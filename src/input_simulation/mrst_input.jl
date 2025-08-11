@@ -42,6 +42,35 @@ function get_mrst_input_path(name)
     return fn
 end
 
+function reservoir_domain_from_predict(name::String; extraout = false)
+    fn = get_mrst_input_path(name)
+    @debug "Reading MAT file $fn..."
+    exported = MAT.matread(fn)
+    @debug "File read complete. Unpacking data..."
+    G_raw = exported["G"]
+    g = MRSTWrapMesh(G_raw)
+    perm = copy((exported["rock"]["perm"])')
+
+    # --- Check for negative values in perm ---
+    # neg_idx = findall(<(0), perm)   # all indices where value < 0
+    # if !isempty(neg_idx)
+    #     println("Negative permeability values found:")
+    #     for idx in neg_idx
+    #         println("Index: ", idx, ", Value: ", perm[idx])
+    #     end
+    # else
+    #     println("No negative permeability values found.")
+    # end
+    # -----------------------------------------
+
+    domain = reservoir_domain(g, permeability = perm)
+    if extraout
+        return (domain, exported)
+    else
+        return domain
+    end
+end
+
 function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid = false)
     fn = get_mrst_input_path(name)
     @debug "Reading MAT file $fn..."
@@ -54,7 +83,6 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
         g = MRSTWrapMesh(G_raw)
     end
     has_trans = haskey(exported, "T") && length(exported["T"]) > 0
-
     function get_vec(d)
         if isa(d, AbstractArray)
             return vec(copy(d))
@@ -1125,8 +1153,12 @@ function setup_case_from_mrst(casename;
         dr_max = Inf,
         kwarg...
     )
-    data_domain, mrst_data = reservoir_domain_from_mrst(casename, extraout = true, convert_grid = convert_grid)
+    #data_domain, mrst_data = reservoir_domain_from_mrst(casename, extraout = true, convert_grid = convert_grid)
+    data_domain, mrst_data = reservoir_domain_from_predict(casename, extraout = true)
     G = discretized_domain_tpfv_flow(data_domain; kwarg...)
+    @show typeof(G)
+    error()
+
     if ismissing(facility_grouping)
         if split_wells
             facility_grouping = :perwell
