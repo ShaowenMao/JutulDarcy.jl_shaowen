@@ -38,6 +38,9 @@ g = CartesianMesh((nx, nz), pdims)
 g = UnstructuredMesh(g)
 D = dim(g)
 
+@show typeof(g), D 
+error()
+
 v = 0.1
 for i in eachindex(g.node_points)
     x, y = g.node_points[i]
