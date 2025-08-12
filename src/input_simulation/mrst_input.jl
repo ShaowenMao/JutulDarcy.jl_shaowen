@@ -1156,9 +1156,6 @@ function setup_case_from_mrst(casename;
     #data_domain, mrst_data = reservoir_domain_from_mrst(casename, extraout = true, convert_grid = convert_grid)
     data_domain, mrst_data = reservoir_domain_from_predict(casename, extraout = true)
     G = discretized_domain_tpfv_flow(data_domain; kwarg...)
-    @show typeof(G)
-    error()
-
     if ismissing(facility_grouping)
         if split_wells
             facility_grouping = :perwell
