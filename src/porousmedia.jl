@@ -282,8 +282,6 @@ function discretized_domain_tpfv_flow(domain::Jutul.DataDomain;
         d = PotentialFlow(N, nc, kgrad = kgrad, upwind = upwind, ad = ad_flag)
     end
     disc = (mass_flow = d, heat_flow = d)
-    # @show typeof(N), size(N), nc
-    # error()
     G = MinimalTPFATopology(N, ncells = nc)
     return DiscretizedDomain(G, disc)
 end
