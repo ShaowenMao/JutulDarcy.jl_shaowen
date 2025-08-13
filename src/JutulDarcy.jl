@@ -74,6 +74,7 @@ module JutulDarcy
     export get_test_setup, get_well_from_mrst_data
     export setup_case_from_mrst
     export simulate_mrst_case
+    export simulate_predict_case
     export MultiPhaseCompositionalSystemLV
     export StandardVolumeSource, VolumeSource, MassSource
     export OverallMoleFractions

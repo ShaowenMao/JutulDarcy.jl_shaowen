@@ -1,3 +1,5 @@
+using GLMakie  
+
 function get_mrst_input_path(name)
     function valid_mat_path(S)
         base, ext = splitext(S)
@@ -42,28 +44,28 @@ function get_mrst_input_path(name)
     return fn
 end
 
-function reservoir_domain_from_predict(name::String; extraout = false)
+function reservoir_domain_from_predict(name::String; extraout = false, plot_grid = false)
     fn = get_mrst_input_path(name)
     @debug "Reading MAT file $fn..."
     exported = MAT.matread(fn)
     @debug "File read complete. Unpacking data..."
+
     G_raw = exported["G"]
     g = MRSTWrapMesh(G_raw)
+
+    # Only plot if requested
+    if plot_grid
+        fig = Figure()
+        ax3 = Axis3(fig[1, 1], title = "3D mesh")
+        Jutul.plot_mesh_edges!(ax3, g)   # g = your 3D structured mesh
+        ax3.aspect = (1, 1, 1)
+        autolimits!(ax3)
+        display(fig)
+    end
+    
     perm = copy((exported["rock"]["perm"])')
-
-    # --- Check for negative values in perm ---
-    # neg_idx = findall(<(0), perm)   # all indices where value < 0
-    # if !isempty(neg_idx)
-    #     println("Negative permeability values found:")
-    #     for idx in neg_idx
-    #         println("Index: ", idx, ", Value: ", perm[idx])
-    #     end
-    # else
-    #     println("No negative permeability values found.")
-    # end
-    # -----------------------------------------
-
     domain = reservoir_domain(g, permeability = perm)
+
     if extraout
         return (domain, exported)
     else
@@ -1519,6 +1521,41 @@ function mrst_well_ctrl(model, wdata, is_comp, rhoS)
     end
     return ctrl
 end
+
+function simulate_predict_case(fn; 
+        write_mrst = false,
+        kwarg...
+    )
+    scheme = :tpfa
+    sys = SinglePhaseSystem()
+
+    data_domain = reservoir_domain_from_predict(fn)
+    G = discretized_domain_tpfv_flow(data_domain; kwarg...)
+
+    model, parameters = setup_reservoir_model(data_domain, sys, 
+        general_ad = true,
+        kgrad = scheme, 
+        block_backend = false
+    )
+
+    state0 = setup_reservoir_state(model, Pressure = 1e5)
+
+    bcells = Int64[]
+    bpres = Float64[]
+
+
+
+
+
+
+
+
+
+
+
+end
+
+
 
 """
     ws, states = simulate_mrst_case(file_name)
