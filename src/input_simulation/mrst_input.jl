@@ -67,7 +67,7 @@ function reservoir_domain_from_predict(name::String; extraout = false, plot_grid
     domain = reservoir_domain(g, permeability = perm)
 
     if extraout
-        return (domain, exported)
+        return (domain, G_raw)
     else
         return domain
     end
@@ -1529,7 +1529,7 @@ function simulate_predict_case(fn;
     scheme = :tpfa
     sys = SinglePhaseSystem()
 
-    data_domain = reservoir_domain_from_predict(fn)
+    data_domain, grid_mrst = reservoir_domain_from_predict(fn, extraout = true)
     G = discretized_domain_tpfv_flow(data_domain; kwarg...)
 
     model, parameters = setup_reservoir_model(data_domain, sys, 
@@ -1542,17 +1542,40 @@ function simulate_predict_case(fn;
 
     bcells = Int64[]
     bpres = Float64[]
+    
+    #  Get (nx, ny, nz) robustly from mrst grid. The mrst grids are saved in Float64.
+    nx, ny, nz = ntuple(i -> Int(round(grid_mrst["cartDims"][i])), 3)
+    nx, ny, nz = ntuple(i -> Int(round(grid_mrst["cartDims"][i])), 3)
 
+    # Collect boundary cells for x = left (i=1) and x = right (i=nx). Dip perpendicular
+    # Wrap raw grid before calling Jutul.cell_index
+    wrapped_g = MRSTWrapMesh(grid_mrst)
 
+    left_cells  = [Jutul.cell_index(wrapped_g, (1,  j, k))   for j in 1:ny, k in 1:nz]
+    right_cells = [Jutul.cell_index(wrapped_g, (nx, j, k))   for j in 1:ny, k in 1:nz]
+   
+    # Reshape 2D array into a 1D column vector. flow_boundary_condition expect a flat list of cells indices and pressures as inputs.
+    left_cells  = vec(left_cells)
+    right_cells = vec(right_cells)
 
+    # Assign pressures
+    p_left  = 1e5   # Pa
+    p_right = 2e5   # Pa
 
+    bcells = vcat(left_cells, right_cells)
+    bpres  = vcat(fill(p_left,  length(left_cells)), fill(p_right, length(right_cells)))
 
+    # Build BCs and attach to the model
+    bc     = flow_boundary_condition(bcells, data_domain, bpres)
+    forces = setup_reservoir_forces(model; bc = bc)
 
-
-
-
-
-
+    dt = [si_unit(:day)]
+    _, states = simulate_reservoir(state0, model, dt,
+        forces = forces, failure_cuts_timestep = false,
+        tol_cnv = 1e-6,
+        linear_solver = GenericKrylov(preconditioner = AMGPreconditioner(:smoothed_aggregation), rtol = 1e-6)
+        )
+    return states[end][:Pressure]
 end
 
 
