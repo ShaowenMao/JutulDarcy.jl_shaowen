@@ -1545,7 +1545,6 @@ function simulate_predict_case(fn;
     
     #  Get (nx, ny, nz) robustly from mrst grid. The mrst grids are saved in Float64.
     nx, ny, nz = ntuple(i -> Int(round(grid_mrst["cartDims"][i])), 3)
-    nx, ny, nz = ntuple(i -> Int(round(grid_mrst["cartDims"][i])), 3)
 
     # Collect boundary cells for x = left (i=1) and x = right (i=nx). Dip perpendicular
     # Wrap raw grid before calling Jutul.cell_index
@@ -1566,7 +1565,7 @@ function simulate_predict_case(fn;
     bpres  = vcat(fill(p_left,  length(left_cells)), fill(p_right, length(right_cells)))
 
     # Build BCs and attach to the model
-    bc     = flow_boundary_condition(bcells, data_domain, bpres)
+    bc     = flow_boundary_condition(bcells, data_domain, bpres; dir=:x)
     forces = setup_reservoir_forces(model; bc = bc)
 
     dt = [si_unit(:day)]
