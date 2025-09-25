@@ -116,6 +116,7 @@ function reservoir_domain(g;
         kwarg = (diffusion = diffusion, kwarg...)
     end
     #minimum(permeability) >= 0 || throw(ArgumentError("All permeability values must be non-negative."))
+    #permeability = max.(permeability, 0.0e0)
     nk = length(permeability)
     nc = number_of_cells(g)
     if nk != nc && permeability isa AbstractVector
@@ -475,7 +476,6 @@ function setup_reservoir_model(reservoir::DataDomain, system::JutulSystem;
         flash_reuse_guess = flash_reuse_guess,
         flash_stability_bypass = flash_stability_bypass
     )
-
     if extra_outputs isa Bool
         if extra_outputs
             for k in keys(rmodel.secondary_variables)
@@ -561,7 +561,6 @@ function setup_reservoir_model(reservoir::DataDomain, system::JutulSystem;
             models[:Facility] = F
         end
     end
-
     # Put it all together as multimodel
     model = reservoir_multimodel(models,
         split_wells = split_wells,

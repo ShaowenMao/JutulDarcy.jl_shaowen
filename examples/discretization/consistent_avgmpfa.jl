@@ -30,6 +30,12 @@ using LinearAlgebra
 using GLMakie
 using Test # hide
 
+using Revise
+using Pkg
+#Pkg.activate(raw"D:\Github\JutulDarcy.jl_shaowen") #Desktop at home
+Pkg.activate(raw"C:\\Users\\Shaow\\Documents\\GitHub\\JutulDarcy.jl_shaowen") # Dell laptop
+
+
 sys = SinglePhaseSystem()
 nx = nz = 100
 pdims = (1.0, 1.0)
@@ -51,7 +57,7 @@ domain = reservoir_domain(g, permeability = 0.1*si_unit(:darcy))
 
 fig = Figure()
 Jutul.plot_mesh_edges!(Axis(fig[1, 1]), g)
-fig
+display(fig)
 # ## Create a test problem function
 # We set up a problem for our given domain with left and right boundary boundary
 # conditions that correspond to a linear pressure drop. We can expect the
@@ -60,7 +66,7 @@ fig
 # return the pressure solution at the end of the simulation for a given scheme.
 function solve_test_problem(scheme)
     model, parameters = setup_reservoir_model(domain, sys,
-        general_ad = true,
+        general_ad = false,
         kgrad = scheme,
         block_backend = false
     )
@@ -78,7 +84,6 @@ function solve_test_problem(scheme)
     end
     bc = flow_boundary_condition(bcells, domain, bpres)
     forces = setup_reservoir_forces(model, bc = bc)
-
     dt = [si_unit(:day)]
     _, states = simulate_reservoir(state0, model, dt,
         forces = forces, failure_cuts_timestep = false,

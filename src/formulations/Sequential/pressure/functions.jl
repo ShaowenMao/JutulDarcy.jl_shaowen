@@ -19,8 +19,17 @@ function store_total_fluxes(model, state::AbstractDict)
 end
 
 function store_total_fluxes(model, state::Union{JutulStorage, NamedTuple})
+    # @show typeof(model)
+    # @show fieldnames(typeof(model))
+    # @show typeof(model.models)
+    # @show typeof(model.models[:Reservoir])
+    # @show fieldnames(typeof(model.models[:Reservoir]))
+    # res = model.models[:Reservoir]
+    # error("test1")
     nf = number_of_faces(model.data_domain)
     vT = zeros(nf)
+    # @show typeof(state), keys(state), size(state[:Pressure])
+    # error("test2")
     return store_total_fluxes!(vT, model, state)
 end
 

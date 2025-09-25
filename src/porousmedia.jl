@@ -233,11 +233,16 @@ function discretized_domain_tpfv_flow(domain::Jutul.DataDomain;
     N = domain[:neighbors]
     g = physical_representation(domain)
     nc = number_of_cells(g)
+
     # defaulted_disc = isnothing(kgrad) && isnothing(upwind)
     kgrad_is_tpfa = (isnothing(kgrad) || eltype(kgrad) == TPFA || kgrad == :tpfa)
     upw_is_tpfa = (isnothing(upwind) || eltype(upwind) == SPU || upwind == :spu)
 
     is_tpfa = kgrad_is_tpfa && upw_is_tpfa
+
+    # @show sizeof(N), typeof(g), nc, is_tpfa, general_ad, size(N,), upwind isa Symbol
+    # error("Test2")
+
     if is_tpfa
         if general_ad
             d = PotentialFlow(N, nc)
