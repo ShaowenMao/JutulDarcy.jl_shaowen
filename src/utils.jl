@@ -863,15 +863,34 @@ end
 - `min_timestep=0.0`: Minimum internal timestep used in solver.
 
 ## Convergence criterions
+The main numerical tolerances that govern the accuracy of the simulation. The
+default values are quite strict and can be relaxed for faster simulation. The
+main tolerance to adjust is the `tol_cnv` value, which is the maximum point-wise
+error allowed for the volume balance. The mass-balance tolerance (`tol_mb`) is
+typically much smaller and should not be adjusted unless you have a very good
+reason to do so.
+
+Pressure tolerances are at the moment only implemented for compositional and
+pressure models. The default value is `Inf` for compositional, and sensible
+values for pressure models.
+
+### Mass conservation
 - `tol_cnv=1e-3`: maximum allowable point-wise error (volume-balance)
 - `tol_mb=1e-7`: maximum alllowable integrated error (mass-balance)
 - `tol_cnv_well=10*tol_cnv`: maximum allowable point-wise error for well node
   (volume-balance)
 - `tol_mb_well=1e4*tol_mb`: maximum alllowable integrated error for well node
   (mass-balance)
-- `inc_tol_dp_abs=Inf`: Maximum allowable pressure change (absolute)
-- `inc_tol_dp_rel=Inf`: Maximum allowable pressure change (absolute)
+- `inc_tol_dp_abs=missing`: Maximum allowable pressure change (absolute)
+- `inc_tol_dp_rel=missing`: Maximum allowable pressure change (relative)
 - `inc_tol_dz=Inf`: Maximum allowable composition change (compositional only).
+
+## Convergence criterions (energy conservation)
+- `tol_cnve=tol_cnv`: Maximum allowable point-wise error
+- `tol_eb=tol_mb`: Maximum allowable integrated error
+- `tol_cnve_well=10*tol_cnve`: Maximum allowable point-wise error for well node
+- `tol_eb_well=1e4*tol_eb`: Maximum allowable integrated error for well node
+- `inc_tol_dT=Inf`: Maximum allowable temperature change (absolute)
 
 ## Inherited keyword arguments
 
@@ -925,17 +944,23 @@ function setup_reservoir_simulator(case::JutulCase;
         tol_cnv_well = 10*tol_cnv,
         tol_mb_well = 1e4*tol_mb,
         tol_dp_well = 1e-3,
-        inc_tol_dp_abs = Inf,
-        inc_tol_dp_rel = Inf,
+        inc_tol_dp_abs = missing,
+        inc_tol_dp_rel = missing,
+        inc_tol_dz = Inf,
+        tol_cnve = tol_cnv,
+        tol_eb = tol_mb,
+        tol_cnve_well = 10*tol_cnve,
+        tol_eb_well = 1e4*tol_eb,
+        inc_tol_dT = Inf,
         failure_cuts_timestep = true,
         max_timestep_cuts = 25,
-        inc_tol_dz = Inf,
         timesteps = :auto,
         relaxation = false,
         presolve_wells = false,
         parray_arg = Dict{Symbol, Any}(),
         set_linear_solver = missing,
         linear_solver_arg = Dict{Symbol, Any}(),
+        transport_scheme = :ppu,
         extra_timing_setup = false,
         nldd_partition = missing,
         nldd_arg = Dict{Symbol, Any}(),
@@ -957,6 +982,11 @@ function setup_reservoir_simulator(case::JutulCase;
         # Single-process solve
         if method == :newton
             sim = Simulator(case; sim_kwarg...)
+        elseif method == :sequential || method == :si || method == :sfi
+            if method == :si || method == :sfi
+                extra_kwarg[:sfi] = method == :sfi
+            end
+            sim = JutulDarcy.Sequential.SequentialSimulator(case; transport_scheme = transport_scheme, sim_kwarg...)
         else
             extra_kwarg[:method] = method
             sim = NLDD.NLDDSimulator(case, nldd_partition; nldd_arg..., sim_kwarg...)
@@ -1055,7 +1085,12 @@ function setup_reservoir_simulator(case::JutulCase;
         tol_dp_well = tol_dp_well,
         inc_tol_dp_abs = inc_tol_dp_abs,
         inc_tol_dp_rel = inc_tol_dp_rel,
-        inc_tol_dz = inc_tol_dz
+        inc_tol_dz = inc_tol_dz,
+        tol_cnve = tol_cnve,
+        tol_eb = tol_eb,
+        tol_cnve_well = tol_cnve_well,
+        tol_eb_well = tol_eb_well,
+        inc_tol_dT = inc_tol_dT,
         )
     return (sim, cfg)
 end
@@ -1151,10 +1186,35 @@ function set_default_cnv_mb_inner!(tol, model;
         tol_mb_well = 1e-3,
         tol_cnv_well = 1e-2,
         tol_dp_well = 1e-3,
-        inc_tol_dp_abs = Inf,
-        inc_tol_dp_rel = Inf,
-        inc_tol_dz = Inf
-        )
+        inc_tol_dz = Inf,
+        tol_cnve = tol_cnv,
+        tol_eb = tol_mb,
+        tol_cnve_well = 10*tol_cnve,
+        tol_eb_well = 1e4*tol_eb,
+        inc_tol_dp_rel = missing,
+        inc_tol_dp_abs = missing,
+        inc_tol_dT = Inf,
+    )
+    is_pressure_model = haskey(model.equations, :pressure)
+    if is_pressure_model
+        label = :pressure
+    else
+        label = :mass_conservation
+    end
+    if ismissing(inc_tol_dp_abs)
+        if is_pressure_model
+            inc_tol_dp_abs = 0.1 # 0.1 MPa = 1 bar
+        else
+            inc_tol_dp_abs = Inf
+        end
+    end
+    if ismissing(inc_tol_dp_rel)
+        if is_pressure_model
+            inc_tol_dp_rel = 1e-3
+        else
+            inc_tol_dp_rel = Inf
+        end
+    end
     sys = model.system
     if model isa Jutul.CompositeModel && hasproperty(model.system.systems, :flow)
         sys = flow_system(model.system)
@@ -1164,23 +1224,31 @@ function set_default_cnv_mb_inner!(tol, model;
         is_well = model_or_domain_is_well(model)
         if is_well
             if physical_representation(model) isa SimpleWell
-                m = Inf
+                mb, eb = Inf, Inf
             else
                 tol[:potential_balance] = (AbsMax = tol_dp_well,)
-                m = tol_mb_well
+                mb, eb = tol_mb_well, tol_eb_well
             end
-            c = tol_cnv_well
+            cnv, cnve = tol_cnv_well, tol_cnve_well
         else
-            c = tol_cnv
-            m = tol_mb
+            cnv, cnve = tol_cnv, tol_cnv
+            mb, eb = tol_mb, tol_eb
         end
+
         tol[:mass_conservation] = (
-            CNV = c,
-            MB = m,
+            CNV = cnv,
+            MB = mb,
             increment_dp_abs = inc_tol_dp_abs,
             increment_dp_rel = inc_tol_dp_rel,
             increment_dz = inc_tol_dz
         )
+        if haskey(model.equations, :energy_conservation)
+            tol[:energy_conservation] = (
+                CNV = cnve,
+                EB = eb,
+                increment_dT = inc_tol_dT
+            )
+        end
     end
 end
 
@@ -1365,7 +1433,9 @@ function setup_reservoir_forces(model::MultiModel;
     )
     submodels = model.models
     has_facility = any(x -> isa(x.domain, WellGroup), values(submodels))
-    no_well_controls = isnothing(control) && isnothing(limits)
+    has_no_controls = isnothing(control) || isempty(control)
+    has_no_limits = isnothing(limits) || isempty(limits)
+    no_well_controls = has_no_controls && has_no_limits
     if !isnothing(bc) && !(bc isa AbstractVector)
         bc = [bc]
     end
@@ -1373,7 +1443,7 @@ function setup_reservoir_forces(model::MultiModel;
         sources = [sources]
     end
     reservoir_forces = (bc = bc, sources = sources)
-    @assert no_well_controls || has_facility "Model must have facility when well controls are provided."
+    (no_well_controls || has_facility) || error("Model must have facility when well controls are provided.")
     if haskey(submodels, :Facility)
         # Unified facility for all wells
         facility = model.models.Facility
@@ -2512,7 +2582,7 @@ function reservoir_measurables(model, wellresult, states = missing;
         if use_prefix
             name = Symbol(prefix, name)
         end
-        out[name] = (values = values, legend = "$prefix_str legend", unit_type = unit, is_rate = is_rate)
+        out[name] = (values = values, legend = "$prefix_str $legend", unit_type = unit, is_rate = is_rate)
         return values
     end
     # Production of different types
@@ -2714,4 +2784,70 @@ function transfer_variables_and_parameters!(new_model, old_model;
         transfer!(:parameters)
     end
     return new_model
+end
+
+
+function reservoir_fluxes(model::SimulationModel, states::AbstractVector, kind = :volumetric; kwarg...)
+    return map(x -> reservoir_fluxes(model, x, kind; kwarg...), states)
+end
+
+function reservoir_fluxes(model::MultiModel, state_or_states, kind = :volumetric;
+        parameters = setup_parameters(model),
+        simulator = missing,
+        kwarg...
+    )
+    function get_rstate(x)
+        if haskey(x, :Reservoir)
+            return x[:Reservoir]
+        else
+            return x
+        end
+    end
+    if state_or_states isa AbstractVector
+        state_or_states = map(get_rstate, state_or_states)
+        single_state = state_or_states[1]
+    else
+        state_or_states = get_rstate(state_or_states)
+        single_state = state_or_states
+    end
+    rmodel = reservoir_model(model)
+    rparam = parameters[:Reservoir]
+    if ismissing(simulator)
+        simulator = HelperSimulator(rmodel, state0 = single_state, parameters = rparam)
+    end
+    return reservoir_fluxes(rmodel, state_or_states, kind; parameters = rparam, simulator = simulator, kwarg...)
+end
+
+function reservoir_fluxes(model, state, kind = :volumetric;
+        parameters = setup_parameters(model),
+        total = false,
+        internal = true,
+        dt = NaN,
+        forces = setup_forces(model),
+        extra_out = false,
+        simulator = HelperSimulator(model, state0 = state, parameters = parameters)
+    )
+    storage = Jutul.get_simulator_storage(simulator)
+    update_state_dependents!(storage, model, dt, forces; update_secondary = true)
+    if kind == :volumetric
+        is_mass = false
+    elseif kind == :mass
+        is_mass = true
+    else
+        error("Unknown flux kind $kind. Supported kinds are :volumetric and :mass")
+    end
+    internal || error("Boundary fluxes not supported in this function yet, set internal = true to compute internal fluxes")
+    if total
+        V = Sequential.store_total_fluxes(model, storage.state, is_mass)
+    else
+        V = Sequential.store_phase_fluxes(model, storage.state, is_mass)
+    end
+    if extra_out
+        rdomain = reservoir_domain(model)
+        rmesh = physical_representation(rdomain)
+        out = (V, get_neighborship(rmesh))
+    else
+        out = V
+    end
+    return out
 end
