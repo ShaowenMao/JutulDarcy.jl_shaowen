@@ -73,6 +73,7 @@ module JutulDarcy
     export simulate_data_file, setup_case_from_data_file
     export get_test_setup, get_well_from_mrst_data
     export setup_case_from_mrst
+    export simulate_predict_case
     export simulate_mrst_case
     export MultiPhaseCompositionalSystemLV
     export StandardVolumeSource, VolumeSource, MassSource
