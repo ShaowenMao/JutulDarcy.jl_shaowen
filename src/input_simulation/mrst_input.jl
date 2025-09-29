@@ -42,6 +42,22 @@ function get_mrst_input_path(name)
     return fn
 end
 
+function reservoir_domain_from_predict(name::String; extraout = false)
+    fn = get_mrst_input_path(name)
+    @debug "Reading MAT file $fn..."
+    exported = MAT.matread(fn)
+    @debug "File read complete. Unpacking data..."
+    G_raw = exported["G"]
+    g = MRSTWrapMesh(G_raw)
+    perm = copy((exported["rock"]["perm"])')
+    domain = reservoir_domain(g, permeability = perm)
+    if extraout
+        return (domain, exported)
+    else
+        return domain
+    end
+end
+
 function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid = false)
     fn = get_mrst_input_path(name)
     @debug "Reading MAT file $fn..."
