@@ -48,10 +48,10 @@ function FlowBoundaryCondition(
     )
     G = physical_representation(domain)
     D = Jutul.dim(G)
+    ndim = length(cell_dims(G, cell)) 
     dir in (:x, :y, :z) || dir in 1:3 || throw(ArgumentError("Direction argument `dir` must be either :x, :y, :z or 1, 2, 3"))
-    G = physical_representation(domain)
     if dir isa Symbol
-        dir = findfirst(isequal(dir), (:x, :y, :z))
+        dir = min(findfirst(isequal(dir), (:x, :y, :z)), ndim)
     end
     dist = cell_dims(G, cell)[dir]
     # Approximate area since we don't know the face.

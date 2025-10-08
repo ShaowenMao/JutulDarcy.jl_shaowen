@@ -42,6 +42,55 @@ function get_mrst_input_path(name)
     return fn
 end
 
+function reservoir_domain_from_predict(name::String; extraout = false, plot_grid = false)
+    fn = get_mrst_input_path(name)
+    @debug "Reading MAT file $fn..."
+    exported = MAT.matread(fn)
+    @debug "File read complete. Unpacking data..."
+
+    G_raw = exported["G"]
+    g = MRSTWrapMesh(G_raw)
+    dimension = Int(G_raw["griddim"])
+
+    # Only plot if requested
+    # if plot_grid
+    #     fig = Figure()
+    #     ax3 = Axis3(fig[1, 1], title = "3D mesh")
+    #     Jutul.plot_mesh_edges!(ax3, g)   # g = your 3D structured mesh
+    #     ax3.aspect = (1, 1, 1)
+    #     autolimits!(ax3)
+    #     display(fig)
+    # end
+    if plot_grid
+        if dimension == 2
+            fig = Figure()
+            ax = Axis(fig[1, 1], title = "2D mesh")
+            Jutul.plot_mesh_edges!(ax, g)
+            #ax.aspect = DataAspect()
+            autolimits!(ax)
+            display(fig)
+        elseif dimension == 3
+            fig = Figure()
+            ax3 = Axis3(fig[1, 1], title = "3D mesh")
+            Jutul.plot_mesh_edges!(ax3, g)
+            ax3.aspect = (1, 1, 1)
+            autolimits!(ax3)
+            display(fig)
+        else
+            @warn "Grid dimension $(g.dim) not supported for plotting."
+        end
+    end
+
+    perm = copy((exported["rock"]["perm"])')
+    domain = reservoir_domain(g, permeability = perm)
+
+    if extraout
+        return (domain, dimension, G_raw)
+    else
+        return (domain, dimension)
+    end
+end
+
 function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid = false)
     fn = get_mrst_input_path(name)
     @debug "Reading MAT file $fn..."
@@ -1765,6 +1814,390 @@ function simulate_mrst_case(fn;
         end
         return result
     end
+end
+
+function simulate_predict_case(fn; 
+        write_mrst = false,
+        plot_pressure = false,
+        kwarg...
+    )
+    scheme = :tpfa
+    sys = SinglePhaseSystem()
+    p_bc_pair = (2e5, 1e5) 
+    dp = abs(p_bc_pair[1] - p_bc_pair[2])
+
+    
+    data_domain, grid_dimension, grid_mrst = reservoir_domain_from_predict(fn, extraout = true, plot_grid = false)
+    model, parameters = setup_reservoir_model(data_domain, sys;
+        general_ad = true,
+        kgrad = scheme, 
+        block_backend = false,
+        extra_out = true,
+    )
+
+    res = model.models[:Reservoir]
+    K = data_domain[:permeability]
+    neighbor_internal_faces = res.domain.representation.neighborship
+    trans_internal_faces = parameters[:Reservoir][:Transmissibilities]
+    @assert size(neighbor_internal_faces, 2) == length(trans_internal_faces)
+
+    bcells = Int64[]
+    bpres = Float64[]
+
+    # Collect boundary cells for x = left (i=1) and x = right (i=nx). Dip perpendicular
+    # Wrap raw grid before calling Jutul.cell_index
+    wrapped_g = MRSTWrapMesh(grid_mrst)
+    cartDims  = Int.(grid_mrst["cartDims"])
+    coords    = grid_mrst["nodes"]["coords"]
+    faultsize = grid_mrst["cellDim"] .* cartDims
+
+    dx = (maximum(coords[:,1]) - minimum(coords[:,1])) / cartDims[1]
+
+    if grid_dimension == 3
+        dy = (cartDims[2] > 1) ? (maximum(coords[:,2]) - minimum(coords[:,2])) / cartDims[2] : 1.0
+        dz = (cartDims[3] > 1) ? (maximum(coords[:,3]) - minimum(coords[:,3])) / cartDims[3] : 1.0
+        nx, ny, nz = cartDims
+        dirs = (:x, :y, :z)
+    elseif grid_dimension == 2
+        dy = 1.0  # Unit length along strike for 2d cases
+        dz = (cartDims[2] > 1) ? (maximum(coords[:,2]) - minimum(coords[:,2])) / cartDims[2] : 1.0
+        nx, nz = cartDims
+        dirs = (:x, :z)
+    else
+        error("Unsupported coordinate dimensionality: $grid_dimension")
+    end
+
+    number_of_cells = prod(cartDims) 
+    k_upscale = OrderedDict{Symbol, Float64}()
+    
+    # ---- precompute boundary index sets
+    boundary_cells = Dict{Symbol,Tuple{Vector{Int},Vector{Int}}}()
+    if grid_dimension == 2
+        min_x = [Jutul.cell_index(wrapped_g, (1,  k)) for k in 1:nz]
+        max_x = [Jutul.cell_index(wrapped_g, (nx, k)) for k in 1:nz]
+        min_z = [Jutul.cell_index(wrapped_g, (i, 1))  for i in 1:nx]
+        max_z = [Jutul.cell_index(wrapped_g, (i, nz)) for i in 1:nx]
+        boundary_cells[:x] = (min_x, max_x)
+        boundary_cells[:z] = (min_z, max_z)
+    else
+        min_x = vec([Jutul.cell_index(wrapped_g, (1,  j , k )) for j in 1:ny, k in 1:nz])
+        max_x = vec([Jutul.cell_index(wrapped_g, (nx, j , k )) for j in 1:ny, k in 1:nz])
+        min_y = vec([Jutul.cell_index(wrapped_g, (i,  1 , k )) for i in 1:nx, k in 1:nz])
+        max_y = vec([Jutul.cell_index(wrapped_g, (i,  ny, k )) for i in 1:nx, k in 1:nz])
+        min_z = vec([Jutul.cell_index(wrapped_g, (i,  j , 1 )) for i in 1:nx, j in 1:ny])
+        max_z = vec([Jutul.cell_index(wrapped_g, (i,  j , nz)) for i in 1:nx, j in 1:ny])
+        boundary_cells[:x] = (min_x, max_x)
+        boundary_cells[:y] = (min_y, max_y)
+        boundary_cells[:z] = (min_z, max_z)
+    end
+
+    # ---- preallocate BC buffers (no vcat/fill)
+    max_bc = maximum(length(a)+length(b) for (a,b) in values(boundary_cells))
+    bcells = Vector{Int}(undef, max_bc)
+    bpres  = Vector{Float64}(undef, max_bc)
+
+    # ---- cache permeability fields once
+    if grid_dimension == 2
+        kxx_field, kzz_field = normal_perm_field(K, grid_dimension, cartDims[1], 1, cartDims[2])
+    else
+        kxx_field, kyy_field, kzz_field = normal_perm_field(K, grid_dimension, cartDims[1], cartDims[2], cartDims[3])
+    end
+    
+    first_dir = true
+    F = nothing
+
+    @time begin
+    for dir in dirs
+        
+        min_cells, max_cells = boundary_cells[dir]
+        nmin = length(min_cells); nmax = length(max_cells); nbc = nmin + nmax
+        resize!(bcells, nbc); resize!(bpres, nbc)
+        copyto!(bcells,        1, min_cells, 1, nmin)
+        copyto!(bcells, nmin + 1, max_cells, 1, nmax)
+        @views bpres[     1:nmin] .= p_bc_pair[1]
+        @views bpres[nmin+1:nbc ] .= p_bc_pair[2]
+        
+        # Build BCs and attach to the model
+        bc = flow_boundary_condition(bcells, data_domain, bpres; dir=dir)
+        A, rhs_bc = assemble_tpfa_pressure_matrix(neighbor_internal_faces, trans_internal_faces, bc, number_of_cells)
+
+        # Direct solver
+        #@time begin
+        # F = cholesky(Symmetric(A, :U); check=false)    
+        # if first_dir
+        #     F = cholesky(Symmetric(A, :U); check=false)  
+        #     first_dir = false
+        # else
+        #     cholesky!(F, Symmetric(A, :U))               # reuse analysis
+        # end
+        # p = F \ rhs_bc
+        # end
+
+        @time begin 
+        prob = LinearSolve.LinearProblem(A, rhs_bc)
+        sol = LinearSolve.solve(prob, CholeskyFactorization())
+        p = sol.u
+        end 
+
+        # @time begin 
+        # A_sparse = sparse(A)
+        # cg = HYPRE.PCG()
+        # p = HYPRE.solve(cg, A_sparse, rhs_bc)
+        # end 
+
+
+
+
+        # Iterative solver
+        #ml = ruge_stuben(A)               # build AMG hierarchy once
+        #P  = aspreconditioner(ml)         # wrap as a preconditioner
+        
+        #p, stats = cg(A, rhs_bc; rtol=1e-8, itmax=20_000, history=true)
+        #p = gmres(A, rhs_bc; reltol=1e-8, restart=50)
+        # Release memory
+        A = nothing; rhs_bc = nothing
+
+        if grid_dimension == 2
+            p_field = reshape(p, nx, nz)
+            if dir == :x 
+                q_total = total_netflow_on_dirichlet_boundary(p_field, kxx_field, p_bc_pair, dir, dx, dy, dz); L = faultsize[1]; area = faultsize[2]
+            elseif dir == :z
+                q_total = total_netflow_on_dirichlet_boundary(p_field, kzz_field, p_bc_pair, dir, dx, dy, dz); L = faultsize[2]; area = faultsize[1]
+            end
+            if plot_pressure
+                plot_pressure_field(p, (nx, 1, nz), grid_dimension; dir=dir, savefig=true)
+            end
+        else
+            p_field = reshape(p, nx, ny, nz)
+            if dir == :x 
+                q_total = total_netflow_on_dirichlet_boundary(p_field, kxx_field, p_bc_pair, dir, dx, dy, dz); L = faultsize[1]; area = faultsize[2] * faultsize[3]
+            elseif dir == :y 
+                q_total = total_netflow_on_dirichlet_boundary(p_field, kyy_field, p_bc_pair, dir, dx, dy, dz); L = faultsize[2]; area = faultsize[1] * faultsize[3]
+            elseif dir == :z 
+                q_total = total_netflow_on_dirichlet_boundary(p_field, kzz_field, p_bc_pair, dir, dx, dy, dz); L = faultsize[3]; area = faultsize[1] * faultsize[2]
+            end
+            if plot_pressure
+                plot_pressure_field(p, (nx, ny, nz), grid_dimension; dir=dir, savefig=true)
+            end
+        end
+        # Upscale permeability
+        k_upscale[dir] = abs(q_total) * L / (dp * area)
+    end
+    end
+    return k_upscale
+end
+
+function plot_pressure_field(p::AbstractVector, grid_dims::NTuple{3, Int}, grid_dimension::Int; dir::Symbol, savefig::Bool=false)
+    nx, ny, nz = grid_dims
+
+    if grid_dimension == 2
+        @assert ny == 1 "Expected ny = 1 for 2D"
+        p2d = reshape(p, nx, nz)
+
+        fig = Figure()
+        ax = Axis(fig[1, 1], title = "Pressure Field (2D) - Direction: $dir", xlabel = "i (x)", ylabel = "k (z)")
+        hm = heatmap!(ax, 1:nx, 1:nz, p2d; interpolate = false)
+        Colorbar(fig[1, 2], hm)
+
+        display(fig)
+
+        if savefig
+            save("pressure_field_2d_$dir.png", fig)
+        end
+
+    elseif grid_dimension == 3
+        p3d = reshape(p, nx, ny, nz)
+        cmap = :viridis
+        pmin, pmax = extrema(p3d)
+
+        fig = Figure(resolution = (800, 600))
+        ax3 = Axis3(fig[1, 1], title = "Pressure Field (3D) - Direction: $dir")
+
+        volume!(ax3, p3d;
+            colormap = cmap,
+            colorrange = (pmin, pmax),
+            algorithm = :mip,
+            transparency = false,
+        )
+
+        Colorbar(fig[1, 2],
+            colormap = cmap,
+            limits = (pmin, pmax),
+            label = "Pressure (Pa)"
+        )
+
+        display(fig)
+
+        if savefig
+            save("pressure_field_3d_$dir.png", fig)
+        end
+
+    else
+        error("Unsupported grid dimension: $grid_dimension")
+    end
+end
+
+function dirichlet_boundary_face_contributions(bc::AbstractVector, nc::Integer)
+    rhs  = zeros(Float64, nc)
+    diag = zeros(Float64, nc)
+    @inbounds for i in bc
+        cellindex = i.cell
+        pressure_at_boundary_cell = i.pressure
+        trans_boundary_face = i.trans_flow
+        rhs[cellindex]  += trans_boundary_face * pressure_at_boundary_cell  # possibly multiple boundary faces for one boundary cell
+        diag[cellindex] += trans_boundary_face
+    end
+    return rhs, diag
+end 
+
+function internal_faces_contributions(nc::Integer, cellNo, sgn, trans_internal_face, gravity_internal_face)
+    rhs = zeros(Float64, nc)
+    @inbounds for i in eachindex(cellNo)
+        cellindex = cellNo[i]
+        rhs[cellindex] -= trans_internal_face[i] * ( sgn[i] * gravity_internal_face[i] )
+    end
+    return rhs 
+end
+
+function assemble_tpfa_pressure_matrix(neighbor_intf, trans_intf, bc::AbstractVector, nc::Integer)
+    cells_left  = neighbor_intf[1, :]
+    cells_right = neighbor_intf[2, :]
+    num_intf = length(trans_intf) 
+
+    # Diagonal from internal faces. Loop over all the internal faces. Loop over the neighbor list. 
+    d = zeros(Float64, nc)
+    @inbounds for k in 1 : num_intf
+        d[cells_left[k]]  += trans_intf[k]
+        d[cells_right[k]] += trans_intf[k]
+    end
+
+    # Dirichlet boundary adds
+    rhs_bc, d_bc = dirichlet_boundary_face_contributions(bc, nc)
+    d .+= d_bc
+
+    # Triplets
+    I = Vector{Int}(undef, 2 * num_intf + nc)
+    J = similar(I)
+    V = Vector{Float64}(undef, 2 * num_intf + nc)
+
+    @inbounds for k in 1 : num_intf 
+        I[k]            = cells_left[k];  J[k]            = cells_right[k]; V[k]            = - trans_intf[k]
+        I[num_intf + k] = cells_right[k]; J[num_intf + k] = cells_left[k];  V[num_intf + k] = - trans_intf[k]
+    end
+
+    @inbounds for i in 1 : nc
+        index = 2 * num_intf + i 
+        I[index] = i; J[index] = i; V[index] = d[i]
+    end
+
+    A = sparse(I, J, V, nc, nc)
+    return A, rhs_bc    
+end 
+
+"""
+    normal_perm_field(K, nd, nx, ny, nz)
+
+Extract and reshape normal permeability components from compact Voigt form.
+
+Arguments:
+- `K`  : (6 × nc) in 3D [kxx, kxy, kxz, kyy, kyz, kzz],
+         (3 × nc) in 2D [kxx, kxz, kzz]
+- `nd` : 2 or 3, spatial dimension
+- `nx, ny, nz` : grid dimensions (ny=1 in 2D)
+
+Returns:
+- In 3D: tuple `(kxx_field, kyy_field, kzz_field)` each of size (nx, ny, nz)
+- In 2D: tuple `(kxx_field, kzz_field)` each of size (nx, nz)
+"""
+function normal_perm_field(K::AbstractMatrix, nd::Integer, nx::Int, ny::Int, nz::Int)
+    nc = size(K, 2)
+    if nd == 3
+        @assert size(K, 1) == 6 "Expected K to be 6×ncells for 3D"
+        @assert nx*ny*nz == nc "Grid dims (nx*ny*nz) must equal number of cells"
+        kxx = reshape(K[1, :], nx, ny, nz)
+        kyy = reshape(K[4, :], nx, ny, nz)
+        kzz = reshape(K[6, :], nx, ny, nz)
+        return kxx, kyy, kzz
+    elseif nd == 2
+        @assert size(K, 1) == 3 "Expected K to be 3×ncells for 2D"
+        @assert nx*nz == nc "Grid dims (nx*nz) must equal number of cells"
+        kxx = reshape(K[1, :], nx, nz)
+        kzz = reshape(K[3, :], nx, nz)
+        return kxx, kzz
+    else
+        error("nd must be 2 or 3")
+    end
+end
+
+"""
+Total OUTFLOW (sum of positive outward fluxes) on a Cartesian Dirichlet outflow boundary.
+
+Arguments
+- p_field   : pressure field, size (nx,ny,nz) for 3D or (nx,nz) for 2D (ny=1 implied)
+- k_n_field : normal permeability per cell on the boundary, same shape as p_field
+- p_bc      : Dirichlet pressure at the outflow boundary (same units as p_field)
+- dir       : :x | :y | :z (which axis is the outflow boundary normal)
+- dx,dy,dz  : cell sizes (set dy=1 for 2D x–z grids, dz=1 if 2D x–y, etc.)
+- side      : :min | :max (which side of that axis is the outflow side)
+- mu        : viscosity
+
+Returns
+- q_total   : total outward volumetric flux across the selected boundary
+- q_face    : per-boundary-face outward fluxes
+"""
+function total_netflow_on_dirichlet_boundary(p_field, k_n_field, p_bc_pair::Tuple{<:Real,<:Real}, dir::Symbol, dx::Real, dy::Real, dz::Real; 
+        side::Symbol = :max,
+        mu::Real = 1.0
+    )
+
+    nd = ndims(p_field)
+    @assert nd == 2 || nd == 3 "p_field must be (nx,nz) or (nx,ny,nz)"
+
+    if nd == 2
+        nx, nz = size(p_field)
+        ny = 1
+    else
+        nx, ny, nz = size(p_field)
+    end
+
+    # pick the boundary slice indices and geometric factors
+    if dir == :x
+        A = dy * dz
+        dist = 0.5 * dx
+        i = (side == :min) ? 1 : nx
+        # boundary slice pressure array:
+        P   = (nd == 2) ? view(p_field,   i, :) : view(p_field,   i, :, :)
+        k_n = (nd == 2) ? view(k_n_field, i, :) : view(k_n_field, i, :, :)
+    elseif dir == :y 
+        @assert nd == 3 "dir=:y requires 3D p_field"
+        A = dx * dz
+        dist = 0.5 * dy 
+        j = (side == :min) ? 1 : ny
+        P   = view(p_field,   :, j, :)
+        k_n = view(k_n_field, :, j, :)
+    elseif dir == :z 
+        A = dx * dy 
+        dist = 0.5 * dz 
+        k = (side == :min) ? 1 : nz 
+        P   =  (nd == 2) ? view(p_field,   :, k) : view(p_field,   :, :, k)
+        k_n =  (nd == 2) ? view(k_n_field, :, k) : view(k_n_field, :, :, k)
+    else
+        error("dir must be :x, :y or :z")
+    end
+
+   # Check k_n on the boundary slice
+    @assert size(k_n) == size(P) "k_n shape must match boundary slice"
+
+    # Choose Dirichlet pressure based on side
+    p_bc = (side == :min) ? p_bc_pair[1] : p_bc_pair[2]
+    trans = (k_n .* A) ./ (mu * dist)
+
+    # Flux per elemental face on the boundary face. Positive means outflow, negative means inflow. 
+    q_face = trans .* (P .- p_bc)
+
+    # Net flux on the boundary face = sum of face fluxes
+    q_total = sum(q_face)
+    return q_total
 end
 
 function write_reservoir_simulator_output_to_mrst(model, states, reports, forces, output_path; parameters = nothing, write_states = true, write_wells = true, convert_names = true)
