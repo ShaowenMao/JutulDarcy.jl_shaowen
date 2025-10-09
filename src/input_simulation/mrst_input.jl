@@ -1,3 +1,6 @@
+using GLMakie
+using WriteVTK
+
 function get_mrst_input_path(name)
     function valid_mat_path(S)
         base, ext = splitext(S)
@@ -41,6 +44,98 @@ function get_mrst_input_path(name)
     end
     return fn
 end
+
+function reservoir_domain_from_co2_blackoil(name::String; extraout=false, plot_grid=false)
+    fn = get_mrst_input_path(name)
+    @debug "Reading MAT file $fn..."
+    exported = MAT.matread(fn)
+    @debug "File read complete. Unpacking data..."
+
+    G_raw = exported["G"]
+    g = MRSTWrapMesh(G_raw)
+    dimension = Int(G_raw["griddim"])
+
+    if plot_grid
+        if dimension == 2
+            fig = Figure()
+            ax = Axis(fig[1, 1], title = "2D mesh")
+            Jutul.plot_mesh_edges!(ax, g)
+            #ax.aspect = DataAspect()
+            autolimits!(ax)
+            display(fig)  # just call display, do NOT assign or iterate over this
+        elseif dimension == 3
+            fig = Figure()
+            ax3 = Axis3(fig[1, 1], title = "3D mesh")
+            Jutul.plot_mesh_edges!(ax3, g)
+            ax3.aspect = (1, 1, 1)
+            autolimits!(ax3)
+            display(fig)  # same here, just display
+        else
+            @warn "Grid dimension $(g.dim) not supported for plotting."
+        end
+    end
+
+    perm = copy((exported["rock"]["perm"])')
+    domain = reservoir_domain(g, permeability = perm)
+    @show extraout
+    if extraout
+        @show extraout, extraout
+        return (domain, exported)
+    else
+        @show extraout
+        return domain
+    end
+end
+
+
+function export_grid_to_vtu(g::MRSTWrapMesh; filename="grid.vtu")
+    coords = permutedims(g.data.nodes.coords)  # (N,3)
+    face_nodes = collect(eachcol(g.data.faces.nodes'))  # Vector of faces
+    cell_faces = collect(eachcol(g.data.cells.faces))   # Vector of cells' faces
+
+    num_cells = Int(g.data.cells.num)
+    cell_node_map = Vector{Vector{Int}}(undef, num_cells)
+
+    println("Number of faces: ", length(face_nodes))
+    println("Number of cells: ", num_cells)
+
+    for i in 1:num_cells
+        faces = cell_faces[i]
+        nodes = Set{Int}()
+
+        # Check for invalid face indices
+        invalid_faces = filter(f -> abs(f) < 1 || abs(f) > length(face_nodes), faces)
+        if !isempty(invalid_faces)
+            println("Warning: Cell $i has invalid face indices: ", invalid_faces)
+        end
+
+        valid_faces = filter(f -> (1 <= abs(f) <= length(face_nodes)), faces)
+        for f in valid_faces
+            f_idx = Int(abs(f))
+            # Defensive: check face_nodes length
+            if f_idx > length(face_nodes)
+                println("Skipping invalid face index $f_idx in cell $i")
+                continue
+            end
+            for n in face_nodes[f_idx]
+                push!(nodes, Int(n))
+            end
+        end
+
+        cell_node_map[i] = collect(nodes)
+    end
+
+    using WriteVTK
+    vtk_grid(filename, coords, cells=cell_node_map) do vtk
+        # Optional: add scalars here
+    end
+
+    println("Exported grid to $filename")
+end
+
+
+
+
 
 function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid = false)
     fn = get_mrst_input_path(name)
@@ -1158,7 +1253,11 @@ function setup_case_from_mrst(casename;
         dr_max = Inf,
         kwarg...
     )
-    data_domain, mrst_data = reservoir_domain_from_mrst(casename, extraout = true, convert_grid = convert_grid)
+    data_domain, mrst_data = reservoir_domain_from_co2_blackoil(casename; extraout = false, plot_grid = true)
+    error("test1")
+    export_grid_to_vtu(g;"mygrid.vtu")
+    error("test2")
+    #data_domain, mrst_data = reservoir_domain_from_mrst(casename, extraout = true, convert_grid = convert_grid)
     G = discretized_domain_tpfv_flow(data_domain; kwarg...)
     if ismissing(facility_grouping)
         if split_wells
