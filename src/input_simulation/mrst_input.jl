@@ -65,74 +65,28 @@ function reservoir_domain_from_co2_blackoil(name::String; extraout=false, plot_g
             display(fig)  # just call display, do NOT assign or iterate over this
         elseif dimension == 3
             fig = Figure()
-            ax3 = Axis3(fig[1, 1], title = "3D mesh")
-            Jutul.plot_mesh_edges!(ax3, g)
-            ax3.aspect = (1, 1, 1)
-            autolimits!(ax3)
-            display(fig)  # same here, just display
+            ax3 = Axis3(fig[1, 1];
+                title = "3D mesh",
+                aspect = :data        # makes x, y, z use the same scale
+            )
+            ax3.zreversed[] = true    # flip Z if needed
+            Jutul.plot_mesh_edges!(ax3, g; color = :black)
+            display(fig)
         else
             @warn "Grid dimension $(g.dim) not supported for plotting."
         end
     end
 
-    perm = copy((exported["rock"]["perm"])')
-    domain = reservoir_domain(g, permeability = perm)
-    @show extraout
+    perm   = copy(exported["rock"]["perm"]')
+    poro   = copy(exported["rock"]["poro"]')
+    domain = reservoir_domain(g; permeability = perm, porosity = poro)
+
     if extraout
-        @show extraout, extraout
         return (domain, exported)
     else
-        @show extraout
-        return domain
+        return (domain, nothing)
     end
 end
-
-
-function export_grid_to_vtu(g::MRSTWrapMesh; filename="grid.vtu")
-    coords = permutedims(g.data.nodes.coords)  # (N,3)
-    face_nodes = collect(eachcol(g.data.faces.nodes'))  # Vector of faces
-    cell_faces = collect(eachcol(g.data.cells.faces))   # Vector of cells' faces
-
-    num_cells = Int(g.data.cells.num)
-    cell_node_map = Vector{Vector{Int}}(undef, num_cells)
-
-    println("Number of faces: ", length(face_nodes))
-    println("Number of cells: ", num_cells)
-
-    for i in 1:num_cells
-        faces = cell_faces[i]
-        nodes = Set{Int}()
-
-        # Check for invalid face indices
-        invalid_faces = filter(f -> abs(f) < 1 || abs(f) > length(face_nodes), faces)
-        if !isempty(invalid_faces)
-            println("Warning: Cell $i has invalid face indices: ", invalid_faces)
-        end
-
-        valid_faces = filter(f -> (1 <= abs(f) <= length(face_nodes)), faces)
-        for f in valid_faces
-            f_idx = Int(abs(f))
-            # Defensive: check face_nodes length
-            if f_idx > length(face_nodes)
-                println("Skipping invalid face index $f_idx in cell $i")
-                continue
-            end
-            for n in face_nodes[f_idx]
-                push!(nodes, Int(n))
-            end
-        end
-
-        cell_node_map[i] = collect(nodes)
-    end
-
-    using WriteVTK
-    vtk_grid(filename, coords, cells=cell_node_map) do vtk
-        # Optional: add scalars here
-    end
-
-    println("Exported grid to $filename")
-end
-
 
 
 
@@ -1253,10 +1207,7 @@ function setup_case_from_mrst(casename;
         dr_max = Inf,
         kwarg...
     )
-    data_domain, mrst_data = reservoir_domain_from_co2_blackoil(casename; extraout = false, plot_grid = true)
-    error("test1")
-    export_grid_to_vtu(g;"mygrid.vtu")
-    error("test2")
+    data_domain, mrst_data = reservoir_domain_from_co2_blackoil(casename; extraout = true, plot_grid = true) 
     #data_domain, mrst_data = reservoir_domain_from_mrst(casename, extraout = true, convert_grid = convert_grid)
     G = discretized_domain_tpfv_flow(data_domain; kwarg...)
     if ismissing(facility_grouping)
