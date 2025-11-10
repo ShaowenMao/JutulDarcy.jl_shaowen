@@ -95,6 +95,22 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
     fn = get_mrst_input_path(name)
     @debug "Reading MAT file $fn..."
     exported = MAT.matread(fn)
+    #dump(exported)
+    # @show typeof(exported), fn
+    # println(keys(exported))
+    # @show typeof(exported["deck"])
+    # println(keys(exported["deck"]))
+    # @show exported["deck"]["PROPS"]
+    println(keys(exported))
+    println(keys(exported["deck"]))
+    println(keys(exported["deck"]["PROPS"]))
+
+
+    #exported["deck"]["PROPS"]["SGOF"][2][:,4] .= 0.0
+    # exported["deck"]["PROPS"]["SGOF"][1][:,4] .= exported["deck"]["PROPS"]["SGOF"][3][:,4]
+    #exported["deck"]["PROPS"]["SGOF"][3][:,4] .= 0.0
+    # error("test")
+
     @debug "File read complete. Unpacking data..."
     G_raw = exported["G"]
     if convert_grid && haskey(G_raw, "nodes")
@@ -102,8 +118,96 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
     else
         g = MRSTWrapMesh(G_raw)
     end
-    has_trans = haskey(exported, "T") && length(exported["T"]) > 0
 
+    dimension = Int(G_raw["griddim"])
+    @show dimension 
+    fig = Figure()
+    ax3 = Axis3(fig[1, 1];
+    title = "3D mesh",
+    aspect = :data        # makes x, y, z use the same scale
+    )
+    ax3.zreversed[] = true    # flip Z if needed
+    Jutul.plot_mesh_edges!(ax3, g; color = :black)
+    display(fig)
+
+    # =========================================================
+    # Plot permeability distribution (similar to MRST)
+    # =========================================================
+    # --- Permeability distribution plot (Makie-compatible) ---
+    perm = copy((exported["rock"]["perm"])')      # permeability in m^2
+    perm_mD = perm ./ 9.869233e-16                # convert to mD
+    perm_log = log10.(perm_mD)                    # log10(k [mD])
+
+    fig_perm = Figure(size = (800, 600))
+    axp = Axis3(fig_perm[1, 1];
+        title = "Permeability Distribution (log₁₀ k [mD])",
+        aspect = :data,
+        xlabel = "X", ylabel = "Y", zlabel = "Z"
+    )
+    axp.zreversed[] = true
+    axp.azimuth[] = 270
+    axp.elevation[] = 0
+
+    # Plot the cell data — returns a plot object we can link colorbar to
+    plt_perm = Jutul.plot_cell_data!(axp, g, perm_log; colormap = :copper)
+
+    # Correct colorbar syntax (link to plot object)
+    Colorbar(fig_perm[1, 2], plt_perm, label = "log₁₀(k [mD])")
+
+    display(fig_perm)
+
+    # =========================================================
+    
+    reg = copy((exported["rock"]["regions"]["saturation"])')    
+    fig_reg = Figure(size = (800, 600))
+    axp = Axis3(fig_reg[1, 1];
+        title = "Saturation Regions",
+        aspect = :data,
+        xlabel = "X", ylabel = "Y", zlabel = "Z"
+    )
+    axp.zreversed[] = true
+    axp.azimuth[] = 270
+    axp.elevation[] = 0
+    
+    # Plot the cell data — returns a plot object we can link colorbar to
+    plt_reg = Jutul.plot_cell_data!(axp, g, reg; colormap = :copper)
+    # Correct colorbar syntax (link to plot object)
+    Colorbar(fig_reg[1, 2], plt_reg, label = "Regions")
+
+    display(fig_reg)
+
+    # =========================================================
+    
+    poro = copy((exported["rock"]["poro"])')    
+    fig_poro = Figure(size = (800, 600))
+    axp = Axis3(fig_poro[1, 1];
+        title = "Porosity Distribution (/)",
+        aspect = :data,
+        xlabel = "X", ylabel = "Y", zlabel = "Z"
+    )
+    axp.zreversed[] = true
+    axp.azimuth[] = 270
+    axp.elevation[] = 0
+    
+    # Plot the cell data — returns a plot object we can link colorbar to
+    plt_poro = Jutul.plot_cell_data!(axp, g, poro; colormap = :copper, colorrange = (0.1, 0.3))
+    # Correct colorbar syntax (link to plot object)
+    Colorbar(fig_poro[1, 2], plt_poro, label = "Porosity (/)")
+
+    display(fig_poro)
+
+    @show typeof(exported)
+    @show keys(exported["schedule"]["control"])
+    @show exported["schedule"]["control"][1]
+
+    @show keys(exported["rock"])
+    @show exported["rock"]["regions"]
+    @show exported["rock"]["poro"]
+    @show size(exported["rock"]["perm"])
+
+    #error("test")
+
+    has_trans = haskey(exported, "T") && length(exported["T"]) > 0
     function get_vec(d)
         if isa(d, AbstractArray)
             return vec(copy(d))
@@ -122,6 +226,7 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
         # MATLAB exporter all old exported mat files will be rendered obsolete.
         domain[:porosity] = poro./ntg
     end
+
     nf = number_of_faces(domain)
     if haskey(exported, "N")
         N = Int64.(exported["N"]')
@@ -396,6 +501,7 @@ function deck_pvt_oil(props; scaling = missing)
         t = rescale_btable(props["PVDO"], scaling)
         pvt = PVDO(t)
     else
+        println(keys(props))
         t = rescale_btable(props["PVCDO"], scaling)
         pvt = PVCDO(t)
     end
@@ -439,7 +545,6 @@ function deck_relperm(runspec, props; oil, water, gas, satnum = nothing)
     else
         scaling = NoKrScale()
     end
-
     hysteresis_w = hysteresis_ow = hysteresis_og = hysteresis_g = NoHysteresis()
     if haskey(props, "EHYSTR") && !haskey(runspec, "NOHYST")
         ehystr = props["EHYSTR"]
@@ -545,12 +650,20 @@ function deck_relperm(runspec, props; oil, water, gas, satnum = nothing)
             end
         end
         if haskey(props, "SGOF")
+
+            @show size(props["SGOF"])
+            
             for (reg, sgof) in enumerate(props["SGOF"])
                 swcon = get_swcon(tables_krw, reg)
                 krg, krog = table_to_relperm(sgof, swcon = swcon, first_label = :g, second_label = :og)
                 push!(tables_krg, krg)
                 push!(tables_krog, krog)
             end
+
+            @show size(tables_krg), size(tables_krog), satnum
+            #error("test")
+
+
         end
     else
         if haskey(props, "SWFN")
@@ -1207,8 +1320,8 @@ function setup_case_from_mrst(casename;
         dr_max = Inf,
         kwarg...
     )
-    data_domain, mrst_data = reservoir_domain_from_co2_blackoil(casename; extraout = true, plot_grid = true) 
-    #data_domain, mrst_data = reservoir_domain_from_mrst(casename, extraout = true, convert_grid = convert_grid)
+    #data_domain, mrst_data = reservoir_domain_from_co2_blackoil(casename; extraout = true, plot_grid = true) 
+    data_domain, mrst_data = reservoir_domain_from_mrst(casename, extraout = true, convert_grid = convert_grid)
     G = discretized_domain_tpfv_flow(data_domain; kwarg...)
     if ismissing(facility_grouping)
         if split_wells
@@ -1229,6 +1342,15 @@ function setup_case_from_mrst(casename;
     rhoS = reference_densities(model.system)
 
     has_schedule = haskey(mrst_data, "schedule")
+
+    @show has_schedule 
+    println(keys(mrst_data))
+    # @show (keys(mrst_data["schedule"]))
+    # @show (mrst_data["schedule"]["step"])
+    @show keys(mrst_data["schedule"]["control"])
+    #println(mrst_data["schedule"])
+    #error("test4")
+
     if has_schedule
         @assert !haskey(mrst_data, "dt")
         @assert !haskey(mrst_data, "W")
@@ -1469,9 +1591,29 @@ function setup_case_from_mrst(casename;
 
         p_def = Pressure(max_abs = dp_max_abs, max_rel = dp_max_rel, minimum = p_min, maximum = p_max)
         replace_variables!(model, Pressure = p_def, throw = false)
+        
+        @show keys(initializer[:Reservoir])
+        @show initializer[:Reservoir][:Pressure][1:100]
+        #@show initializer[:Reservoir][:BlackOilUnknown]
 
         state0 = setup_state(model, initializer)
         parameters = setup_parameters(model, parameters)
+
+        @show legacy_output
+        @show keys(state0) 
+        @show keys(state0[:Reservoir])
+        @show size(state0[:Reservoir][:Saturations])
+        @show state0[:Reservoir][:Saturations][2,1]
+        @show typeof(parameters)
+        @show keys(parameters)
+        @show keys(parameters[:Reservoir])
+        @show timesteps
+        @show keys(forces)
+        @show forces[1]
+        @show forces[2]
+        @show model[:I1].domain
+        @show physical_representation(model[:I1].domain).perforations
+        
 
         case = JutulCase(model, timesteps, forces, state0 = state0, parameters = parameters)
         return (case, mrst_data)
@@ -1698,6 +1840,15 @@ function simulate_mrst_case(fn;
     parameters = case.parameters
     models = model.models
     rmodel = models[:Reservoir]
+    
+    @show typeof(rmodel)
+    @show typeof(rmodel.system)
+    @show has_disgas(rmodel.system)
+    @show has_vapoil(rmodel.system)
+    @show fieldnames(typeof(rmodel.system))
+    @show rmodel.system isa BlackOilSystem
+    @show verbose 
+
     if rmodel isa StandardBlackOilModel
         sys = rmodel.system
         if has_disgas(sys)
@@ -1712,6 +1863,27 @@ function simulate_mrst_case(fn;
         push!(extra_outputs, :VaporMassFractions)
         push!(extra_outputs, :Saturations)
     end
+
+    @show typeof(rmodel.system)
+    @show has_disgas(rmodel.system)
+    @show has_vapoil(rmodel.system)
+    @show fieldnames(typeof(rmodel.system))
+    interp_tuple = getfield(rmodel.system, 1)  # the first, unnamed field in the struct
+    @show interp_tuple
+    @show typeof(rmodel.domain)
+   # @show typeof(rmodel.storage)
+
+
+
+
+
+    
+
+
+    #error("test1")
+ 
+
+
 
     out = rmodel.output_variables
     for k in extra_outputs
@@ -1729,6 +1901,8 @@ function simulate_mrst_case(fn;
     else
         output_path = nothing
     end
+    @show size(mrst_data["rock"]["poro"])
+    error("test")
     sim, cfg = setup_reservoir_simulator(
         case;
         mode = mode,
@@ -1755,11 +1929,70 @@ function simulate_mrst_case(fn;
             jutul_message("MRST model", "Starting simulation of $s system with $nc cells and $nph phases and $ncomp components.")
         end
         rspec = deck["RUNSPEC"]
+
+        @show keys(deck) 
+        @show keys(rspec)
+        @show cfg 
+        
         if haskey(rspec, "START")
             start = DateTime(0) + Day(rspec["START"])
         else
             start = nothing
         end
+
+        @show start
+        @show keys(cfg)
+        @show keys(cfg[:tolerances][:Reservoir])
+        @show cfg[:tolerances][:Reservoir][:default]
+        @show cfg[:tolerances][:Reservoir][:mass_conservation]
+        @show cfg[:info_level]
+        @show cfg[:report_level]
+        @show forces[15]
+        @show forces[16]
+        @show keys(mrst_data["deck"]["PROPS"]["SGOF"])
+        @show size(mrst_data["deck"]["PROPS"]["SGOF"][1])
+        @show mrst_data["deck"]["PROPS"]["SGOF"][1][:,4]
+
+        #mrst_data["deck"]["PROPS"]["SGOF"][2][:,4] .= 0.0
+        @show mrst_data["deck"]["PROPS"]["SGOF"][2][:,4]
+        @show mrst_data["deck"]["PROPS"]["SGOF"][3][:,4]
+
+        # Extract data
+        x = mrst_data["deck"]["PROPS"]["SGOF"][3][:, 1]
+        y = mrst_data["deck"]["PROPS"]["SGOF"][3][:, 4]
+
+        # Create a figure and axis
+        fig = Figure(size = (600, 400))
+        ax = Axis(fig[1, 1];
+            xlabel = "Gas Saturation (/)",
+            ylabel = "Capillary Pressure (Pa)",  # replace with actual meaning
+        )
+
+        # Plot the line
+        lines!(ax, x, y, color = :blue, linewidth = 2)
+
+        # Display the figure
+        display(fig)
+
+       # error("test")
+        @show forces[1]
+        # dt = dt[1:6]
+        # forces = forces[1:6]
+        @show dt, write_output, write_mrst
+        #cfg[:relaxation] = Jutul.SimpleRelaxation()
+        
+        @show cfg[:relaxation]
+        @show typeof(cfg)
+        @show cfg[:timestep_selectors]
+       # cfg[:timestep_selectors][1] = Jutul.TimestepSelector(1.0, 86400.0, 2.0, 0.1, 3.1556952e7, 0.0)
+        @show cfg[:timestep_selectors][1]
+
+       # error("test")
+        #error("test6")
+        cfg[:info_level] = 1
+        cfg[:report_level] = 1
+        #cfg[:tolerances][:Reservoir][:default] = 1.0e-6
+
         result = simulate(sim, dt, forces = forces, config = cfg, restart = restart, start_date = start);
         states, reports = result
         if write_output && write_mrst
@@ -1825,6 +2058,14 @@ function write_reservoir_simulator_output_to_mrst(model, states, reports, forces
         return String(wname[ok])
     end
     mkpath(output_path)
+
+    # Delete old files in output_path
+    for f in readdir(output_path; join = true)
+        if endswith(f, ".mat")
+            rm(f; force = true)
+        end
+    end
+
     prep_write(x) = x
     prep_write(x::AbstractMatrix) = collect(x')
     if write_states

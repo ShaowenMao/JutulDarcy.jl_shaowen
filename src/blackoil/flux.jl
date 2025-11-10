@@ -16,6 +16,18 @@ Compute the component mass fluxes for a given face in a black oil model.
 - This function modifies the `q` array in place with the computed mass fluxes.
 """
 @inline function component_mass_fluxes!(q, face, state, model::StandardBlackOilModel, flux_type, kgrad, upw)
+
+    # @show typeof(model)
+    # @show model.system
+    # @show typeof(model.system), has_disgas(model.system)
+    # @show typeof(state)
+
+    # bt = stacktrace()
+    # for (i, f) in enumerate(bt)
+    #     println("[$i] $(f.func) at $(f.file):$(f.line)")
+    # end
+    # println(keys(state))
+    # error("test2")
     sys = model.system
     ix = phase_indices(sys)
     (; l, v) = ix
