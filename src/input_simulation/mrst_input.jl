@@ -107,8 +107,8 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
 
 
     #exported["deck"]["PROPS"]["SGOF"][2][:,4] .= 0.0
-    # exported["deck"]["PROPS"]["SGOF"][1][:,4] .= exported["deck"]["PROPS"]["SGOF"][3][:,4]
-    #exported["deck"]["PROPS"]["SGOF"][3][:,4] .= 0.0
+    #exported["deck"]["PROPS"]["SGOF"][1][:,4] .= exported["deck"]["PROPS"]["SGOF"][3][:,4]
+    exported["deck"]["PROPS"]["SGOF"][3][:,4] .= 6.0e5
     # error("test")
 
     @debug "File read complete. Unpacking data..."
@@ -1871,7 +1871,28 @@ function simulate_mrst_case(fn;
     interp_tuple = getfield(rmodel.system, 1)  # the first, unnamed field in the struct
     @show interp_tuple
     @show typeof(rmodel.domain)
-   # @show typeof(rmodel.storage)
+    #@show typeof(rmodel.storage)
+    @show typeof(case)
+    @show fieldnames(typeof(case))
+    @show typeof(case.input_data)
+    @show typeof(rmodel.secondary_variables[:CapillaryPressure])
+    @show fieldnames(typeof(rmodel.secondary_variables[:CapillaryPressure]))
+   
+    pcs = rmodel.secondary_variables[:CapillaryPressure].pc[1]
+    sg = range(0, 1; length=1000)
+
+    fig = Figure(resolution=(600, 400))
+    ax = Axis(fig[1, 1]; xlabel="Gas saturation", ylabel="Capillary pressure (Pa)")
+
+    for i in eachindex(pcs)
+        y = [pcs[i](s) for s in sg]
+        lines!(ax, sg, y, label="Region $i")
+    end
+
+    axislegend(ax; position = :lt)
+    display(fig)
+
+   # error("test")
 
 
 
@@ -1902,7 +1923,7 @@ function simulate_mrst_case(fn;
         output_path = nothing
     end
     @show size(mrst_data["rock"]["poro"])
-    error("test")
+   # error("test")
     sim, cfg = setup_reservoir_simulator(
         case;
         mode = mode,
@@ -1976,8 +1997,8 @@ function simulate_mrst_case(fn;
 
        # error("test")
         @show forces[1]
-        # dt = dt[1:6]
-        # forces = forces[1:6]
+        # dt = dt[1:5]
+        # forces = forces[1:5]
         @show dt, write_output, write_mrst
         #cfg[:relaxation] = Jutul.SimpleRelaxation()
         
