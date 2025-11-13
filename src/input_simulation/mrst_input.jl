@@ -108,7 +108,9 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
 
     #exported["deck"]["PROPS"]["SGOF"][2][:,4] .= 0.0
     #exported["deck"]["PROPS"]["SGOF"][1][:,4] .= exported["deck"]["PROPS"]["SGOF"][3][:,4]
-    exported["deck"]["PROPS"]["SGOF"][3][:,4] .= 6.0e5
+    #exported["deck"]["PROPS"]["SGOF"][1] .= exported["deck"]["PROPS"]["SGOF"][3]
+    exported["deck"]["PROPS"]["SGOF"][3][:,4] .=  5.000062500703130e4  #6.727171322029720e5  #0.0
+    #exported["deck"]["PROPS"]["SGOF"][3][1:5,4] .= 0.0
     # error("test")
 
     @debug "File read complete. Unpacking data..."
@@ -1892,7 +1894,7 @@ function simulate_mrst_case(fn;
     axislegend(ax; position = :lt)
     display(fig)
 
-   # error("test")
+    #error("test")
 
 
 
@@ -1997,8 +1999,8 @@ function simulate_mrst_case(fn;
 
        # error("test")
         @show forces[1]
-        # dt = dt[1:5]
-        # forces = forces[1:5]
+        # dt = dt[1:37]
+        # forces = forces[1:37]
         @show dt, write_output, write_mrst
         #cfg[:relaxation] = Jutul.SimpleRelaxation()
         

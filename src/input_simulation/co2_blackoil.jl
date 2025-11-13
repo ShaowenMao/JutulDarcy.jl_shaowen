@@ -14,4 +14,3 @@ simulate_mrst_case(raw"C:/Users/Shaow/OneDrive/MIT/mrst-2025a/SINTEF-AppliedComp
 # case = setup_case_from_mrst(fn)[1]
 
 # @show typeof(case)
-# simulate_reservoir(case; info_level = 1)
