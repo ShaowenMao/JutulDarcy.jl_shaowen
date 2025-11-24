@@ -116,6 +116,9 @@ function reservoir_domain(g;
         kwarg = (diffusion = diffusion, kwarg...)
     end
    # minimum(permeability) >= 0 || throw(ArgumentError("All permeability values must be non-negative."))
+   @show kwarg 
+   @show size(diffusion)
+   #error("test")
     nk = length(permeability)
     nc = number_of_cells(g)
     if nk != nc && permeability isa AbstractVector
@@ -1007,10 +1010,13 @@ function setup_reservoir_simulator(case::JutulCase;
             parray_arg...
         )
     end
-
+    #max_dt = 3600 * 12
     t_base = TimestepSelector(initial_absolute = initial_dt, max = max_dt)
     sel = Vector{Any}()
     push!(sel, t_base)
+    
+    @show timesteps,target_its, max_dt,max_timestep,initial_dt
+   # error("test1")
     if timesteps == :auto || timesteps == :iteration
         if isfinite(target_its)
             t_its = IterationTimestepSelector(target_its, offset = offset_its)

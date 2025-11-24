@@ -205,6 +205,7 @@ function Jutul.default_values(model, ::Transmissibilities)
 end
 
 function Jutul.default_parameter_values(data_domain, model, param::Transmissibilities, symb)
+   # error("ttt")
     if haskey(data_domain, :transmissibilities, Faces())
         # This takes precedence
         T = copy(data_domain[:transmissibilities])
@@ -244,6 +245,8 @@ Jutul.values_per_entity(model, ::Diffusivities) = number_of_phases(model.system)
 function Jutul.default_parameter_values(data_domain, model, param::Diffusivities, symb)
     nf = number_of_faces(model.domain)
     nph = number_of_phases(model.system)
+    @show haskey(data_domain, :diffusion, Cells())
+  #  error("ddd")
     if haskey(data_domain, :diffusivities, Faces())
         # This takes precedence
         T = data_domain[:diffusivities]
@@ -272,6 +275,8 @@ function Jutul.default_parameter_values(data_domain, model, param::Diffusivities
         error(":diffusion or :diffusivities symbol must be present in DataDomain to initialize parameter $symb, had keys: $(keys(data_domain))")
     end
     @assert size(T) == (nph, nf)
+    @show nph, nf, size(T)
+    #error("dddd")
     return T
 end
 

@@ -141,6 +141,10 @@ function CPRPreconditioner(p = default_psolve(), s = ILUZeroPreconditioner();
 end
 
 function default_psolve(; max_levels = 10, max_coarse = 10, amgcl_type = :amg, type = default_amg_symbol(), kwarg...)
+    @show type 
+    type = :ruge_stuben
+    @show kwarg, length(kwarg)
+   # error("test")
     if type == :hypre
         amg = BoomerAMGPreconditioner(; kwarg...)
     elseif type == :amgx

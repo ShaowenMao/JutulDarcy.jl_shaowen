@@ -74,12 +74,25 @@ Compute the component mass fluxes for a given face in a black oil model.
         q_v = rhoVS*λb_v*∇ψ_v
     end
 
+    # @show model.parameters
+    # @show keys(state)
+    # @show haskey(state, :Diffusivities), has_disgas(sys),has_vapoil(sys)
+    #error("test1")
     if haskey(state, :Diffusivities)
         S = state.Saturations
         density = state.PhaseMassDensities
         D = state.Diffusivities
+
+        #@show l, v
         if has_disgas(sys)
             qo_diffusive_l, qo_diffusive_v = blackoil_diffusion(Rs, S, density, rhoLS, rhoVS, face, D, l, kgrad, upw)
+            # @show size(D)
+            # @show qo_diffusive_l
+            # @show qo_diffusive_v
+            # @show size(qo_diffusive_l), size(qo_diffusive_v)
+            # @show q_l
+            # @show face
+            # error("ddd")
             q_l += qo_diffusive_l
             q_v += qo_diffusive_v
         end
@@ -101,6 +114,13 @@ function blackoil_diffusion(R, S, density, rhoS_self, rhoS_dissolved, face, D, �
     # Two components: 1 - X_l - (1 - X_r) = - X_l + X_r = -(X_l - X_r) = ΔX
     ΔX_self = -gradient(X_self, kgrad)
     ΔX_other = -ΔX_self
+
+    # @show size(D)
+    # @show D_α, α, face
+   # error("test")
+    # @show cell
+    # @show ΔX_self
+    # @show X_self(1), X_self(2)
 
     T = typeof(ΔX_self)
     mass_l = cell -> density[α, cell]*S[α, cell]

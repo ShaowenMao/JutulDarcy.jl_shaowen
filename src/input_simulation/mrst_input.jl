@@ -1,5 +1,6 @@
 using GLMakie
 using WriteVTK
+using Infiltrator
 
 function get_mrst_input_path(name)
     function valid_mat_path(S)
@@ -109,7 +110,7 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
     #exported["deck"]["PROPS"]["SGOF"][2][:,4] .= 0.0
     #exported["deck"]["PROPS"]["SGOF"][1][:,4] .= exported["deck"]["PROPS"]["SGOF"][3][:,4]
     #exported["deck"]["PROPS"]["SGOF"][1] .= exported["deck"]["PROPS"]["SGOF"][3]
-    exported["deck"]["PROPS"]["SGOF"][3][:,4] .=  5.000062500703130e4  #6.727171322029720e5  #0.0
+    #exported["deck"]["PROPS"]["SGOF"][3][:,4] .=  5.000062500703130e4  #6.727171322029720e5  #0.0
     #exported["deck"]["PROPS"]["SGOF"][3][1:5,4] .= 0.0
     # error("test")
 
@@ -219,7 +220,26 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
     end
     poro = get_vec(exported["rock"]["poro"])
     perm = copy((exported["rock"]["perm"])')
-    domain = reservoir_domain(g, porosity = poro, permeability = perm)
+
+
+    # =========================================================
+    # Add diffusion coefficients (per cell, per component)
+    # =========================================================
+    nc = Int(G_raw["cells"]["num"])
+    ncomp = 2
+
+    # diffusion stored as (ncomp × nc)
+    diffusion_coeff = zeros(ncomp, nc)
+
+    @inbounds for c in 1:nc
+        diffusion_coeff[1, c] = 2.0e-11  # component 1: liquid (oil)
+        diffusion_coeff[2, c] = 0.0      # component 2: vapor (gas)
+    end
+
+    @show diffusion_coeff
+   # error("tset")
+
+    domain = reservoir_domain(g, porosity = poro, permeability = perm, diffusion = diffusion_coeff)
     if haskey(exported["rock"], "ntg")
         ntg = get_vec(exported["rock"]["ntg"])
         domain[:net_to_gross, Cells()] = ntg
@@ -241,9 +261,12 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
             domain[:normals, Faces()] = fill!(zeros(d, nf), NaN)
             domain[:face_centroids, Faces()] = fill!(zeros(d, nf), NaN)
         end
+        
         domain[:neighbors, Faces()] = N
     end
     # Deal with face data
+    # @show has_trans 
+    # error("test")
     if has_trans
         @debug "Found precomputed transmissibilities, reusing"
         T = get_vec(exported["T"])
@@ -804,9 +827,18 @@ function deck_pc(props; oil, water, gas, satnum = nothing, is_co2 = false)
             else
                 constant_dx = false
             end
+
+            @show s 
+            @show pc 
+            @show constant_dx
+            
             interp_phase_pair = get_1d_interpolator(s, pc, constant_dx = constant_dx)
             push!(PC, interp_phase_pair)
         end
+        
+        @show PC
+        @show PC[3](10.0)
+        #error("test1")
         out = Tuple(PC)
         return (out, found)
     end
@@ -1000,6 +1032,7 @@ function model_from_mat_deck(G, data_domain, mrst_data, res_context)
         mu = DeckPhaseViscosities(pvt)
         set_secondary_variables!(model, PhaseViscosities = mu, PhaseMassDensities = rho)
         set_deck_specialization!(model, runspec, props, satnum, has_oil, has_wat, has_gas)
+        model.parameters[:Diffusivities] = Diffusivities()
         param = setup_parameters(model)
     end
 
@@ -1338,6 +1371,22 @@ function setup_case_from_mrst(casename;
     forces = Dict()
     res_context, = Jutul.select_contexts(backend, block_backend = block_backend, minbatch = minbatch, nthreads = nthreads)
     model, param_res = model_from_mat(G, data_domain, mrst_data, res_context)
+
+    # -----------------------------------------------------------
+    # Enable diffusion in the Black-Oil reservoir model
+    # -----------------------------------------------------------
+    # a, b = get_parameters(model)
+    # model.parameters[:Diffusivities] = Diffusivities()
+    # param_res = setup_parameters(model, param_res)
+    # -----------------------------------------------------------
+
+    @show keys(model.parameters)
+
+    @show model.parameters[:Diffusivities]
+    @show model.parameters[:Transmissibilities]
+    @show keys(param_res)
+    #error("test2")
+
     init = init_from_mat(mrst_data, model, param_res)
 
     is_comp = model isa CompositionalModel
@@ -1860,6 +1909,10 @@ function simulate_mrst_case(fn;
             push!(extra_outputs, :Rv)
         end
         push!(extra_outputs, :Saturations)
+        # Ask Jutul to also output these secondary variables
+        for v in (:Saturations, :FluidVolume, :PhaseMassDensities, :TotalMasses, :ShrinkageFactors)
+            v in extra_outputs || push!(extra_outputs, v)   # if the left side is true, julia does not evalute the right side; if false, it does.
+        end
     elseif rmodel isa CompositionalModel
         push!(extra_outputs, :LiquidMassFractions)
         push!(extra_outputs, :VaporMassFractions)
@@ -1966,8 +2019,18 @@ function simulate_mrst_case(fn;
         @show start
         @show keys(cfg)
         @show keys(cfg[:tolerances][:Reservoir])
+        @show cfg[:tolerances][:Reservoir]
         @show cfg[:tolerances][:Reservoir][:default]
         @show cfg[:tolerances][:Reservoir][:mass_conservation]
+        @show cfg[:max_nonlinear_iterations]
+        @show cfg[:min_nonlinear_iterations]
+        @show cfg[:max_timestep_cuts], cfg[:cutting_criterion], cfg[:timestep_max_decrease], cfg[:timestep_max_increase]
+        cfg[:max_nonlinear_iterations] = 10
+        cfg[:max_timestep_cuts] = 12
+        @show cfg[:linear_solver]
+
+      #  error("test1")
+
         @show cfg[:info_level]
         @show cfg[:report_level]
         @show forces[15]
@@ -2009,8 +2072,11 @@ function simulate_mrst_case(fn;
         @show cfg[:timestep_selectors]
        # cfg[:timestep_selectors][1] = Jutul.TimestepSelector(1.0, 86400.0, 2.0, 0.1, 3.1556952e7, 0.0)
         @show cfg[:timestep_selectors][1]
-
-       # error("test")
+        
+        @show cfg[:linear_solver]
+        @show cfg[:timestep_selectors]
+        @show dt 
+    #    error("test")
         #error("test6")
         cfg[:info_level] = 1
         cfg[:report_level] = 1
@@ -2018,6 +2084,32 @@ function simulate_mrst_case(fn;
 
         result = simulate(sim, dt, forces = forces, config = cfg, restart = restart, start_date = start);
         states, reports = result
+
+
+        state = states[end]
+        rho_l_res = state[:Reservoir][:PhaseMassDensities][1,:]
+        rho_g_res = state[:Reservoir][:PhaseMassDensities][2,:]
+        rs = state[:Reservoir][:Rs]
+        pv = state[:Reservoir][:FluidVolume]
+        sw = state[:Reservoir][:Saturations][1,:]
+        sg = state[:Reservoir][:Saturations][2,:]
+        bo = state[:Reservoir][:ShrinkageFactors][1,:]
+        bg = state[:Reservoir][:ShrinkageFactors][2,:]
+
+        m_free =  sg .* pv .* rho_g_res
+        m_dissolved =  sw .* pv .* rs .* bo .* rho_g_res ./ bg
+
+        M_free = sum(m_free)
+        M_dissolved = sum(m_dissolved)
+        M_total = M_free + M_dissolved
+        println("Free gas mass: $M_free kg")
+        println("Dissolved gas mass: $M_dissolved kg")  
+        println("Total gas mass: $M_total kg")
+        println("Gas dissolution ratio: $(M_dissolved / M_total * 100) %")
+        println("Free gas ratio: $(M_free / M_total * 100) %")
+
+        @infiltrate
+
         if write_output && write_mrst
             mrst_output_path = "$(output_path)_mrst"
             if verbose
@@ -2103,6 +2195,11 @@ function write_reservoir_simulator_output_to_mrst(model, states, reports, forces
             state_path = joinpath(output_path, "state$i.mat")
             # @info "Writing to $state_path"
             D = Dict{String, Any}()
+            # @show model.getProp(res_state, :Density)
+            # @show keys(res_state)
+            # @show haskey(res_state, :PVTProps)
+            # error("test")
+
             for k in keys(res_state)
                 mk = String(k)
                 if convert_names
