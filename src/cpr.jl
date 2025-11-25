@@ -141,6 +141,13 @@ function CPRPreconditioner(p = default_psolve(), s = ILUZeroPreconditioner();
 end
 
 function default_psolve(; max_levels = 10, max_coarse = 10, amgcl_type = :amg, type = default_amg_symbol(), kwarg...)
+    # Here you can choose the AMG method used inside the CPR preconditioner.
+    # Available options: :smoothed_aggregation, :ruge_stuben, :aggregation
+    #
+    # In general:
+    #   - :smoothed_aggregation  → most robust, but also the slowest
+    #   - :ruge_stuben           → good balance between robustness and speed
+    #   - :aggregation           → fastest, but least robust
     if type == :hypre
         amg = BoomerAMGPreconditioner(; kwarg...)
     elseif type == :amgx

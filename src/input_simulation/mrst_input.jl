@@ -47,6 +47,14 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
     @debug "Reading MAT file $fn..."
     exported = MAT.matread(fn)
     @debug "File read complete. Unpacking data..."
+
+    # A place to change capillary pressure curves if needed 
+    #exported["deck"]["PROPS"]["SGOF"][2][:,4] .= 0.0
+    #exported["deck"]["PROPS"]["SGOF"][1][:,4] .= exported["deck"]["PROPS"]["SGOF"][3][:,4]
+    #exported["deck"]["PROPS"]["SGOF"][1] .= exported["deck"]["PROPS"]["SGOF"][3]
+    #exported["deck"]["PROPS"]["SGOF"][3][:,4] .=  5.000062500703130e4  #6.727171322029720e5  #0.0
+    #exported["deck"]["PROPS"]["SGOF"][3][1:5,4] .= 0.0
+
     G_raw = exported["G"]
     if convert_grid && haskey(G_raw, "nodes")
         g = UnstructuredMesh(G_raw)
@@ -64,7 +72,25 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
     end
     poro = get_vec(exported["rock"]["poro"])
     perm = copy((exported["rock"]["perm"])')
-    domain = reservoir_domain(g, porosity = poro, permeability = perm)
+
+    # =========================================================
+    # Add diffusion coefficients (per cell, per component)
+    # =========================================================
+    nc = Int(G_raw["cells"]["num"])
+    ncomp = 2
+
+    # Diffusion coefficients stored as (ncomp x nc)
+    # :diffusion in JutulDarcy is the scalar diffusion coefficient (pseudo-diffusivity) defined in Lluis et al., 2024
+    # :diffusivity in JutulDarcy is the "effective diffusivity on faces" 
+    # Discretization of diffusion terms is analogous to that of advection terms
+    diffusion_coeff = zeros(ncomp, nc)
+
+    @inbounds for c in 1:nc 
+        diffusion_coeff[1, c] = 2.0e-11  # component 1: liquid, m^2/s
+        diffusion_coeff[2, c] = 0.0      # component 2: gas, m^2/s 
+    end
+
+    domain = reservoir_domain(g, porosity = poro, permeability = perm, diffusion = diffusion_coeff)
     if haskey(exported["rock"], "ntg")
         ntg = get_vec(exported["rock"]["ntg"])
         domain[:net_to_gross, Cells()] = ntg
@@ -836,6 +862,7 @@ function model_from_mat_deck(G, data_domain, mrst_data, res_context)
         mu = DeckPhaseViscosities(pvt)
         set_secondary_variables!(model, PhaseViscosities = mu, PhaseMassDensities = rho)
         set_deck_specialization!(model, runspec, props, satnum, has_oil, has_wat, has_gas)
+        model.parameters[:Diffusivities] = Diffusivities()  # assign Diffusivities parameter object to the reservoir model because diffusion is not enabled by default.
         param = setup_parameters(model)
     end
 
@@ -1657,6 +1684,10 @@ function simulate_mrst_case(fn;
             push!(extra_outputs, :Rv)
         end
         push!(extra_outputs, :Saturations)
+        # Save more secondary variables into final output to calculate mass fraction of dissolved and free gas 
+        for v in (:Saturations, :FluidVolume, :PhaseMassDensities, :TotalMasses, :ShrinkageFactors)
+            v in extra_outputs || push!(extra_outputs, v)   # if the left side is true, julia does not evalute the right side; if false, it does.
+        end
     elseif rmodel isa CompositionalModel
         push!(extra_outputs, :LiquidMassFractions)
         push!(extra_outputs, :VaporMassFractions)
@@ -1710,8 +1741,41 @@ function simulate_mrst_case(fn;
         else
             start = nothing
         end
+
+        # Set these parameters the same as the Matlab diffusion example
+        cfg[:max_nonlinear_iterations] = 10
+        cfg[:max_timestep_cuts] = 12
+
+        # Set the level of information and reporting during simulation 
+        cfg[:info_level] = 1
+        cfg[:report_level] = 1
+
         result = simulate(sim, dt, forces = forces, config = cfg, restart = restart, start_date = start);
         states, reports = result
+
+        # Calculate mass fractions of dissolved and free gas 
+        state = states[end]
+        rs = state[:Reservoir][:Rs]
+        pv = state[:Reservoir][:FluidVolume]  # accout for pore volume changes due to rock compressibility
+        sw = state[:Reservoir][:Saturations][1,:]
+        sg = state[:Reservoir][:Saturations][2,:]
+        bo = state[:Reservoir][:ShrinkageFactors][1,:]
+        bg = state[:Reservoir][:ShrinkageFactors][2,:]
+        rho_g_res = state[:Reservoir][:PhaseMassDensities][2,:]
+
+        m_free = sg .* pv .* rho_g_res
+        m_dissolved =  sw .* pv .* rs .* bo .* rho_g_res ./ bg
+
+        M_free = sum(m_free)
+        M_dissolved = sum(m_dissolved)
+        M_total = M_free + M_dissolved
+        println("Free gas mass: $M_free kg")
+        println("Dissolved gas mass: $M_dissolved kg")  
+        println("Total gas mass: $M_total kg")
+        println("Gas dissolution ratio: $(M_dissolved / M_total * 100) %")
+        println("Free gas ratio: $(M_free / M_total * 100) %")
+        println("-----------------------------------------------------")  
+
         if write_output && write_mrst
             mrst_output_path = "$(output_path)_mrst"
             if verbose

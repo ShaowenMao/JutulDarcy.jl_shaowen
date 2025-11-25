@@ -1008,6 +1008,8 @@ function setup_reservoir_simulator(case::JutulCase;
         )
     end
 
+    # You can change the maximum timestep here if need to reduce the number of wasted iterations
+    # max_dt = 3600 * 12 
     t_base = TimestepSelector(initial_absolute = initial_dt, max = max_dt)
     sel = Vector{Any}()
     push!(sel, t_base)

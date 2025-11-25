@@ -138,6 +138,7 @@ module JutulDarcy
     # Artifacts
     using Artifacts
     using LazyArtifacts
+    using Infiltrator    # This has to be placed inside the JutulDarcy module. 
 
     import DataStructures: OrderedDict
     using DocStringExtensions
