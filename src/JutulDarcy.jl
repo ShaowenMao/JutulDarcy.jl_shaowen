@@ -140,6 +140,7 @@ module JutulDarcy
     # Artifacts
     using Artifacts
     using LazyArtifacts
+    using LinearSolve
 
     import DataStructures: OrderedDict
     using DocStringExtensions

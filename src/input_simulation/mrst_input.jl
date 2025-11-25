@@ -1681,7 +1681,9 @@ function simulate_predict_case(fn;
         # end
         # p = F \ rhs_bc
         prob = LinearSolve.LinearProblem(A, rhs_bc)
-        p = LinearSolve.solve(prob)
+        sol  = LinearSolve.solve(prob)
+        p    = sol.u
+
 
 
         end

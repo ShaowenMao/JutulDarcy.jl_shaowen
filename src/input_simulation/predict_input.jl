@@ -7,8 +7,7 @@ using Revise
 #using Profile
 #using ProfileView
 #using StatProfilerHTML
-
-using LinearSolve 
+#using LinearSolve 
 
 
 #simulate_mrst_case("C:/Users/Shaow/AppData/Local/Temp/qfs_wo", write_mrst = true, info_level=-1, ascii_terminal = true)
