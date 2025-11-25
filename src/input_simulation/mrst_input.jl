@@ -1672,14 +1672,18 @@ function simulate_predict_case(fn;
 
         # Direct solver
         @time begin
-        #F = cholesky(Symmetric(A, :U); check=false)    
-        if first_dir
-            F = cholesky(Symmetric(A, :U); check=false)  
-            first_dir = false
-        else
-            cholesky!(F, Symmetric(A, :U))               # reuse analysis
-        end
-        p = F \ rhs_bc
+        # F = cholesky(Symmetric(A, :U); check=false)    
+        # if first_dir
+        #     F = cholesky(Symmetric(A, :U); check=false)  
+        #     first_dir = false
+        # else
+        #     cholesky!(F, Symmetric(A, :U))               # reuse analysis
+        # end
+        # p = F \ rhs_bc
+        prob = LinearSolve.LinearProblem(A, rhs_bc)
+        p = LinearSolve.solve(prob)
+
+
         end
 
         # Iterative solver

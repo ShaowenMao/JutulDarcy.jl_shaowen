@@ -33,6 +33,7 @@ Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 TestItems = "1c621080-faea-4a02-84b6-bbd5e436b8fe"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 Tullio = "bc48ee85-29a4-5162-ae0b-a64e1601d4bc"
+LinearSolve = "295af30f-7a64-5e35-8f30-5c19b447c9d2"
 
 [weakdeps]
 AMGX = "c963dde9-0319-47f5-bf0c-b07d3c80ffa6"

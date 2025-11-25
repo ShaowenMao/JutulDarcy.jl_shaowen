@@ -126,6 +126,7 @@ module JutulDarcy
     import Jutul: @tic
 
     using Jutul
+    using LinearSolve
     using ForwardDiff, StaticArrays, SparseArrays, LinearAlgebra, Statistics
     using AlgebraicMultigrid
     # PVT
