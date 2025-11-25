@@ -392,14 +392,22 @@ function deck_relperm(runspec, props; oil, water, gas, satnum = nothing)
     end
 
     hysteresis_w = hysteresis_ow = hysteresis_og = hysteresis_g = NoHysteresis()
-    if haskey(props, "EHYSTR") && !haskey(runspec, "NOHYST")
+
+    # If no kr hysteresis
+    # delete!(props, "EHYSTR")
+
+    if  haskey(props, "EHYSTR")&& !haskey(runspec, "NOHYST")
         ehystr = props["EHYSTR"]
         pc_curve, hyst_type, kr_curve, killough_tol, hyst_krpc_active, hyst_flag, _, wetting_og, = props["EHYSTR"]
         if hyst_krpc_active == "PC" || hyst_krpc_active == "BOTH"
             jutul_message("EHYSTR", "Capillary pressure hysteresis is not supported and will be ignored.", color = :yellow)
         end
+
+        #@infiltrate
         if hyst_krpc_active != "PC"
             killough = KilloughHysteresis(tol = killough_tol, s_min = ehystr[12])
+            # This is the place to change the minimum saturation threshold if needed. 
+            #killough = KilloughHysteresis(tol = killough_tol, s_min = 0.05)
             if wetting_og == "DEFAULT"
                 oil_is_wetting_for_og = true
             else
