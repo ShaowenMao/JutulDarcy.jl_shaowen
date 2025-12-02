@@ -812,9 +812,11 @@ function model_from_mat_deck(G, data_domain, mrst_data, res_context)
         end
 
         if has_oil
+            @infiltrate
             push!(pvt, deck_pvt_oil(props))
             push!(phases, LiquidPhase())
             push!(rhoS, rhoOS)
+            error("test")
         end
 
         if has_gas

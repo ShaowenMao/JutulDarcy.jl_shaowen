@@ -141,6 +141,7 @@ module JutulDarcy
 
     import DataStructures: OrderedDict
     using DocStringExtensions
+    using Infiltrator
 
     timeit_debug_enabled() = Jutul.timeit_debug_enabled()
     function __init__()
