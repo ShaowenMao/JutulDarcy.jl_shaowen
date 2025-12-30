@@ -115,7 +115,7 @@ function reservoir_domain(g;
         all(isfinite, diffusion) || throw(ArgumentError("Keyword argument diffusion has non-finite entries."))
         kwarg = (diffusion = diffusion, kwarg...)
     end
-    minimum(permeability) >= 0 || throw(ArgumentError("All permeability values must be non-negative."))
+    #minimum(permeability) >= 0 || throw(ArgumentError("All permeability values must be non-negative."))
     nk = length(permeability)
     nc = number_of_cells(g)
     if nk != nc && permeability isa AbstractVector

@@ -65,6 +65,11 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
     poro = get_vec(exported["rock"]["poro"])
     perm = copy((exported["rock"]["perm"])')
     domain = reservoir_domain(g, porosity = poro, permeability = perm)
+
+    if haskey(exported["rock"]["regions"],"rocknum")
+        rocknum = Int64.(get_vec(exported["rock"]["regions"]["rocknum"]))
+        domain[:rocknum, Cells()] = rocknum
+    end
     if haskey(exported["rock"], "ntg")
         ntg = get_vec(exported["rock"]["ntg"])
         domain[:net_to_gross, Cells()] = ntg
@@ -1710,8 +1715,41 @@ function simulate_mrst_case(fn;
         else
             start = nothing
         end
+
+        # Set these parameters the same as the Matlab diffusion example
+        cfg[:max_nonlinear_iterations] = 10
+        cfg[:max_timestep_cuts] = 8
+
+        # Set the level of information and reporting during simulation 
+        cfg[:info_level] = 1
+        cfg[:report_level] = 1
+
         result = simulate(sim, dt, forces = forces, config = cfg, restart = restart, start_date = start);
         states, reports = result
+
+        # Calculate mass fractions of dissolved and free gas 
+        state = states[end]
+        rs = state[:Reservoir][:Rs]
+        pv = state[:Reservoir][:FluidVolume]  # accout for pore volume changes due to rock compressibility
+        sw = state[:Reservoir][:Saturations][1,:]
+        sg = state[:Reservoir][:Saturations][2,:]
+        bo = state[:Reservoir][:ShrinkageFactors][1,:]
+        bg = state[:Reservoir][:ShrinkageFactors][2,:]
+        rho_g_res = state[:Reservoir][:PhaseMassDensities][2,:]
+
+        m_free = sg .* pv .* rho_g_res
+        m_dissolved =  sw .* pv .* rs .* bo .* rho_g_res ./ bg
+
+        M_free = sum(m_free)
+        M_dissolved = sum(m_dissolved)
+        M_total = M_free + M_dissolved
+        println("Free gas mass: $M_free kg")
+        println("Dissolved gas mass: $M_dissolved kg")  
+        println("Total gas mass: $M_total kg")
+        println("Gas dissolution ratio: $(M_dissolved / M_total * 100) %")
+        println("Free gas ratio: $(M_free / M_total * 100) %")
+        println("-----------------------------------------------------")  
+
         if write_output && write_mrst
             mrst_output_path = "$(output_path)_mrst"
             if verbose
