@@ -1,3 +1,7 @@
+include("vtk_export.jl")
+include("states_visualization.jl")
+
+
 function get_mrst_input_path(name)
     function valid_mat_path(S)
         base, ext = splitext(S)
@@ -1662,6 +1666,10 @@ function simulate_mrst_case(fn;
             push!(extra_outputs, :Rv)
         end
         push!(extra_outputs, :Saturations)
+        # Save more secondary variables into final output to calculate mass fraction of dissolved and free gas 
+        for v in (:Saturations, :FluidVolume, :PhaseMassDensities, :TotalMasses, :ShrinkageFactors)
+            v in extra_outputs || push!(extra_outputs, v)   # if the left side is true, julia does not evalute the right side; if false, it does.
+        end
     elseif rmodel isa CompositionalModel
         push!(extra_outputs, :LiquidMassFractions)
         push!(extra_outputs, :VaporMassFractions)
@@ -1723,12 +1731,42 @@ function simulate_mrst_case(fn;
         # Set the level of information and reporting during simulation 
         cfg[:info_level] = 1
         cfg[:report_level] = 1
-
-        result = simulate(sim, dt, forces = forces, config = cfg, restart = restart, start_date = start);
+        
+        #result = simulate(sim, dt, forces = forces, config = cfg, restart = restart, start_date = start);
+        pth = jutul_output_path("C:/Users/shaowen/restart_output")
+        result = simulate(sim, dt, forces = forces, config = cfg, output_path = pth, restart = true, start_date = start);
         states, reports = result
 
         # Calculate mass fractions of dissolved and free gas 
         state = states[end]
+
+        # report_times_vtu_export(
+        #     mrst_data["G"], states;
+        #     outdir="G:/Shaowen/visualization",
+        #     prefix="lluis_res",
+        #     vars=[:Pressure, :Saturations, :Rs],
+        #     split_matrices=true,
+        #     write_pvd=true,
+        #     write_regions=true,
+        #     reservoir_regions=mrst_data["rock"]["regions"]
+        # )
+
+        times_seconds = cumsum(dt)
+        report_times_vtu_export(
+            mrst_data["G"], states;
+            outdir="G:/Shaowen/visualization",
+            prefix="lluis_res",
+            vars=[:Pressure, :Saturations, :Rs],
+            split_matrices=true,
+            write_pvd=true,
+            times=times_seconds, 
+            write_regions=true,
+            reservoir_regions=mrst_data["rock"]["regions"],
+            write_dp=true,
+            state0_pressure=mrst_data["state0"]["pressure"],
+            dp_name="dP"
+        )
+
         rs = state[:Reservoir][:Rs]
         pv = state[:Reservoir][:FluidVolume]  # accout for pore volume changes due to rock compressibility
         sw = state[:Reservoir][:Saturations][1,:]

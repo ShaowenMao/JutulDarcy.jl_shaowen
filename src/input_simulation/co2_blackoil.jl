@@ -7,12 +7,16 @@ using WriteVTK
 using StaticArrays
 include("vtk_export.jl")
 
-path = raw"C:/Users/Shaow/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case.mat"
+#local laptop
+#path = raw"C:/Users/Shaow/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case.mat"
+
+# GRS3 server
+path = raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case.mat"
 
 # Control flags
-run_sim   = true   # set to true to rerun simulation
+run_sim   = true    # set to true to rerun simulation
 plot_flag = false   # set to false to skip all plotting
-vtu_flag  = false    # set to false to skip writing .vtu for ParaView
+vtu_flag  = false   # set to false to skip writing .vtu for ParaView
 
 # ---------------------------------------------------------
 # 0. Run simulation (optional)
@@ -38,7 +42,6 @@ kx       = perm_raw isa AbstractMatrix ? perm_raw[:, 1] : perm_raw
 perm_mD  = kx ./ 9.869233e-16
 perm_log = log10.(perm_mD .+ 1e-6)
 
-reg  = vec(copy(exported["rock"]["regions"]["saturation"]))
 poro = vec(copy(exported["rock"]["poro"]))
 
 # ---------------------------------------------------------
@@ -104,12 +107,25 @@ end
 # 3. Export triangulated surface + properties to ParaView (.vtu)
 # ---------------------------------------------------------
 if vtu_flag
+
+    @infiltrate
+    error("test")
+    sat_reg   = vec(copy(exported["rock"]["regions"]["saturation"]))
+    rock_reg  = vec(copy(exported["rock"]["regions"]["rocknum"]))
+    imbi_reg  = vec(copy(exported["rock"]["regions"]["imbibition"]))
+    init_pres = vec(copy(exported["state0"]["pressure"]))
+
     cell_data = Dict{String,AbstractVector}(
         "perm_log10_mD" => perm_log,
-        "region"        => reg,
         "porosity"      => poro,
+        "sat_region"    => sat_reg, 
+        "rock_region"   => rock_reg,
+        "imbi_region"   => imbi_reg,
+        "init_pressure" => init_pres,      
     )
-    write_surface_vtu(g, cell_data; filename = "lluis_field_case_surface")
+
+    write_volume_vtu(G_raw; cell_data, filename = "lluis_field_case_volume")
+
     println("VTU export complete: lluis_field_case_surface.vtu")
 else
     println("VTU export disabled. Skipping .vtu file generation.")

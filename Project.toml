@@ -1,7 +1,7 @@
 name = "JutulDarcy"
 uuid = "82210473-ab04-4dce-b31b-11573c4f8e0a"
-authors = ["Olav Møyner <olav.moyner@gmail.com>"]
 version = "0.2.47"
+authors = ["Olav Møyner <olav.moyner@gmail.com>"]
 
 [deps]
 AlgebraicMultigrid = "2169fc97-5a83-5252-b627-83903c6c433c"
@@ -11,6 +11,7 @@ Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 DocStringExtensions = "ffbed154-4ef7-542d-bbb7-c09d3a79fcae"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
 GeoEnergyIO = "3b1dd628-313a-45bb-9d8d-8f3c48dcb5d4"
 Infiltrator = "5903a43b-9cc3-4c30-8d17-598619ec4e9b"
 Jutul = "2b460a1a-8a2b-45b2-b125-b5c536396eb9"
@@ -39,7 +40,6 @@ WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"
 [weakdeps]
 AMGX = "c963dde9-0319-47f5-bf0c-b07d3c80ffa6"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
-GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
 HYPRE = "b5ffcf37-a2bd-41ab-a3da-4bd9bc8ad771"
 MPI = "da04e1cc-30fd-572f-bb4f-1f8673147195"
 Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
@@ -62,6 +62,7 @@ Dates = "1"
 DelimitedFiles = "1.6"
 DocStringExtensions = "0.9.3"
 ForwardDiff = "0.10.30"
+GLMakie = "0.12.0"
 GeoEnergyIO = "1.1.23"
 HYPRE = "1.6.0, 1.7"
 Infiltrator = "1.9.5"
