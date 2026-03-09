@@ -157,12 +157,22 @@ end
 
 function Jutul.apply_forces_to_equation!(acc, storage, model::SimulationModel{D, S}, eq::ConservationLaw{:TotalMasses}, eq_s, force::V, time) where {V <: AbstractVector{<:FlowBoundaryCondition}, D, S<:MultiPhaseSystem}
     state = storage.state
-    nph = number_of_phases(reservoir_model(model).system)
+    rm = reservoir_model(model)
+    sys = rm.system
+    gmap = global_map(model)
+    nph = number_of_phases(sys)
+
     for bc in force
         c = bc.cell
         acc_i = view(acc, :, c)
-        q = compute_bc_mass_fluxes(bc, global_map(model), state, nph)
-        apply_flow_bc!(acc_i, q, bc, model, state, time)
+
+        if sys isa StandardBlackOilSystem
+            qtot = compute_bc_total_flux(bc, gmap, state)   # scalar
+            apply_flow_bc!(acc_i, qtot, bc, rm, state, time) # <- dispatch to StandardBlackOilModel
+        else
+            qvec = compute_bc_mass_fluxes(bc, gmap, state, nph) # vector
+            apply_flow_bc!(acc_i, qvec, bc, model, state, time) # <- dispatch to generic method
+        end
     end
 end
 
@@ -175,6 +185,13 @@ function Jutul.apply_forces_to_equation!(acc, storage, model::SimulationModel{D,
         qh_adv, qh_cond = compute_bc_heat_fluxes(bc, global_map(model), state, nph)
         apply_flow_bc!(acc_i, qh_adv + qh_cond, bc, model, state, time)
     end
+end
+
+function compute_bc_total_flux(bc, gmap, state)
+    c   = Jutul.full_cell(bc.cell, gmap)
+    T_f = bc.trans_flow
+    Δp  = state.Pressure[c] - bc.pressure
+    return T_f * Δp  # scalar (can be Dual)
 end
 
 function compute_bc_mass_fluxes(bc, gmap, state, nph)
@@ -245,7 +262,7 @@ function compute_bc_mass_fluxes(bc, gmap, state, nph)
     else
         out = q
     end
-    return q
+    return out
 end
 
 function compute_bc_heat_fluxes(bc, gmap, state, nph)

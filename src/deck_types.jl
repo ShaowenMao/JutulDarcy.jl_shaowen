@@ -235,28 +235,54 @@ function PVTO(pvto::Dict)
     return PVTO(PVTOTable(pvto))
 end
 
-function PVTOTable(d::Dict; fix = true)
-    rs = vec(copy(d["key"]))
-    pos = vec(Int64.(d["pos"]))
-    data = d["data"]
-    # data, pos, rs = add_lower_pvto(data, pos, rs)
-    p = vec(data[:, 1])
-    B = vec(data[:, 2])
-    b = 1.0 ./ B
-    mu = vec(data[:, 3])
-    p_sat = vec(p[pos[1:end-1]])
-    T = typeof(pos)
-    V = typeof(mu)
-    @assert length(p) == length(b) == length(mu)
-    @assert pos[end] == length(p) + 1
-    @assert pos[1] == 1
-    @assert length(p_sat) == length(rs) == length(pos)-1
-    tab = PVTOTable{T, V}(pos, rs, p, p_sat, b, mu)
-    if fix
-        tab = extend_pvt_table_for_safe_extrapolation(tab)
+function PVTOTable(d::Dict; fix::Bool = true)
+    # -------- Variant 1 (old): keys "key", "pos", "data" --------
+    if haskey(d, "key") && haskey(d, "pos") && haskey(d, "data")
+        rs  = vec(copy(d["key"]))
+        pos = vec(Int.(d["pos"]))
+        data = d["data"]
+
+        p  = vec(data[:, 1])
+        Bo = vec(data[:, 2])          # Bo
+        b  = 1.0 ./ Bo                # b = 1/Bo (internal)
+        mu = vec(data[:, 3])
+
+        p_sat = vec(p[pos[1:end-1]])
+
+        tab = PVTOTable{typeof(pos), typeof(mu)}(pos, rs, p, p_sat, b, mu)
+        return fix ? extend_pvt_table_for_safe_extrapolation(tab) : tab
     end
-    return tab
+
+    # -------- Variant 2 (new/MRST-expanded): keys "rs","p","b","mu" --------
+    if haskey(d, "rs") && haskey(d, "p") && haskey(d, "b") && haskey(d, "mu")
+        rs_col = vec(copy(d["rs"]))
+        p      = vec(copy(d["p"]))
+        Bo     = vec(copy(d["b"]))    # In your dump, this looks like Bo (≈1–2.4)
+        b      = 1.0 ./ Bo
+        mu     = vec(copy(d["mu"]))
+
+        @assert length(rs_col) == length(p) == length(Bo) == length(mu)
+
+        # Build PVTO block pointers where rs changes
+        change = findall(!iszero, diff(rs_col))
+        pos = vcat(1, change .+ 1, length(rs_col) + 1)
+
+        # PVTO "key" is one rs per block (constant inside each block)
+        rs = rs_col[pos[1:end-1]]
+
+        # Saturation pressure for each rs block: first p in the block
+        p_sat = p[pos[1:end-1]]
+
+        pos_i = Int.(pos)  # ensure Int for indexing
+        tab = PVTOTable{typeof(pos_i), typeof(mu)}(pos_i, rs, p, p_sat, b, mu)
+        return fix ? extend_pvt_table_for_safe_extrapolation(tab) : tab
+    end
+
+    # -------- Otherwise: unknown layout --------
+    error("Unsupported PVTO table layout. Keys = $(collect(keys(d)))")
 end
+
+
 
 function extend_pvt_table_line(p, mu, b, pos, i, max_p, min_b, min_mu)
     subs = pos[i]:(pos[i+1]-1)

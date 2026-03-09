@@ -64,7 +64,35 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
     end
     poro = get_vec(exported["rock"]["poro"])
     perm = copy((exported["rock"]["perm"])')
+
+    # =========================================================
+    # Add diffusion coefficients (per cell, per component)
+    # =========================================================
+    # nc = Int(G_raw["cells"]["num"])
+    # ncomp = 2
+
+    # Diffusion coefficients stored as (ncomp x nc)
+    # :diffusion in JutulDarcy is the scalar diffusion coefficient (pseudo-diffusivity) defined in Lluis et al., 2024
+    # :diffusivity in JutulDarcy is the "effective diffusivity on faces" 
+    # Discretization of diffusion terms is analogous to that of advection terms
+    # diffusion_coeff = zeros(ncomp, nc)
+
+    # @inbounds for c in 1:nc 
+    #     diffusion_coeff[1, c] = 1.0e-9   # component 1: liquid, m^2/s
+    #     diffusion_coeff[2, c] = 0.0      # component 2: gas, m^2/s 
+    # end
+
+    # domain = reservoir_domain(g, porosity = poro, permeability = perm, diffusion = diffusion_coeff)
+
+
     domain = reservoir_domain(g, porosity = poro, permeability = perm)
+
+    if haskey(exported, "rock") && haskey(exported["rock"], "regions") &&
+    haskey(exported["rock"]["regions"], "rocknum")
+        rocknum = Int64.(get_vec(exported["rock"]["regions"]["rocknum"]))
+        domain[:rocknum, Cells()] = rocknum
+    end
+
     if haskey(exported["rock"], "ntg")
         ntg = get_vec(exported["rock"]["ntg"])
         domain[:net_to_gross, Cells()] = ntg
@@ -429,7 +457,7 @@ function deck_relperm(runspec, props; oil, water, gas, satnum = nothing)
                     nw_hyst = CarlsonHysteresis()
                     w_hyst = ImbibitionOnlyHysteresis()
                 elseif hyst_type == 2
-                    nw_hyst = killough
+                    nw_hyst = NoHysteresis()  #killough
                     w_hyst = NoHysteresis()
                 elseif hyst_type == 3
                     nw_hyst = killough
@@ -1564,6 +1592,13 @@ function simulate_mrst_case(fn;
         nthreads = Threads.nthreads(),
         minbatch = 1000,
         split_wells = false,
+        report_gas_masses::Bool = false,
+        report_co2_concentration::Bool = false,
+        write_initial_step0::Bool = false,
+        write_vtu::Bool = false, 
+        vtu_outdir::AbstractString = "",
+        vtu_prefix::AbstractString = "case",
+        vtu_vars = [:Pressure, :Saturations],
         write_mrst = false,
         write_output = true,
         ds_max = 0.2,
@@ -1657,6 +1692,18 @@ function simulate_mrst_case(fn;
             push!(extra_outputs, :Rv)
         end
         push!(extra_outputs, :Saturations)
+        # Save more secondary variables into final output to calculate mass fraction of dissolved and free gas 
+        if report_gas_masses
+            for v in (:FluidVolume, :PhaseMassDensities, :ShrinkageFactors)
+                v in extra_outputs || push!(extra_outputs, v)
+            end
+        end
+        # If user wants CO2 concentration, ensure we have required secondary variables
+        if report_co2_concentration
+            for v in (:ShrinkageFactors, :PhaseMassDensities)
+                v in extra_outputs || push!(extra_outputs, v)
+            end
+        end
     elseif rmodel isa CompositionalModel
         push!(extra_outputs, :LiquidMassFractions)
         push!(extra_outputs, :VaporMassFractions)
@@ -1665,8 +1712,9 @@ function simulate_mrst_case(fn;
 
     out = rmodel.output_variables
     for k in extra_outputs
-        push!(out, k)
+        k in out || push!(out, k)
     end
+
     if write_output
         fn = realpath(fn)
         if isnothing(output_path)
@@ -1686,6 +1734,21 @@ function simulate_mrst_case(fn;
         output_path = output_path,
         kwarg...
     )
+
+    # Visualize initial conditions
+    if write_vtu && write_initial_step0
+        outdir_local = isempty(vtu_outdir) ? joinpath(pwd(), "paraview_states") : vtu_outdir
+
+        vtu_vars0 = union(vtu_vars, [:Porosity, :Permeability])  # initial only (add :Saturations too if not already)
+        export_initial_step0_vtu(fn, mrst_data;
+            outdir = outdir_local,
+            prefix = "$(vtu_prefix)_incon",   # avoids overwriting series
+            vtu_vars = vtu_vars0,
+            split_matrices = true,           # gives Permeability_1.._3/_6 reliably
+            write_regions = true
+        )
+    end
+
     M = first(values(models))
     sys = M.system
     if sys isa CompositionalSystem
@@ -1710,8 +1773,150 @@ function simulate_mrst_case(fn;
         else
             start = nothing
         end
-        result = simulate(sim, dt, forces = forces, config = cfg, restart = restart, start_date = start);
+
+        # Set these parameters the same as the Matlab diffusion example
+        cfg[:max_nonlinear_iterations] = 10
+        cfg[:max_timestep_cuts] = 8  #8 for GoM case, 25 for FluidFlower
+
+        # Set the level of information and reporting during simulation 
+        cfg[:info_level] = 1
+        cfg[:report_level] = 1
+
+        #result = simulate(sim, dt, forces = forces, config = cfg, restart = restart, start_date = start);
+        result = simulate(sim, dt;
+                          forces = forces, 
+                          config = cfg, 
+                          output_path = output_path, 
+                          restart = restart, 
+                          start_date = start 
+        )
+
         states, reports = result
+
+        # Calculate mass fractions of dissolved and free gas 
+        if report_gas_masses
+            if isempty(states)
+                @warn "Skipping gas-mass report: states is empty."
+            elseif !haskey(states[end], :Reservoir)
+                @warn "Skipping gas-mass report: final state has no :Reservoir."
+            else
+                res = states[end][:Reservoir]
+
+                # Requirements
+                req = (:FluidVolume, :Saturations, :PhaseMassDensities)
+                missing_req = Symbol[]
+                for k in req
+                    haskey(res, k) || push!(missing_req, k)
+                end
+                has_rs   = haskey(res, :Rs)
+                has_shrk = haskey(res, :ShrinkageFactors)
+
+                if !isempty(missing_req) || !has_rs || !has_shrk
+                    @warn "Skipping gas-mass report: missing variables in final state." missing_req has_rs has_shrk
+                else
+                    # --- safe to compute ---
+                    rs        = res[:Rs]
+                    pv        = res[:FluidVolume]
+                    sw        = res[:Saturations][1, :]
+                    sg        = res[:Saturations][2, :]
+                    bo        = res[:ShrinkageFactors][1, :]
+                    bg        = res[:ShrinkageFactors][2, :]
+                    rho_g_res = res[:PhaseMassDensities][2, :]
+
+                    m_free      = sg .* pv .* rho_g_res
+                    m_dissolved = sw .* pv .* rs .* bo .* rho_g_res ./ bg
+
+                    M_free      = sum(m_free)
+                    M_dissolved = sum(m_dissolved)
+                    M_total     = M_free + M_dissolved
+
+                    println("Free gas mass: $M_free kg")
+                    println("Dissolved gas mass: $M_dissolved kg")
+                    println("Total gas mass: $M_total kg")
+                    println("Gas dissolution ratio: $(M_dissolved / M_total * 100) %")
+                    println("Free gas ratio: $(M_free / M_total * 100) %")
+                    println("-----------------------------------------------------")
+                end
+            end
+        end
+
+        # Calculate concentration of dissolved CO2 in brine (kg/m^3 brine)
+        if report_co2_concentration && (write_vtu && (:Concentration in vtu_vars))
+            sys = rmodel.system
+            disgas = has_disgas(sys)
+
+            if isempty(states)
+                @warn "Skipping CO2 concentration: states is empty."
+            else
+                for (i, st) in pairs(states)
+                    haskey(st, :Reservoir) || continue
+                    res = st[:Reservoir]
+
+                    # Need saturations just to know ncells; it's already pushed
+                    if !haskey(res, :Saturations)
+                        @warn "Skipping CO2 concentration for state $i: missing :Saturations"
+                        continue
+                    end
+                    nc = length(res[:Saturations][1, :])
+
+                    if !disgas
+                        # No dissolution modeled -> concentration = 0
+                        res[:Concentration] = zeros(eltype(res[:Saturations]), nc)
+                        continue
+                    end
+
+                    # dissolution modeled: require Rs + shrinkage + density
+                    req = (:PhaseMassDensities, :ShrinkageFactors, :Rs)
+                    missing = Symbol[]
+                    for k in req
+                        haskey(res, k) || push!(missing, k)
+                    end
+                    if !isempty(missing)
+                        @warn "Skipping CO2 concentration for state $i: missing variables." missing
+                        continue
+                    end
+
+                    sw        = res[:Saturations][1, :]
+                    rs        = res[:Rs]
+                    bo        = res[:ShrinkageFactors][1, :]
+                    bg        = res[:ShrinkageFactors][2, :]
+                    rho_g_res = res[:PhaseMassDensities][2, :]
+
+                    c = rs .* bo .* rho_g_res ./ bg
+                    c = ifelse.(sw .> 0.0, c, 0.0)
+
+                    res[:Concentration] = c
+                end
+            end
+        end
+
+        # Write visualization files (guarded)
+        if write_vtu && !isempty(states)
+            times_seconds = cumsum(dt)
+
+            has_regions = haskey(mrst_data, "rock") && haskey(mrst_data["rock"], "regions")
+            has_p0 = haskey(mrst_data, "state0") && haskey(mrst_data["state0"], "pressure")
+
+            outdir_local = isempty(vtu_outdir) ? joinpath(pwd(), "paraview_states") : vtu_outdir
+
+            report_times_vtu_export(mrst_data["G"], states;
+                                    outdir = outdir_local,
+                                    prefix = vtu_prefix,
+                                    vars = vtu_vars,
+                                    split_matrices = true,
+                                    write_pvd = true,
+                                    times = times_seconds,
+
+                                    # only enable if available
+                                    write_regions = has_regions,
+                                    reservoir_regions = has_regions ? mrst_data["rock"]["regions"] : nothing,
+
+                                    write_dp = has_p0,
+                                    state0_pressure = has_p0 ? mrst_data["state0"]["pressure"] : nothing,
+                                    dp_name = "dP"
+            )
+        end 
+
         if write_output && write_mrst
             mrst_output_path = "$(output_path)_mrst"
             if verbose

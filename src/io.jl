@@ -1,14 +1,27 @@
 function table_to_relperm(swof; swcon = 0.0, first_label = :w, second_label = :ow)
+# Unwrap MATLAB cell-like wrapper: 1×1 Matrix{Any} (or similar)
+    while swof isa AbstractArray{Any} && length(swof) == 1
+        swof = swof[1]
+    end
+
+    # Convert Any-matrix to numeric matrix if needed
+    if !(swof isa AbstractMatrix{<:Real})
+        swof = Float64.(swof)
+    end
+
     sw = vec(swof[:, 1])
     krw = vec(swof[:, 2])
     krw = PhaseRelativePermeability(sw, krw, label = first_label)
+
     kro = vec(swof[end:-1:1, 3])
     so = 1 .- sw
     so = vec(so[end:-1:1])
     @. so = so - swcon
     krow = PhaseRelativePermeability(so, kro, label = second_label)
+
     return (krw, krow)
 end
+
 
 function saturation_table_handle_defaults(s, f)
     if any(isnan, f)
