@@ -9,7 +9,7 @@ function test_compositional_with_wells(; kwarg...)
         @testset "Reservoir" begin
             res = states[end][:Reservoir]
             p = res[:Pressure]
-            p_ref = [5.223784741350676e6, 5.186108408110314e6, 5.1421978150419425e6]
+            p_ref = [5.218139052839806e6, 5.180811416153673e6, 5.137566116526581e6]
             @test isapprox(p, p_ref, rtol = 1e-3)
             z = res[:OverallMoleFractions]
             z_ref = [
@@ -23,7 +23,7 @@ function test_compositional_with_wells(; kwarg...)
         @testset "Injector" begin
             inj = states[end][:Injector]
             p = inj[:Pressure]
-            p_ref = [5.341063285051076e6, 5.338652019430578e6]
+            p_ref = [5.333171412614246e6, 5.333171412614246e6]
             @test isapprox(p, p_ref, rtol = 1e-3)
             z = inj[:OverallMoleFractions]
             z_ref = repeat([1.0, 0.0, 0.0], 1, 2)
@@ -38,14 +38,14 @@ function test_immiscible_with_wells(; kwarg...)
         @testset "Reservoir" begin
             res = states[end][:Reservoir]
             p = res[:Pressure]
-            p_ref = [2.8396404068236608e7, 3.6766067601973645e7, 4.507082012446882e7]
+            p_ref = [2.834901722247195e7, 3.6718809754436985e7, 4.5023807041482836e7]
             @test isapprox(p, p_ref, rtol = 1e-4)
         end
 
         @testset "Injector" begin
             inj = states[end][:Injector]
             p = inj[:Pressure]
-            p_ref = [6.758644922653224e7, 6.757680416480392e7]
+            p_ref = [6.753082589164461e7, 6.753082589164461e7]
             @test isapprox(p, p_ref, rtol = 1e-4)
             s = inj[:Saturations]
             s_ref = repeat([0.0, 1.0], 1, 2)
@@ -60,7 +60,7 @@ function test_blackoil_with_wells(; kwarg...)
         @testset "Reservoir" begin
             res = states[end][:Reservoir]
             p = res[:Pressure]
-            p_ref = [5.305880225484623e6, 5.410620732970448e6, 5.472603930435868e6]
+            p_ref = [5.305212863516781e6, 5.409996331019564e6, 5.472028582373638e6]
             @test isapprox(p, p_ref, rtol = 1e-4)
 
             sw = res[:ImmiscibleSaturation]
@@ -86,7 +86,7 @@ function test_perforation_mask()
     g = CartesianMesh(dims, (2000.0, 1500.0, 50.0))
     Darcy = 9.869232667160130e-13
     domain = reservoir_domain(g, permeability = 0.1*Darcy, porosity = 0.1)
-    P = setup_vertical_well(domain, 1, 1, name = :Producer, simple_well = false);
+    P = setup_vertical_well(domain, 1, 1, name = :Producer, simple_well = false, use_top_node = true);
     phases = (LiquidPhase(), VaporPhase())
     rhoLS = 1000.0
     rhoGS = 100.0
@@ -97,7 +97,7 @@ function test_perforation_mask()
     visLS = 1e-4
     visGS = 1e-3
     parameters = Dict(:Reservoir=>Dict(:PhaseViscosities=>[visLS, visGS]))
-    model, parameters = setup_reservoir_model(domain, sys, wells = [P], parameters=parameters)
+    model, parameters = setup_reservoir_model(domain, sys, wells = [P], parameters=parameters, extra_out = true)
     replace_variables!(model, PhaseMassDensities = ρ)
     ## Set up initial state
     state0 = setup_reservoir_state(model, Pressure = 150*bar, Saturations = [1.0, 0.0])
