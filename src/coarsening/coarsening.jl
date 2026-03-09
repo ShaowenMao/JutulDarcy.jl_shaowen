@@ -17,7 +17,7 @@ function coarsen_reservoir_model(fine_model::MultiModel, partition; functions = 
     reservoir = reservoir_domain(fine_model)
     creservoir = coarsen_reservoir(reservoir, partition, functions = functions)
 
-    wells = get_model_wells(fine_model)
+    wells = get_model_wells(fine_model, data_domain = true)
     cwells = []
     for (k, well) in pairs(wells)
         if haskey(well_arg, k)
@@ -34,13 +34,12 @@ function coarsen_reservoir_model(fine_model::MultiModel, partition; functions = 
 
     thermal = haskey(Jutul.get_primary_variables(fine_reservoir_model), :Temperature)
 
-    coarse_model, = setup_reservoir_model(creservoir, sys;
+    coarse_model = setup_reservoir_model(creservoir, sys;
         wells = cwells,
         split_wells = split_wells,
         thermal = thermal,
         kwarg...
     )
-    coarse_reservoir_model = reservoir_model(coarse_model)
     # Variables etc.
     ncoarse = maximum(partition)
     subcells = zeros(Int, ncoarse)
@@ -83,16 +82,24 @@ function coarsen_reservoir(D::DataDomain, partition; functions = Dict())
     if !haskey(functions, :porosity)
         functions[:porosity] = Jutul.CoarsenByVolumeAverage()
     end
+    if !haskey(functions, :pore_volume)
+        functions[:pore_volume] = Jutul.CoarsenBySum()
+    end
+    if haskey(D, :pore_volume_multiplier)
+        functions[:pore_volume_multiplier] = Jutul.CoarsenByVolumeAverage()
+    end
     return Jutul.coarsen_data_domain(D, partition, functions = functions)
 end
 
-function coarsen_well(well, creservoir::DataDomain, reservoir::DataDomain, partition; kwarg...)
+function coarsen_well(wd::DataDomain, creservoir::DataDomain, reservoir::DataDomain, partition; kwarg...)
+    well = physical_representation(wd)
     cells = unique(partition[well.perforations.reservoir])
     is_simple = well isa SimpleWell
-    if is_simple
-        d = well.reference_depth
+    wcent = wd[:cell_centroids, Cells()]
+    if size(wcent, 1) == 3
+        d = wcent[3, 1]
     else
-        d = well.top.reference_depth
+        d = missing
     end
     return setup_well(creservoir, cells;
         name = well.name,
@@ -143,7 +150,8 @@ function coarsen_reservoir_state(coarse_model, fine_model, fine_state0; function
         pv = pore_volume(fine_reservoir)
         default = CoarsenByPoreVolume(pv)
     end
-
+    cg = physical_representation(coarse_reservoir)
+    coarse_to_cells = map(i -> findall(isequal(i), cg.partition), 1:maximum(cg.partition))
     ncoarse = number_of_cells(coarse_reservoir)
     for (k, v) in pairs(fine_state0)
         if associated_entity(fine_rmodel[k]) == Cells() && eltype(v)<:AbstractFloat
@@ -153,7 +161,7 @@ function coarsen_reservoir_state(coarse_model, fine_model, fine_state0; function
                 coarseval = zeros(size(v, 1), ncoarse)
             end
             f = get(functions, k, default)
-            coarse_state0[k] = Jutul.apply_coarsening_function!(coarseval, v, f, coarse_reservoir, fine_reservoir, k, Cells())
+            coarse_state0[k] = Jutul.apply_coarsening_function!(coarseval, v, f, coarse_reservoir, fine_reservoir, k, Cells(), coarse_to_cells = coarse_to_cells)
         end
     end
     return setup_reservoir_state(coarse_model, coarse_state0)
@@ -176,6 +184,11 @@ Partition the reservoir model into coarser grids.
 - `method`: Optional. The method to use for partitioning. Defaults to `missing`.
 - `partitioner_conn_type`: Optional. The type of connection to use for the
   partition. Can be :trans, :logtrans or :unit.
+- `wells_in_single_block`: Optional. A boolean indicating whether wells should
+  be contained within a single coarse block. Defaults to false.
+- `compartments`: Optional. A vector specifying compartments for the cells.
+  Cells in different compartments will not be grouped together during
+  coarsening.
 
 # Returns
 - A partitioned version of the reservoir model.
@@ -184,7 +197,8 @@ Partition the reservoir model into coarser grids.
 function partition_reservoir(model::JutulModel, coarsedim::Union{Tuple, Int}, method = missing;
         parameters = missing,
         wells_in_single_block = false,
-        partitioner_conn_type = :trans
+        partitioner_conn_type = :trans,
+        compartments = missing
     )
     domain = model |> reservoir_model |> reservoir_domain
     mesh = physical_representation(domain)
@@ -218,6 +232,12 @@ function partition_reservoir(model::JutulModel, coarsedim::Union{Tuple, Int}, me
             parameters = setup_parameters(model)
         end
         N, T, well_groups = partitioner_input(model, parameters, conn = partitioner_conn_type)
+        if !ismissing(compartments)
+            l = N[1, :]
+            r = N[2, :]
+            keep = compartments[l] .== compartments[r]
+            N = N[:, keep]
+        end
         if wells_in_single_block
             groups = well_groups
         else
@@ -226,7 +246,16 @@ function partition_reservoir(model::JutulModel, coarsedim::Union{Tuple, Int}, me
         p = Jutul.partition_hypergraph(N, coarsedim, partitioner, groups = groups)
         p = Int64.(p)
     end
-    p = Jutul.process_partition(mesh, p)
+    if ismissing(compartments)
+        weights = ones(number_of_faces(mesh))
+    else
+        neigh = get_neighborship(mesh)
+        l = neigh[1, :]
+        r = neigh[2, :]
+        keep = compartments[l] .== compartments[r]
+        weights = Float64.(keep)
+    end
+    p = Jutul.process_partition(mesh, p, weights = weights)
     if wells_in_single_block
         # Could have split up things that are actually connected by wells.
         for group in partitioner_well_groups(model)
@@ -250,7 +279,10 @@ Coarsens the given reservoir case to the specified dimensions.
 
 # Arguments
 - `case`: The reservoir case to be coarsened.
-- `coarsedim`: The target dimensions for the coarsened reservoir.
+- `coarsedim`: The target dimensions for the coarsened reservoir. Can be one of the following:
+    - A tuple (nx, ny, nz) specifying the number of coarse blocks in each dimension.
+    - An integer specifying the total number of desired coarse blocks.
+    - Or a vector specifying the partition directly.
 
 # Keyword Arguments
 - `method`: The method to use for partitioning. Defaults to `missing`.
@@ -276,7 +308,74 @@ function coarsen_reservoir_case(case, coarsedim;
     (; model, forces, dt, parameters, state0) = case
     coarse_model, coarse_parameters = coarsen_reservoir_model(model, p; setup_arg...)
     coarse_state0 = coarsen_reservoir_state(coarse_model, model, state0; state_arg...)
-    coarse_forces = deepcopy(forces)
+    coarse_forces = coarsen_reservoir_forces(forces, coarse_model, model)
     coarse_dt = deepcopy(dt)
-    return JutulCase(coarse_model, coarse_dt, coarse_forces, parameters = coarse_parameters, state0 = coarse_state0)
+    return JutulCase(coarse_model, coarse_dt, coarse_forces,
+        parameters = coarse_parameters,
+        state0 = coarse_state0,
+        start_date = case.start_date,
+        termination_criterion = case.termination_criterion
+    )
+end
+
+function coarsen_reservoir_forces(forces::AbstractVector, coarse_model, fine_model)
+    conv(f) = coarsen_reservoir_forces(f, coarse_model, fine_model)
+    # Coarsen unique forces and map back
+    fmap = Jutul.unique_forces_and_mapping(forces, ones(length(forces)); eachstep = false)
+    coarse_unique_forces = map(conv, fmap.forces)
+    return coarse_unique_forces[fmap.timesteps_to_forces]
+end
+
+function coarsen_reservoir_forces(forces, coarse_model, fine_model)
+    c_forces = deepcopy(forces)
+    for (k, f) in pairs(c_forces)
+        sub = OrderedDict{Symbol, Any}()
+        for (fk, fv) in pairs(f)
+            sub[fk] = coarsen_reservoir_force(Val(fk), fv, coarse_model, fine_model, k)
+        end
+        c_forces[k] = NamedTuple(sub)
+    end
+    return c_forces
+end
+
+function coarsen_reservoir_force(::Val{T}, ::Nothing, coarse_model, fine_model, submodel_key) where T
+    return nothing
+end
+
+function coarsen_reservoir_force(::Val{T}, f::Any, coarse_model, fine_model, submodel_key) where T
+    println("No coarsening defined for force of type $T, returning fine force")
+    return deepcopy(f)
+end
+
+function coarsen_reservoir_force(::Val{:control}, f, coarse_model, fine_model, submodel_key)
+    return deepcopy(f)
+end
+
+function coarsen_reservoir_force(::Val{:limits}, f, coarse_model, fine_model, submodel_key)
+    return deepcopy(f)
+end
+
+function coarsen_reservoir_force(::Val{:mask}, f::PerforationMask, coarse_model, fine_model, submodel_key)
+    res = reservoir_domain(coarse_model)
+    p = physical_representation(res).partition
+    vals = f.values
+    perf_coarse = physical_representation(coarse_model[submodel_key]).perforations
+    perf_fine = physical_representation(fine_model[submodel_key]).perforations
+    nperf_coarse = length(perf_coarse.self)
+    new_vals = zeros(nperf_coarse)
+    new_vals_num = zeros(Int, nperf_coarse)
+    # We average the mask values for all fine perforations mapping to the same coarse perforation
+    for (fine_idx, res_cell) in enumerate(perf_fine.reservoir)
+        part_perf = p[res_cell]
+        idx = findfirst(isequal(part_perf), perf_coarse.reservoir)
+        new_vals[idx] += vals[fine_idx]
+        new_vals_num[idx] += 1
+    end
+    new_vals = new_vals./max.(new_vals_num, 1)
+    for v in new_vals
+        if v < 0.0
+            @warn "Coarsened perforation mask has negative values, something is wrong."
+        end
+    end
+    return PerforationMask(new_vals)
 end

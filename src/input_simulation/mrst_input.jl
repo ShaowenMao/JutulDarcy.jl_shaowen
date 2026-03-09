@@ -129,7 +129,7 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
 end
 
 function get_well_from_mrst_data(
-        mrst_data, system, ix;
+        mrst_data, reservoir, system, ix;
         volume = 1e-3,
         extraout = false,
         use_lengths = false,
@@ -156,7 +156,7 @@ function get_well_from_mrst_data(
         [x]
     end
     ref_depth = W_mrst["refDepth"]
-    rc = Int64.(awrap(W_mrst["cells"]))
+    rc = vec(Int64.(awrap(W_mrst["cells"])))
     n = length(rc)
     # dz = awrap(w.dZ)
     WI = awrap(W_mrst["WI"])
@@ -174,6 +174,7 @@ function get_well_from_mrst_data(
     segment_models = nothing
     if well_type == :ms
         if haskey(W_mrst, "isMS") && W_mrst["isMS"]
+            error("MRST exported multisegment well for current version of JutulDarcy.jl")
             @info "MS well found: $nm"
             nodes = W_mrst["nodes"]
             V = vec(copy(nodes["vol"]))
@@ -250,11 +251,12 @@ function get_well_from_mrst_data(
                                                         accumulator_volume = accumulator_volume,
                                                         surface_conditions = cond)
     elseif well_type == :simple || well_type == :std
-        # For simple well, distance from ref depth to perf
-        dz = z_res .- ref_depth
+        W = setup_well(reservoir, rc, WI = vec(WI), reference_depth = ref_depth)
         z = [ref_depth]
-        accumulator_volume = volume*mean(well_cell_volume)
-        W = SimpleWell(rc, WI = WI, WIth = WIth, dz = dz, surface_conditions = cond, name = Symbol(nm), volume = accumulator_volume)
+        # For simple well, distance from ref depth to perf
+        # dz = z_res .- ref_depth
+        # accumulator_volume = volume*mean(well_cell_volume)
+        # W = SimpleWell(rc, WI = WI, WIth = WIth, dz = dz, surface_conditions = cond, name = Symbol(nm), volume = accumulator_volume)
         reservoir_cells = [rc[1]]
     else
         error("Unsupported well type $well_type (can be :ms, :simple or :std)")
@@ -264,8 +266,8 @@ function get_well_from_mrst_data(
     else
         wsys = system
     end
-    W_domain = discretized_domain_well(W, z = z)
-    wmodel = SimulationModel(W_domain, wsys; kwarg...)
+    # W_domain = discretized_domain_well(W)
+    wmodel = SimulationModel(W, wsys; kwarg...)
     if haskey(mrst_data["deck"], "SOLUTION")
         sol = mrst_data["deck"]["SOLUTION"]
         if haskey(sol, "FIELDSEP")
@@ -929,7 +931,6 @@ function set_thermal_deck_specialization!(model, props, pvtnum, oil, water, gas)
         end
         tab = tuple(tab...)
         v = TemperatureDependentVariable(tab, regions = pvtnum)
-        v = wrap_reservoir_variable(model.system, v, :thermal)
         set_secondary_variables!(model, ComponentHeatCapacity = v)
     end
 
@@ -945,7 +946,6 @@ function set_thermal_deck_specialization!(model, props, pvtnum, oil, water, gas)
         end
         tab = tuple(tab...)
         v = TemperatureDependentVariable(tab, regions = pvtnum)
-        v = wrap_reservoir_variable(model.system, v, :thermal)
         set_secondary_variables!(model, RockHeatCapacity = v)
     end
 end
@@ -953,7 +953,7 @@ end
 function set_deck_pc!(vars, param, sys, props; kwarg...)
     pc = deck_pc(props; kwarg...)
     if !isnothing(pc)
-        vars[:CapillaryPressure] = wrap_reservoir_variable(sys, pc, :flow)
+        vars[:CapillaryPressure] = pc
     end
 end
 
@@ -1021,22 +1021,6 @@ function set_deck_pvmult!(vars, runspec, param, sys, props, reservoir)
         param[:StaticFluidVolume] = static
         vars[:FluidVolume] = ϕ
     end
-end
-
-function wrap_reservoir_variable(sys::CompositeSystem, var::JutulVariables, type::Symbol = :flow)
-    return Pair(type, var)
-end
-
-function wrap_reservoir_variable(sys, var, type::Symbol = :flow)
-    return var
-end
-
-function unwrap_reservoir_variable(var)
-    return var
-end
-
-function unwrap_reservoir_variable(var::Pair)
-    return last(var)
 end
 
 function init_from_mat(mrst_data, model, param)
@@ -1243,7 +1227,7 @@ function setup_case_from_mrst(casename;
     sys = model.system
     for i = 1:num_wells
         sym = well_symbols[i]
-        wi, wdata, res_cells = get_well_from_mrst_data(mrst_data, sys, i, W_data = first_well_set,
+        wi, wdata, res_cells = get_well_from_mrst_data(mrst_data, data_domain, sys, i, W_data = first_well_set,
                 extraout = true, well_type = wells, context = w_context, use_lengths = use_well_lengths)
 
         param_w = setup_parameters(wi)
@@ -1284,31 +1268,12 @@ function setup_case_from_mrst(casename;
         end
         @debug "$sym: Well $i/$num_wells" typeof(ctrl) ci
 
-        pw = vec(init[:Pressure][res_cells])
-        w0 = Dict{Symbol, Any}(:Pressure => pw, :TotalMassFlux => 1e-12)
-        if is_comp
-            if isnothing(ci)
-                cw_0 = init[:OverallMoleFractions][:, res_cells]
-                cw_0::Matrix{Float64}
-            else
-                cw_0 = ci
-            end
-            w0[:OverallMoleFractions] = cw_0
-        elseif haskey(init, :Saturations)
-            w0[:Saturations] = init[:Saturations][:, res_cells]
-        end
-        for sk in [:GasMassFraction, :BlackOilUnknown, :ImmiscibleSaturation]
-            if haskey(init, sk)
-                w0[sk] = vec(init[sk][res_cells])
-            end
-        end
         parameters[sym] = param_w
         controls[sym] = ctrl
         forces[sym] = nothing
-        initializer[sym] = w0
     end
     #
-    mode = PredictionMode()
+    mode = FacilitySystem(sys)
     F0 = Dict(:TotalSurfaceMassRate => 0.0)
 
     facility_symbols = []
@@ -1387,8 +1352,7 @@ function setup_case_from_mrst(casename;
                         limits[wsym] = convert_to_immutable_storage(lims)
                         found_limits = true
                     end
-                    Ω_w = models[wsym].domain
-                    WI = physical_representation(Ω_w).perforations.WI
+                    WI = setup_parameters(models[wsym])[:WellIndices]
                     new_WI = vectorize(wdata["WI"])
                     if all(cstatus) && all(WI .== new_WI)
                         new_force[wsym] = nothing
@@ -1448,7 +1412,7 @@ function setup_case_from_mrst(casename;
         p_def = Pressure(max_abs = dp_max_abs, max_rel = dp_max_rel, minimum = p_min, maximum = p_max)
         replace_variables!(model, Pressure = p_def, throw = false)
 
-        state0 = setup_state(model, initializer)
+        state0 = setup_reservoir_state(model, initializer[:Reservoir])
         parameters = setup_parameters(model, parameters)
 
         case = JutulCase(model, timesteps, forces, state0 = state0, parameters = parameters)
@@ -1681,8 +1645,7 @@ function simulate_mrst_case(fn;
     forces = case.forces
     dt = case.dt
     parameters = case.parameters
-    models = model.models
-    rmodel = models[:Reservoir]
+    rmodel = reservoir_model(model)
     if rmodel isa StandardBlackOilModel
         sys = rmodel.system
         if has_disgas(sys)
@@ -1749,8 +1712,7 @@ function simulate_mrst_case(fn;
         )
     end
 
-    M = first(values(models))
-    sys = M.system
+    sys = rmodel.system
     if sys isa CompositionalSystem
         s = "compositional"
     elseif sys isa BlackOilSystem
@@ -1762,7 +1724,7 @@ function simulate_mrst_case(fn;
     end
     ncomp = number_of_components(sys)
     nph = number_of_phases(sys)
-    nc = number_of_cells(M.domain)
+    nc = number_of_cells(rmodel.domain)
     if do_sim
         if verbose
             jutul_message("MRST model", "Starting simulation of $s system with $nc cells and $nph phases and $ncomp components.")
@@ -1922,7 +1884,7 @@ function simulate_mrst_case(fn;
             if verbose
                 jutul_message("MRST model", "Writing output to $mrst_output_path.")
             end
-            write_reservoir_simulator_output_to_mrst(sim.model, states, reports, forces, mrst_output_path, parameters = parameters)
+            write_reservoir_simulator_output_to_mrst(model, states, reports, forces, mrst_output_path, parameters = parameters)
         end
         ns = length(states)
         nt = length(dt)

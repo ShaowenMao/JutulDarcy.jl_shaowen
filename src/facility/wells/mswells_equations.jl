@@ -2,17 +2,14 @@
 """
 Hagedorn and Brown well bore friction model for a segment.
 """
-struct SegmentWellBoreFrictionHB{R}
-    L::R
-    roughness::R
-    D_outer::R
-    D_inner::R
+struct SegmentWellBoreFrictionHB
     assume_turbulent::Bool
-    laminar_limit::R
-    turbulent_limit::R
-    function SegmentWellBoreFrictionHB(L, roughness, D_outer; D_inner = 0.0, assume_turbulent = false, laminar_limit = 2000.0, turbulent_limit = 4000.0)
-        L, roughness, D_outer, D_inner = promote(L, roughness, D_outer, D_inner)
-        new{typeof(L)}(L, roughness, D_outer, D_inner, assume_turbulent, laminar_limit, turbulent_limit)
+    laminar_limit::Float64
+    turbulent_limit::Float64
+    function SegmentWellBoreFrictionHB(; assume_turbulent = false, laminar_limit = 2000.0, turbulent_limit = 4000.0)
+        laminar_limit > 0.0 || throw(ArgumentError("laminar_limit must be positive"))
+        turbulent_limit > laminar_limit || throw(ArgumentError("turbulent_limit must be larger than laminar_limit"))
+        new(assume_turbulent, laminar_limit, turbulent_limit)
     end
 end
 
@@ -26,37 +23,43 @@ end
 
 well_segment_is_closed(::SegmentWellBoreFrictionHB) = false
 
-function segment_pressure_drop(f::SegmentWellBoreFrictionHB, v, ρ, μ)
-    D⁰, Dⁱ = f.D_outer, f.D_inner
-    R, L = f.roughness, f.L
-    ΔD = D⁰-Dⁱ
-    A = π*((D⁰/2)^2 - (Dⁱ/2)^2)
-    # Scaling fix
-    s = v > 0.0 ? 1.0 : -1.0
-    e = eps(Float64)
-    v = s*max(abs(v), e)
+function segment_pressure_drop(f::SegmentWellBoreFrictionHB, L, rough, radius_outer, radius_inner, V, ρ, μ)
+    Dₒ = 2*radius_outer
+    Dᵢ = 2*radius_inner
+    A = well_cross_section_area(radius_outer, radius_inner)
+    v = V/(ρ*A) # Mass flux to velocity
+    if abs(v) < eps(Float64)
+        # Avoid division by zero - use laminar flow model,
+        #   Δp = 2*f*(L/Dₒ)*ρ*v^2, where f = 16/Re,
+        # with direct elimination of v to avoid division by very small number
+        Δp = 2*(16/(ρ*(Dₒ-Dᵢ)/μ))*(L/(Dₒ-Dᵢ))*ρ*v
+        return Δp
+    end
 
-    Re = abs(D⁰*v/(A*μ))
+    Re = abs(ρ*v*(Dₒ-Dᵢ)/μ)
     # Friction model - empirical relationship
     Re_l, Re_t = f.laminar_limit, f.turbulent_limit
     if is_laminar_flow(f, Re)
         f = 16.0/Re
     else
         # Either turbulent or intermediate flow regime. We need turbulent value either way.
-        f_t = (-3.6*log10(6.9/Re +(R/(3.7*D⁰))^(10.0/9.0)))^(-2.0)
+        f_t = (-3.6*log10(6.9/Re +(rough/(3.7*Dₒ))^(10.0/9.0)))^(-2.0)
         if is_turbulent_flow(f, Re)
             # Turbulent flow
             f = f_t
         else
             # Intermediate regime - interpolation
-            f_l = 16.0/Re_l
-            Δf = f_t - f_l
-            ΔRe = Re_t - Re_l
-            f = f_l + (Δf / ΔRe)*(Re - Re_l)
+            f_l = 16.0/Re
+            α = (Re - Re_l)/(Re_t - Re_l)
+            f = (1 - α)*f_l + α*f_t
         end
     end
-    Δp = 2*f*L*v^2/((A^2)*D⁰*ρ)
+    Δp = 2*f*(L/(Dₒ-Dᵢ))*ρ*v^2
     return Δp
+end
+
+function well_cross_section_area(radius_outer, radius_inner)
+    return π * (radius_outer^2 - radius_inner^2)
 end
 
 struct ClosedSegment
@@ -85,10 +88,15 @@ Jutul.discretization(e::PotentialDropBalanceWell) = e.flow_discretization
 
 import Jutul: two_point_potential_drop
 function Jutul.update_equation_in_entity!(eq_buf, i, state, state0, eq::PotentialDropBalanceWell, model, dt, ldisc = local_discretization(eq, i))
-    (; face, left, right, gdz) = ldisc
+    (; face, left, right) = ldisc
     μ = state.PhaseViscosities
     V = state.TotalMassFlux[face]
+    gdz = state.SegmentConnectionGravityDifference[face]
     densities = state.PhaseMassDensities
+    L = state.SegmentLength[face]
+    roughness = state.SegmentRoughness[face]
+    radius_outer = state.SegmentRadius[face]
+    radius_inner = state.SegmentRadiusInner[face]
     s = state.Saturations
     p = state.Pressure
 
@@ -101,13 +109,10 @@ function Jutul.update_equation_in_entity!(eq_buf, i, state, state0, eq::Potentia
         rho_r, mu_r = saturation_mixed(s, densities, μ, right)
         rho = 0.5*(rho_l + rho_r)
         μ_mix = 0.5*(mu_l + mu_r)
-        Δp = segment_pressure_drop(seg_model, V, rho, μ_mix)
+        Δp = segment_pressure_drop(seg_model, L, roughness, radius_outer, radius_inner, V, rho, μ_mix)
         Δθ = two_point_potential_drop(p[left], p[right], gdz, rho_l, rho_r)
-        # We rewrite the term so that for very small friction, the model reduces
-        # to a high trans darcy flux Note that the SI units make this sensible
-        # since dp is very large (Pa) and v is small (m/s).
-        # Normally the V term is neglible.
-        eq = 1e-3*(Δθ + Δp) - V
+        eq = Δθ - Δp
+
     end
     eq_buf[] = eq
 end
@@ -136,20 +141,26 @@ function Jutul.update_equation_in_entity!(eq_buf::AbstractVector{T_e}, self_cell
 
     mass = state.TotalMasses
     mass0 = state0.TotalMasses
-    v = state.TotalMassFlux
-    # For each component, compute fractional flow for mass flux + accumulation
     ncomp = number_of_components(model.system)
-    m_t = component_sum(mass, self_cell)
-    for i in 1:ncomp
-        m_i = mass[i, self_cell]
-        eq_i = (m_i - mass0[i, self_cell])/dt
-        f_i = m_i/m_t
-        for (cell, face, sgn) in zip(cells, faces, signs)
-            v_f = sgn*v[face]
-            f_o = mass[i, cell]/component_sum(mass, cell)
-            eq_i += v_f*upw_flux(v_f, f_i, f_o)
+    if length(faces) == 0
+        for i in 1:ncomp
+            eq_buf[i] = (mass[i, self_cell] - mass0[i, self_cell])/dt
         end
-        eq_buf[i] = eq_i
+    else
+        v = state.TotalMassFlux
+        # For each component, compute fractional flow for mass flux + accumulation
+        m_t = component_sum(mass, self_cell)
+        for i in 1:ncomp
+            m_i = mass[i, self_cell]
+            eq_i = (m_i - mass0[i, self_cell])/dt
+            f_i = m_i/m_t
+            for (cell, face, sgn) in zip(cells, faces, signs)
+                v_f = sgn*v[face]
+                f_o = mass[i, cell]/component_sum(mass, cell)
+                eq_i += v_f*upw_flux(v_f, f_i, f_o)
+            end
+            eq_buf[i] = eq_i
+        end
     end
 end
 
@@ -157,35 +168,33 @@ function Jutul.update_equation_in_entity!(eq_buf::AbstractVector{T_e}, self_cell
     (; cells, faces, signs) = ldisc
     nph = number_of_phases(model.system)
     λm = state.MaterialThermalConductivities
-    mass = state.TotalMasses
     energy = state.TotalThermalEnergy
     energy0 = state0.TotalThermalEnergy
     density = state.PhaseMassDensities
     S = state.Saturations
     H_f = state.FluidEnthalpy
-    v = state.TotalMassFlux
     T = state.Temperature
 
     eq = (energy[self_cell] - energy0[self_cell])/dt
-    m_t_self = total_density(S, density, self_cell)
-
-    for (cell, face, sgn) in zip(cells, faces, signs)
-        v_f = sgn*v[face]
-        for ph in 1:nph
-            # Compute mass fraction of phase, then weight by enthalpy.
-            m_t_other = total_density(S, density, cell)
-            f_self = density[ph, self_cell]*S[ph, self_cell]/m_t_self
-            f_other = density[ph, cell]*S[ph, cell]/m_t_other
-
-            ME_other = H_f[ph, cell]*f_other
-            ME_self = H_f[ph, self_cell]*f_self
-            eq += v_f*upw_flux(v_f, ME_self, ME_other)
-        end
-
-        λm_f = λm[face]
-        if λm_f >= 0.0
-            # Account for heat conduction in well material
-            eq -= λm_f*(T[cell] - T[self_cell])
+    if length(faces) > 0
+        v = state.TotalMassFlux
+        m_t_self = total_density(S, density, self_cell)
+        for (cell, face, sgn) in zip(cells, faces, signs)
+            v_f = sgn*v[face]
+            for ph in 1:nph
+                # Compute mass fraction of phase, then weight by enthalpy.
+                m_t_other = total_density(S, density, cell)
+                f_self = density[ph, self_cell]*S[ph, self_cell]/m_t_self
+                f_other = density[ph, cell]*S[ph, cell]/m_t_other
+                ME_other = H_f[ph, cell]*f_other
+                ME_self = H_f[ph, self_cell]*f_self
+                eq += v_f*upw_flux(v_f, ME_self, ME_other)
+            end
+            λm_f = λm[face]
+            if λm_f >= 0.0
+                # Account for heat conduction in well material
+                eq -= λm_f*(T[cell] - T[self_cell])
+            end
         end
     end
 

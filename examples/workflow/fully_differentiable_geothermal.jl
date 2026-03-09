@@ -8,7 +8,7 @@
 #    generic optimization interface that allows for optimizing any input
 #    parameter used in the setup of a model.
 # ## Load packages and define units
-using Jutul, JutulDarcy, HYPRE, GeoEnergyIO, GLMakie
+using Jutul, JutulDarcy, HYPRE, GLMakie
 meter, kilogram, bar, year, liter, second, darcy, day = si_units(:meter, :kilogram, :bar, :year, :liter, :second, :darcy, :day)
 
 # ## Set up the reservoir mesh
@@ -116,7 +116,7 @@ prod_well = setup_vertical_well(domain, nx - 5, 1,
     simple_well = false
 )
 
-model_base, = setup_reservoir_model(
+model_base = setup_reservoir_model(
     domain, :geothermal,
     wells = [inj_well, prod_well],
 );
@@ -196,7 +196,7 @@ inj_pressure_by_time = get_1d_interpolator(ws.time, inj_bhp)
 
 import JutulDarcy: compute_well_qoi
 function mismatch_objective(m, s, dt, step_info, forces)
-    current_time = step_info[:time] + dt
+    current_time = step_info[:time]
     ## Current values
     T_at_prod = compute_well_qoi(m, s, forces, :Producer, :temperature)
     rate = compute_well_qoi(m, s, forces, :Producer, :wrat)
@@ -246,7 +246,7 @@ free_optimization_parameter!(opt, "layer_porosities", abs_max = 0.35, abs_min = 
 # minimize the objective function, which is the case for a history match. By
 # passing for example `lbfgs_num = 1, max_it = 50` it is possible to obtain a
 # better match, but this is not necessary for the purpose of this example.
-prm_opt = JutulDarcy.optimize_reservoir(opt, mismatch_objective, max_it = 50);
+prm_opt = JutulDarcy.optimize_reservoir(opt, mismatch_objective, max_it = 50, gradient_scaling = false, optimizer = :lbfgsb_qp);
 # ### Print the optimization overview
 # If we display the optimization overview, we can see that there are now
 # additional columns indicating the optimized values. Note that while the
@@ -295,7 +295,7 @@ fig
 # parameterization could lead to good match in terms of the objective function,
 # even without good match for the spatial distribution.
 step = 80
-cmap = :heat
+cmap = reverse(to_colormap(:heat))
 fig = Figure(size = (1200, 400))
 ax = Axis3(fig[1, 1], title = "Truth")
 plot_cell_data!(ax, rmesh, states[step][:Temperature] .- 273.15, colorrange = (10.0, 100.0), colormap = cmap)
@@ -329,7 +329,6 @@ temperature_injection_cost = 20.0
 temperature_production_value = 8.0
 
 function optimization_objective(m, s, dt, step_info, forces)
-    current_time = step_info[:time] + dt
     T_at_prod = convert_from_si(compute_well_qoi(m, s, forces, :Producer, :temperature), :Celsius)
     T_at_inj = convert_from_si(forces[:Facility].control[:Injector].temperature, :Celsius)
 
@@ -343,12 +342,15 @@ end
 
 opt_ctrl = JutulDarcy.setup_reservoir_dict_optimization(prm_truth, setup_doublet_case)
 # ### Set optimization to use injection rate and temperature
-# Note that as these are represented as per-interval values, we could also have passed vectors of equal length as the
-# number of intervals for more fine-grained control over the limits.
+# Note that as these are represented as per-interval values, we could also have
+# passed vectors of equal length as the number of intervals for more
+# fine-grained control over the limits. We specify that the dependencies include
+# the whole case instead of just state0 and parameters since the forces depend on
+# the optimization parameters.
 free_optimization_parameter!(opt_ctrl, "injection_temperature_C", abs_max = 80.0, abs_min = 10.0)
 free_optimization_parameter!(opt_ctrl, "injection_rate", abs_min = 1.0*liter/second, abs_max = 30.0*liter/second)
 # ### Call the optimizer
-prm_opt_ctrl = JutulDarcy.optimize_reservoir(opt_ctrl, optimization_objective, maximize = true);
+prm_opt_ctrl = JutulDarcy.optimize_reservoir(opt_ctrl, optimization_objective, maximize = true, deps = :case, optimizer = :lbfgsb_qp);
 opt_ctrl
 # ### Plot the optimized injection rates and temperatures
 # The optimized injection rates and temperatures are plotted for each interval.
@@ -374,7 +376,7 @@ case_opt_ctrl = setup_doublet_case(prm_opt_ctrl)
 ws_opt_ctrl, states_opt_ctrl = simulate_reservoir(case_opt_ctrl)
 # ### Plot the distribution of temperature with and without optimization
 step = 80
-cmap = :heat
+cmap = reverse(to_colormap(:heat))
 fig = Figure(size = (1000, 400))
 ax = Axis3(fig[1, 1], title = "Base case")
 plot_cell_data!(ax, rmesh, states[step][:Temperature] .- 273.15, colorrange = (10.0, 100.0), colormap = cmap)
