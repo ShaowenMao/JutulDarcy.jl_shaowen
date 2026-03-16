@@ -3,106 +3,143 @@ using JutulDarcy
 using MAT
 using HYPRE
 
-HYPRE.Init(nthreads = 4)  
+# =========================================================
+# Helper functions for environment-variable-driven settings
+# =========================================================
+get_env_str(name::String, default::String) = get(ENV, name, default)
 
-println("Julia threads = ", Threads.nthreads())
+function get_env_int(name::String, default::Int)
+    return parse(Int, get(ENV, name, string(default)))
+end
+
+function get_env_bool(name::String, default::Bool)
+    val = lowercase(get(ENV, name, string(default)))
+    return val in ("1", "true", "yes", "y")
+end
+
+# =========================================================
+# Thread settings
+# =========================================================
+# Julia runtime threads are determined when Julia starts,
+# e.g. by JULIA_NUM_THREADS. Threads.nthreads() reports how
+# many Julia threads are actually available in this process.
+#
+# CASE_JULIA_THREADS is the number passed into simulate_mrst_case.
+# Usually it should be <= Threads.nthreads().
+#
+# HYPRE_THREADS controls the HYPRE internal thread count.
+julia_threads = get_env_int("CASE_JULIA_THREADS", Threads.nthreads())
+hypre_threads = get_env_int("HYPRE_THREADS", 1)
+
+HYPRE.Init(nthreads = hypre_threads)
+
+println("Julia threads available = ", Threads.nthreads())
+println("Julia threads passed to simulate_mrst_case = ", julia_threads)
 println("HYPRE threads = ", HYPRE.NumThreads())
 
-# local laptop path and GRS3 server path are different. Make sure to change it. 
+# =========================================================
+# Case selection
+# =========================================================
+# Options:
+#   GOM_SMALL
+#   GOM_MEDIUM
+#   GOM_LARGE
+#   FLUIDFLOWER
+#
+# Default is GOM_MEDIUM for convenience.
+case_name = uppercase(get_env_str("CASE_NAME", "GOM_SMALL"))
 
-# --------------------------------
-# GoM case -- GRS3 server
-# --------------------------------
-# matfile_path        = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_45_slices_new.mat" #raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_45_slices.mat"
-# restart_output_path = "C:/Users/shaowen/restart_output_45slices_new"
-# vtu_path            = "G:/Shaowen/visualization_45slices_new" 
+# =========================================================
+# Default paths and settings for each case
+# These defaults are convenient for your local Windows machine.
+# On HPC, override them using environment variables.
+# =========================================================
+matfile_default = ""
+restart_default = ""
+vtu_default = ""
 
-# matfile_path        = raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_87_slices_laptop.mat" #raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_45_slices.mat"
-# restart_output_path = "C:/Users/shaowen/restart_output_87_newcode_oldmatfile_laptop"
-# vtu_path            = "G:/Shaowen/restart_output_87_newcode_oldmatfile_laptop" 
+# Control flags
+restart = get_env_bool("RESTART_RUN", true)
 
-# large case -- still need to run one without hysteresis
-# matfile_path        = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_87_slices_modifycentroids.mat" #raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_45_slices.mat"
-# restart_output_path = "C:/Users/shaowen/restart_output_87_modifycentroids"
-# vtu_path            = "G:/Shaowen/restart_output_87_modifycentroids" 
+# VTU control
+write_incon_vtu = get_env_bool("WRITE_INCON_VTU", false)
+write_state_vtu = get_env_bool("WRITE_STATE_VTU", false)
+vtu_prefix = get_env_str("VTU_PREFIX", "test")
+vtu_vars = [:Pressure, :Saturations, :Rs]
 
-# large case -- still need to run one without hysteresis
-# matfile_path        = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case.mat" #raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_45_slices.mat"
-# restart_output_path = "G:/Shaowen/restart_lluis_field_case_nohys"
-# vtu_path            = "G:/Shaowen/visual_lluis_field_case_nohys"
+if case_name == "GOM_SMALL"
+    matfile_default = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_3_slices.mat"
+    restart_default = raw"G:/Shaowen/restart_gom_small"
+    vtu_default = raw"G:/Shaowen/visual_gom_small"
 
-# large case -- no hysteresis -- HYPRE
-# matfile_path        = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case.mat" #raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_45_slices.mat"
-# restart_output_path = "G:/Shaowen/restart_lluis_field_case_nohys_HYPRE_8julia_1hypre"
-# vtu_path            = "G:/Shaowen/visual_lluis_field_case_nohys_HYPRE_8julia_1hypre"
+    report_gas_masses = true
+    report_co2_concentration = false
+    vtu_prefix = "GoM"
+    vtu_vars = [:Pressure, :Saturations, :Rs]
 
-# medium case -- no hysteresis
-# matfile_path        = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_43_slices.mat"#raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_45_slices.mat"
-# restart_output_path = "C:/Users/shaowen/restart_output_43_nohys"
-# vtu_path            = "G:/Shaowen/restart_output_43_nohys" 
+elseif case_name == "GOM_MEDIUM"
+    matfile_default = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_43_slices.mat"
+    restart_default = raw"G:/Shaowen/restart_gom_medium"
+    vtu_default = raw"G:/Shaowen/visual_gom_medium"
 
-# medium case -- no hysteresis -- HYPRE
-matfile_path        = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_43_slices.mat"#raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_45_slices.mat"
-restart_output_path = "G:/Shaowen/restart_output_43_nohys_HYPRE_8julia_4hypre"
-vtu_path            = "G:/Shaowen/visual_output_43_nohys_HYPRE_8julia_4hypre" 
+    report_gas_masses = true
+    report_co2_concentration = false
+    vtu_prefix = "GoM"
+    vtu_vars = [:Pressure, :Saturations, :Rs]
 
-# small case -- no hysteresis
-# matfile_path        = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_3_slices.mat"#raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_45_slices.mat"
-# restart_output_path = "G:/Shaowen/restart_gom_3_nohys_smoothed_aggregation_tighttol_agg" #"C:/Users/shaowen/restart_output_3_nohys"
-# vtu_path            = "G:/Shaowen/visual_gom_3_nohys_smoothed_aggregation_tighttol_agg"  #"G:/Shaowen/restart_output_3_nohys" 
+elseif case_name == "GOM_LARGE"
+    matfile_default = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case.mat"
+    restart_default = raw"G:/Shaowen/restart_gom_large"
+    vtu_default = raw"G:/Shaowen/visual_gom_large"
 
-# small case -- no hysteresis -- HYPRE
-# matfile_path        = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_3_slices.mat"#raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_45_slices.mat"
-# restart_output_path = "G:/Shaowen/restart_gom_3_nohys_HYPRE_8julia_8hypre" #"C:/Users/shaowen/restart_output_3_nohys"
-# vtu_path            = "G:/Shaowen/visual_gom_3_nohys_HYPRE_8julia_8hypre"  #"G:/Shaowen/restart_output_3_nohys" 
+    report_gas_masses = true
+    report_co2_concentration = false
+    vtu_prefix = "GoM"
+    vtu_vars = [:Pressure, :Saturations, :Rs]
 
+elseif case_name == "FLUIDFLOWER"
+    matfile_default = raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/fluidflower_4mm.mat"
+    restart_default = raw"G:/Shaowen/restart_output_fluidflower_4mm_diffusion"
+    vtu_default = raw"G:/Shaowen/visualization_fluidflower_4mm_diffusion"
 
-# Control flag
-restart = true                    # Look in restart_output_path for already-saved results and continue from the last successfully saved step, instead of starting from step 1 again
+    report_gas_masses = true
+    report_co2_concentration = true
+    vtu_prefix = "fluidflower"
+    vtu_vars = [:Pressure, :Saturations, :Rs, :Concentration]
 
-# Post-analysis flag
-report_gas_masses        = true   # Compute the percentage of dissolved gas and free gas
-report_co2_concentration = false  # For FluidFlower case validation (dissolved co2 mass / brine volume)
+else
+    error("Unknown CASE_NAME = $case_name. Valid options: GOM_SMALL, GOM_MEDIUM, GOM_LARGE, FLUIDFLOWER")
+end
 
-# vtu control 
-write_incon_vtu = false 
-write_state_vtu = false 
-vtu_prefix = "GoM"
-vtu_vars   = [:Pressure, :Saturations, :Rs]
+# =========================================================
+# Final paths
+# These can be overridden from the shell on HPC or desktop
+# =========================================================
+matfile_path = get_env_str("MATFILE_PATH", matfile_default)
+restart_output_path = get_env_str("RESTART_OUTPUT_PATH", restart_default)
+vtu_path = get_env_str("VTU_PATH", vtu_default)
 
-# --------------------------------
-# FluidFlower case -- GRS3 server
-# --------------------------------
-# matfile_path        = raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/fluidflower_4mm.mat"
-# restart_output_path = "G:/Shaowen/restart_output_fluidflower_4mm_diffusion"
-# vtu_path            = "G:/Shaowen/visualization_fluidflower_4mm_diffusion" 
+println("Case name = ", case_name)
+println("matfile_path = ", matfile_path)
+println("restart_output_path = ", restart_output_path)
+println("vtu_path = ", vtu_path)
+println("restart = ", restart)
+println("write_incon_vtu = ", write_incon_vtu)
+println("write_state_vtu = ", write_state_vtu)
 
-# # Control flag
-# restart = true                    # Look in restart_output_path for already-saved results and continue from the last successfully saved step, instead of starting from step 1 again
-
-# # Post-analysis flag
-# report_gas_masses        = true   # Compute the percentage of dissolved gas and free gas
-# report_co2_concentration = true   # For FluidFlower case validation (dissolved co2 mass / brine volume)
-        
-# # vtu control 
-# write_incon_vtu = true 
-# write_state_vtu = true 
-# vtu_prefix = "fluidflower"
-# vtu_vars   = [:Pressure, :Saturations, :Rs, :Concentration]
-
-# ---------------------------------------------------------
-# Run simulation 
-# ---------------------------------------------------------
-simulate_mrst_case(matfile_path;
-                   output_path = restart_output_path,
-                   restart    = restart,
-                   write_vtu  = write_state_vtu,
-                   vtu_outdir = vtu_path,
-                   vtu_prefix = vtu_prefix,
-                   vtu_vars   = vtu_vars,  # Only write these reservoir state varialbes. This does not affect optional extras for regions and dp.
-                   report_gas_masses        = report_gas_masses,
-                   report_co2_concentration = report_co2_concentration,
-                   write_initial_step0      = write_incon_vtu,
-                   nthreads = 8
-) 
-
+# =========================================================
+# Run simulation
+# =========================================================
+simulate_mrst_case(
+    matfile_path;
+    output_path = restart_output_path,
+    restart = restart,
+    write_vtu = write_state_vtu,
+    vtu_outdir = vtu_path,
+    vtu_prefix = vtu_prefix,
+    vtu_vars = vtu_vars,  # Only write these reservoir state variables.
+    report_gas_masses = report_gas_masses,
+    report_co2_concentration = report_co2_concentration,
+    write_initial_step0 = write_incon_vtu,
+    nthreads = julia_threads
+)
