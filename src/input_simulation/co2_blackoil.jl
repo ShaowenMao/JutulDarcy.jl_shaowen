@@ -3,7 +3,7 @@ using JutulDarcy
 using MAT
 using HYPRE
 
-HYPRE.Init(nthreads = 1)  
+HYPRE.Init(nthreads = 4)  
 
 println("Julia threads = ", Threads.nthreads())
 println("HYPRE threads = ", HYPRE.NumThreads())
@@ -31,10 +31,10 @@ println("HYPRE threads = ", HYPRE.NumThreads())
 # restart_output_path = "G:/Shaowen/restart_lluis_field_case_nohys"
 # vtu_path            = "G:/Shaowen/visual_lluis_field_case_nohys"
 
-# large case -- still need to run one without hysteresis -- HYPRE
+# large case -- no hysteresis -- HYPRE
 # matfile_path        = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case.mat" #raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_45_slices.mat"
-# restart_output_path = "G:/Shaowen/restart_lluis_field_case_nohys_HYPRE"
-# vtu_path            = "G:/Shaowen/visual_lluis_field_case_nohys_HYPRE"
+# restart_output_path = "G:/Shaowen/restart_lluis_field_case_nohys_HYPRE_8julia_1hypre"
+# vtu_path            = "G:/Shaowen/visual_lluis_field_case_nohys_HYPRE_8julia_1hypre"
 
 # medium case -- no hysteresis
 # matfile_path        = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_43_slices.mat"#raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_45_slices.mat"
@@ -42,9 +42,9 @@ println("HYPRE threads = ", HYPRE.NumThreads())
 # vtu_path            = "G:/Shaowen/restart_output_43_nohys" 
 
 # medium case -- no hysteresis -- HYPRE
-# matfile_path        = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_43_slices.mat"#raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_45_slices.mat"
-# restart_output_path = "C:/Users/shaowen/restart_output_43_nohys_HYPRE"
-# vtu_path            = "G:/Shaowen/restart_output_43_nohys_HYPRE" 
+matfile_path        = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_43_slices.mat"#raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_45_slices.mat"
+restart_output_path = "G:/Shaowen/restart_output_43_nohys_HYPRE_8julia_4hypre"
+vtu_path            = "G:/Shaowen/visual_output_43_nohys_HYPRE_8julia_4hypre" 
 
 # small case -- no hysteresis
 # matfile_path        = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_3_slices.mat"#raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_45_slices.mat"
@@ -52,9 +52,9 @@ println("HYPRE threads = ", HYPRE.NumThreads())
 # vtu_path            = "G:/Shaowen/visual_gom_3_nohys_smoothed_aggregation_tighttol_agg"  #"G:/Shaowen/restart_output_3_nohys" 
 
 # small case -- no hysteresis -- HYPRE
-matfile_path        = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_3_slices.mat"#raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_45_slices.mat"
-restart_output_path = "G:/Shaowen/restart_gom_3_nohys_HYPRE" #"C:/Users/shaowen/restart_output_3_nohys"
-vtu_path            = "G:/Shaowen/visual_gom_3_nohys_HYPRE"  #"G:/Shaowen/restart_output_3_nohys" 
+# matfile_path        = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_3_slices.mat"#raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/lluis_field_case_45_slices.mat"
+# restart_output_path = "G:/Shaowen/restart_gom_3_nohys_HYPRE_8julia_8hypre" #"C:/Users/shaowen/restart_output_3_nohys"
+# vtu_path            = "G:/Shaowen/visual_gom_3_nohys_HYPRE_8julia_8hypre"  #"G:/Shaowen/restart_output_3_nohys" 
 
 
 # Control flag
@@ -65,8 +65,8 @@ report_gas_masses        = true   # Compute the percentage of dissolved gas and 
 report_co2_concentration = false  # For FluidFlower case validation (dissolved co2 mass / brine volume)
 
 # vtu control 
-write_incon_vtu = true 
-write_state_vtu = true 
+write_incon_vtu = false 
+write_state_vtu = false 
 vtu_prefix = "GoM"
 vtu_vars   = [:Pressure, :Saturations, :Rs]
 
@@ -102,6 +102,7 @@ simulate_mrst_case(matfile_path;
                    vtu_vars   = vtu_vars,  # Only write these reservoir state varialbes. This does not affect optional extras for regions and dp.
                    report_gas_masses        = report_gas_masses,
                    report_co2_concentration = report_co2_concentration,
-                   write_initial_step0      = write_incon_vtu
+                   write_initial_step0      = write_incon_vtu,
+                   nthreads = 8
 ) 
 
