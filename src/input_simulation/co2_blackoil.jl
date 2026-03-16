@@ -12,6 +12,10 @@ function get_env_int(name::String, default::Int)
     return parse(Int, get(ENV, name, string(default)))
 end
 
+function get_env_float(name::String, default::Real)
+    return parse(Float64, get(ENV, name, string(default)))
+end
+
 function get_env_bool(name::String, default::Bool)
     val = lowercase(get(ENV, name, string(default)))
     return val in ("1", "true", "yes", "y")
@@ -61,6 +65,9 @@ max_nonlinear_iterations_default = 10
 max_timestep_cuts_default = 8
 info_level_default = 1
 report_level_default = 1
+enable_diffusion_default = false
+liquid_diffusion_default = 0.0
+gas_diffusion_default = 0.0
 
 # Control flags
 restart = get_env_bool("RESTART_RUN", true)
@@ -109,6 +116,9 @@ elseif case_name == "FLUIDFLOWER"
     report_gas_masses = true
     report_co2_concentration = true
     max_timestep_cuts_default = 25
+    enable_diffusion_default = true
+    liquid_diffusion_default = 1.0e-9
+    gas_diffusion_default = 0.0
     vtu_prefix = "fluidflower"
     vtu_vars = [:Pressure, :Saturations, :Rs, :Concentration]
 
@@ -127,6 +137,10 @@ max_nonlinear_iterations = get_env_int("MAX_NONLINEAR_ITERATIONS", max_nonlinear
 max_timestep_cuts = get_env_int("MAX_TIMESTEP_CUTS", max_timestep_cuts_default)
 info_level = get_env_int("INFO_LEVEL", info_level_default)
 report_level = get_env_int("REPORT_LEVEL", report_level_default)
+enable_diffusion = get_env_bool("ENABLE_DIFFUSION", enable_diffusion_default)
+liquid_diffusion_coeff = get_env_float("LIQUID_DIFFUSION_COEFF", liquid_diffusion_default)
+gas_diffusion_coeff = get_env_float("GAS_DIFFUSION_COEFF", gas_diffusion_default)
+diffusion = enable_diffusion ? (liquid_diffusion_coeff, gas_diffusion_coeff) : nothing
 
 println("Case name = ", case_name)
 println("matfile_path = ", matfile_path)
@@ -139,6 +153,11 @@ println("max_nonlinear_iterations = ", max_nonlinear_iterations)
 println("max_timestep_cuts = ", max_timestep_cuts)
 println("info_level = ", info_level)
 println("report_level = ", report_level)
+println("enable_diffusion = ", enable_diffusion)
+if enable_diffusion
+    println("liquid_diffusion_coeff = ", liquid_diffusion_coeff)
+    println("gas_diffusion_coeff = ", gas_diffusion_coeff)
+end
 
 # =========================================================
 # Run simulation
@@ -158,5 +177,6 @@ simulate_mrst_case(
     max_nonlinear_iterations = max_nonlinear_iterations,
     max_timestep_cuts = max_timestep_cuts,
     info_level = info_level,
-    report_level = report_level
+    report_level = report_level,
+    diffusion = diffusion
 )

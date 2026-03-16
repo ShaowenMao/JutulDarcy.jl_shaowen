@@ -42,7 +42,50 @@ function get_mrst_input_path(name)
     return fn
 end
 
-function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid = false)
+function mrst_diffusion_override(diffusion, nc::Int)
+    if isnothing(diffusion)
+        # Leave diffusion disabled for this case.
+        out = nothing
+    elseif diffusion isa Number
+        # Single scalar -> same coefficient in every cell.
+        out = fill(float(diffusion), nc)
+    elseif diffusion isa Tuple
+        # Tuple -> one uniform coefficient per phase, expanded to all cells.
+        out = zeros(Float64, length(diffusion), nc)
+        for (i, coeff) in enumerate(diffusion)
+            out[i, :] .= coeff
+        end
+    elseif diffusion isa AbstractVector
+        if length(diffusion) == nc
+            # Cellwise diffusion for a single phase / shared coefficient field.
+            out = collect(diffusion)
+        else
+            # Short vector -> interpret as one uniform coefficient per phase.
+            out = zeros(Float64, length(diffusion), nc)
+            for (i, coeff) in enumerate(diffusion)
+                out[i, :] .= coeff
+            end
+        end
+    elseif diffusion isa AbstractMatrix
+        if size(diffusion, 2) == nc
+            # Already in the internal layout: (nphases, ncells).
+            out = copy(diffusion)
+        elseif size(diffusion, 1) == nc
+            # Accept transposed input as a convenience for callers.
+            out = collect(diffusion')
+        else
+            error("Diffusion override matrix must have $nc columns (or rows before transpose).")
+        end
+    else
+        error("Unsupported diffusion override of type $(typeof(diffusion)).")
+    end
+    # Internal convention used downstream is either:
+    #   Vector{Float64}          -> one coefficient per cell
+    #   Matrix{Float64}(nph, nc) -> one coefficient per phase and cell
+    return out
+end
+
+function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid = false, diffusion = nothing)
     fn = get_mrst_input_path(name)
     @debug "Reading MAT file $fn..."
     exported = MAT.matread(fn)
@@ -65,27 +108,12 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
     poro = get_vec(exported["rock"]["poro"])
     perm = copy((exported["rock"]["perm"])')
 
-    # =========================================================
-    # Add diffusion coefficients (per cell, per component)
-    # =========================================================
-    # nc = Int(G_raw["cells"]["num"])
-    # ncomp = 2
-
-    # Diffusion coefficients stored as (ncomp x nc)
-    # :diffusion in JutulDarcy is the scalar diffusion coefficient (pseudo-diffusivity) defined in Lluis et al., 2024
-    # :diffusivity in JutulDarcy is the "effective diffusivity on faces" 
-    # Discretization of diffusion terms is analogous to that of advection terms
-    # diffusion_coeff = zeros(ncomp, nc)
-
-    # @inbounds for c in 1:nc 
-    #     diffusion_coeff[1, c] = 1.0e-9   # component 1: liquid, m^2/s
-    #     diffusion_coeff[2, c] = 0.0      # component 2: gas, m^2/s 
-    # end
-
-    # domain = reservoir_domain(g, porosity = poro, permeability = perm, diffusion = diffusion_coeff)
-
-
-    domain = reservoir_domain(g, porosity = poro, permeability = perm)
+    diffusion_coeff = mrst_diffusion_override(diffusion, length(poro))
+    if isnothing(diffusion_coeff)
+        domain = reservoir_domain(g, porosity = poro, permeability = perm)
+    else
+        domain = reservoir_domain(g, porosity = poro, permeability = perm, diffusion = diffusion_coeff)
+    end
 
     if haskey(exported, "rock") && haskey(exported["rock"], "regions") &&
     haskey(exported["rock"]["regions"], "rocknum")
@@ -1184,9 +1212,15 @@ function setup_case_from_mrst(casename;
         p_min = DEFAULT_MINIMUM_PRESSURE,
         p_max = Inf,
         dr_max = Inf,
+        diffusion = nothing,
         kwarg...
     )
-    data_domain, mrst_data = reservoir_domain_from_mrst(casename, extraout = true, convert_grid = convert_grid)
+    data_domain, mrst_data = reservoir_domain_from_mrst(
+        casename,
+        extraout = true,
+        convert_grid = convert_grid,
+        diffusion = diffusion
+    )
     G = discretized_domain_tpfv_flow(data_domain; kwarg...)
     if ismissing(facility_grouping)
         if split_wells
@@ -1584,6 +1618,9 @@ Simulate a MRST case from `file_name` as exported by `writeJutulInput` in MRST.
 - `info_level = nothing`: Optional override for Jutul verbosity. 0 for minimal
   printing, -1 for no printing, 1-5 for various levels of verbosity
 - `report_level = nothing`: Optional override for simulator reporting verbosity
+- `diffusion = nothing`: Optional diffusion override for MRST `.mat` cases.
+  Scalars apply uniformly, vectors can be cellwise, and tuples/matrices can be
+  used for per-phase values.
 
 Additional input arguments are passed onto, [`setup_case_from_mrst`](@ref),
 [`setup_reservoir_simulator`](@ref) and [`simulator_config`](@ref) if
@@ -1625,6 +1662,7 @@ function simulate_mrst_case(fn;
         max_timestep_cuts::Union{Nothing, Int} = nothing,
         info_level::Union{Nothing, Int} = nothing,
         report_level::Union{Nothing, Int} = nothing,
+        diffusion = nothing,
         kwarg...
     )
     ext = lowercase(last(splitext(fn)))
@@ -1682,7 +1720,8 @@ function simulate_mrst_case(fn;
             p_min = p_min,
             p_max = p_max,
             dz_max = dz_max,
-            ds_max = ds_max
+            ds_max = ds_max,
+            diffusion = diffusion
         )
         deck = mrst_data["deck"]
     end
