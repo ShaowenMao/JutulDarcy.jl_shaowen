@@ -1577,8 +1577,13 @@ Simulate a MRST case from `file_name` as exported by `writeJutulInput` in MRST.
 - `nthreads=Threads.nthreads()`: number of threads to use
 - `linear_solver=:bicgstab`: name of Krylov.jl solver to use, or :direct (for
   small cases only)
-- `info_level=0`: standard Jutul info_level. 0 for minimal printing, -1 for no
-  printing, 1-5 for various levels of verbosity
+- `max_nonlinear_iterations = nothing`: Optional override for the simulator
+  nonlinear iteration cap
+- `max_timestep_cuts = nothing`: Optional override for the simulator timestep
+  cut cap
+- `info_level = nothing`: Optional override for Jutul verbosity. 0 for minimal
+  printing, -1 for no printing, 1-5 for various levels of verbosity
+- `report_level = nothing`: Optional override for simulator reporting verbosity
 
 Additional input arguments are passed onto, [`setup_case_from_mrst`](@ref),
 [`setup_reservoir_simulator`](@ref) and [`simulator_config`](@ref) if
@@ -1616,6 +1621,10 @@ function simulate_mrst_case(fn;
         wells = :simple,
         plot = false,
         linear_solver = :bicgstab,
+        max_nonlinear_iterations::Union{Nothing, Int} = nothing,
+        max_timestep_cuts::Union{Nothing, Int} = nothing,
+        info_level::Union{Nothing, Int} = nothing,
+        report_level::Union{Nothing, Int} = nothing,
         kwarg...
     )
     ext = lowercase(last(splitext(fn)))
@@ -1774,13 +1783,18 @@ function simulate_mrst_case(fn;
             start = nothing
         end
 
-        # Set these parameters the same as the Matlab diffusion example
-        cfg[:max_nonlinear_iterations] = 10
-        cfg[:max_timestep_cuts] = 8  #8 for GoM case, 25 for FluidFlower
-
-        # Set the level of information and reporting during simulation 
-        cfg[:info_level] = 1
-        cfg[:report_level] = 1
+        if !isnothing(max_nonlinear_iterations)
+            cfg[:max_nonlinear_iterations] = max_nonlinear_iterations
+        end
+        if !isnothing(max_timestep_cuts)
+            cfg[:max_timestep_cuts] = max_timestep_cuts
+        end
+        if !isnothing(info_level)
+            cfg[:info_level] = info_level
+        end
+        if !isnothing(report_level)
+            cfg[:report_level] = report_level
+        end
 
         #result = simulate(sim, dt, forces = forces, config = cfg, restart = restart, start_date = start);
         result = simulate(sim, dt;

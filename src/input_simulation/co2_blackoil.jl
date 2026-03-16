@@ -57,6 +57,10 @@ case_name = uppercase(get_env_str("CASE_NAME", "GOM_SMALL"))
 matfile_default = ""
 restart_default = ""
 vtu_default = ""
+max_nonlinear_iterations_default = 10
+max_timestep_cuts_default = 8
+info_level_default = 1
+report_level_default = 1
 
 # Control flags
 restart = get_env_bool("RESTART_RUN", true)
@@ -104,6 +108,7 @@ elseif case_name == "FLUIDFLOWER"
 
     report_gas_masses = true
     report_co2_concentration = true
+    max_timestep_cuts_default = 25
     vtu_prefix = "fluidflower"
     vtu_vars = [:Pressure, :Saturations, :Rs, :Concentration]
 
@@ -118,6 +123,10 @@ end
 matfile_path = get_env_str("MATFILE_PATH", matfile_default)
 restart_output_path = get_env_str("RESTART_OUTPUT_PATH", restart_default)
 vtu_path = get_env_str("VTU_PATH", vtu_default)
+max_nonlinear_iterations = get_env_int("MAX_NONLINEAR_ITERATIONS", max_nonlinear_iterations_default)
+max_timestep_cuts = get_env_int("MAX_TIMESTEP_CUTS", max_timestep_cuts_default)
+info_level = get_env_int("INFO_LEVEL", info_level_default)
+report_level = get_env_int("REPORT_LEVEL", report_level_default)
 
 println("Case name = ", case_name)
 println("matfile_path = ", matfile_path)
@@ -126,6 +135,10 @@ println("vtu_path = ", vtu_path)
 println("restart = ", restart)
 println("write_incon_vtu = ", write_incon_vtu)
 println("write_state_vtu = ", write_state_vtu)
+println("max_nonlinear_iterations = ", max_nonlinear_iterations)
+println("max_timestep_cuts = ", max_timestep_cuts)
+println("info_level = ", info_level)
+println("report_level = ", report_level)
 
 # =========================================================
 # Run simulation
@@ -141,5 +154,9 @@ simulate_mrst_case(
     report_gas_masses = report_gas_masses,
     report_co2_concentration = report_co2_concentration,
     write_initial_step0 = write_incon_vtu,
-    nthreads = julia_threads
+    nthreads = julia_threads,
+    max_nonlinear_iterations = max_nonlinear_iterations,
+    max_timestep_cuts = max_timestep_cuts,
+    info_level = info_level,
+    report_level = report_level
 )
