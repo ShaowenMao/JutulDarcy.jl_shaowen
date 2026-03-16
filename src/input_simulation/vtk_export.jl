@@ -1,12 +1,7 @@
 # src/input_simulation/vtk_export.jl
 
-import StaticArrays
-import WriteVTK
-
-const SVector       = StaticArrays.SVector
-const VTKPolyhedron = WriteVTK.VTKPolyhedron
-const VTKPointData  = WriteVTK.VTKPointData
-const VTKCellData   = WriteVTK.VTKCellData
+import StaticArrays: SVector
+import WriteVTK: VTKPolyhedron, VTKPointData, VTKCellData, vtk_grid
 
 # Robust conversion: MRST indices may come in as Float64 from MAT (e.g., 1.0, 2.0)
 as_int(x) = x isa Integer ? Int(x) : Int(round(x))
@@ -72,7 +67,7 @@ function write_volume_vtu(G;
     end
 
     # --- Write VTU ---
-    vtk = WriteVTK.vtk_grid(filename, vtk_points, vtk_cells)
+    vtk = vtk_grid(filename, vtk_points, vtk_cells)
 
     # Cell-centered arrays
     for (name, v) in cell_data
