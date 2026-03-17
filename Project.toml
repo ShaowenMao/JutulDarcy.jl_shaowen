@@ -50,7 +50,7 @@ JutulDarcyAMGXExt = "AMGX"
 JutulDarcyCUDAExt = "CUDA"
 JutulDarcyGLMakieExt = "GLMakie"
 JutulDarcyMakieExt = "Makie"
-JutulDarcyPartitionedArraysExt = ["PartitionedArrays", "MPI", "HYPRE"]
+JutulDarcyPartitionedArraysExt = ["PartitionedArrays", "MPI"]
 
 [compat]
 AMGX = "0.2"

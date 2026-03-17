@@ -485,7 +485,7 @@ function deck_relperm(runspec, props; oil, water, gas, satnum = nothing)
                     nw_hyst = CarlsonHysteresis()
                     w_hyst = ImbibitionOnlyHysteresis()
                 elseif hyst_type == 2
-                    nw_hyst = NoHysteresis()  #killough
+                    nw_hyst = killough
                     w_hyst = NoHysteresis()
                 elseif hyst_type == 3
                     nw_hyst = killough
