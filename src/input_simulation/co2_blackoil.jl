@@ -1,4 +1,22 @@
-using Revise  # Good to keep this at the very top
+function env_enabled(name::String, default::Bool)
+    val = lowercase(get(ENV, name, string(default)))
+    return val in ("1", "true", "yes", "y")
+end
+
+function maybe_load_revise()
+    # Default to Revise for interactive desktop use, but keep it off for batch/HPC runs.
+    enable_revise = env_enabled("ENABLE_REVISE", Sys.iswindows() && isinteractive())
+    if enable_revise
+        try
+            @eval using Revise
+        catch err
+            @warn "Revise could not be loaded. Continuing without it." exception = (err, catch_backtrace())
+        end
+    end
+    return nothing
+end
+
+maybe_load_revise()
 using JutulDarcy
 using MAT
 using HYPRE
