@@ -21,162 +21,168 @@ function get_env_bool(name::String, default::Bool)
     return val in ("1", "true", "yes", "y")
 end
 
-# =========================================================
-# Thread settings
-# =========================================================
-# Julia runtime threads are determined when Julia starts,
-# e.g. by JULIA_NUM_THREADS. Threads.nthreads() reports how
-# many Julia threads are actually available in this process.
-#
-# CASE_JULIA_THREADS is the number passed into simulate_mrst_case.
-# Usually it should be <= Threads.nthreads().
-#
-# HYPRE_THREADS controls the HYPRE internal thread count.
-julia_threads = get_env_int("CASE_JULIA_THREADS", Threads.nthreads())
-hypre_threads = get_env_int("HYPRE_THREADS", 1)
+function co2_blackoil_case_defaults(case_name::AbstractString)
+    case_name = uppercase(case_name)
+    base = (
+        report_gas_masses = true,
+        report_co2_concentration = false,
+        vtu_prefix = "GoM",
+        vtu_vars = [:Pressure, :Saturations, :Rs],
+        max_nonlinear_iterations = 10,
+        max_timestep_cuts = 8,
+        info_level = 1,
+        report_level = 1,
+        enable_diffusion = false,
+        liquid_diffusion_coeff = 0.0,
+        gas_diffusion_coeff = 0.0
+    )
 
-HYPRE.Init(nthreads = hypre_threads)
-
-println("Julia threads available = ", Threads.nthreads())
-println("Julia threads passed to simulate_mrst_case = ", julia_threads)
-println("HYPRE threads = ", HYPRE.NumThreads())
-
-# =========================================================
-# Case selection
-# =========================================================
-# Options:
-#   GOM_SMALL
-#   GOM_MEDIUM
-#   GOM_LARGE
-#   FLUIDFLOWER
-#
-# Default is GOM_MEDIUM for convenience.
-case_name = uppercase(get_env_str("CASE_NAME", "GOM_SMALL"))
-
-# =========================================================
-# Default paths and settings for each case
-# These defaults are convenient for your local Windows machine.
-# On HPC, override them using environment variables.
-# =========================================================
-matfile_default = ""
-restart_default = ""
-vtu_default = ""
-max_nonlinear_iterations_default = 10
-max_timestep_cuts_default = 8
-info_level_default = 1
-report_level_default = 1
-enable_diffusion_default = false
-liquid_diffusion_default = 0.0
-gas_diffusion_default = 0.0
-
-# Control flags
-restart = get_env_bool("RESTART_RUN", true)
-
-# VTU control
-write_incon_vtu = get_env_bool("WRITE_INCON_VTU", false)
-write_state_vtu = get_env_bool("WRITE_STATE_VTU", false)
-vtu_prefix = get_env_str("VTU_PREFIX", "test")
-vtu_vars = [:Pressure, :Saturations, :Rs]
-
-if case_name == "GOM_SMALL"
-    matfile_default = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_3_slices.mat"
-    restart_default = raw"G:/Shaowen/restart_gom_small"
-    vtu_default = raw"G:/Shaowen/visual_gom_small"
-
-    report_gas_masses = true
-    report_co2_concentration = false
-    vtu_prefix = "GoM"
-    vtu_vars = [:Pressure, :Saturations, :Rs]
-
-elseif case_name == "GOM_MEDIUM"
-    matfile_default = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_43_slices.mat"
-    restart_default = raw"G:/Shaowen/restart_gom_medium"
-    vtu_default = raw"G:/Shaowen/visual_gom_medium"
-
-    report_gas_masses = true
-    report_co2_concentration = false
-    vtu_prefix = "GoM"
-    vtu_vars = [:Pressure, :Saturations, :Rs]
-
-elseif case_name == "GOM_LARGE"
-    matfile_default = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case.mat"
-    restart_default = raw"G:/Shaowen/restart_gom_large"
-    vtu_default = raw"G:/Shaowen/visual_gom_large"
-
-    report_gas_masses = true
-    report_co2_concentration = false
-    vtu_prefix = "GoM"
-    vtu_vars = [:Pressure, :Saturations, :Rs]
-
-elseif case_name == "FLUIDFLOWER"
-    matfile_default = raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/fluidflower_4mm.mat"
-    restart_default = raw"G:/Shaowen/restart_output_fluidflower_4mm_diffusion"
-    vtu_default = raw"G:/Shaowen/visualization_fluidflower_4mm_diffusion"
-
-    report_gas_masses = true
-    report_co2_concentration = true
-    max_timestep_cuts_default = 25
-    enable_diffusion_default = true
-    liquid_diffusion_default = 1.0e-9
-    gas_diffusion_default = 0.0
-    vtu_prefix = "fluidflower"
-    vtu_vars = [:Pressure, :Saturations, :Rs, :Concentration]
-
-else
-    error("Unknown CASE_NAME = $case_name. Valid options: GOM_SMALL, GOM_MEDIUM, GOM_LARGE, FLUIDFLOWER")
+    if case_name == "GOM_SMALL"
+        return merge(base, (
+            matfile_path = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_3_slices.mat",
+            restart_output_path = raw"G:/Shaowen/restart_gom_small",
+            vtu_path = raw"G:/Shaowen/visual_gom_small"
+        ))
+    elseif case_name == "GOM_MEDIUM"
+        return merge(base, (
+            matfile_path = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case_43_slices.mat",
+            restart_output_path = raw"G:/Shaowen/restart_gom_medium",
+            vtu_path = raw"G:/Shaowen/visual_gom_medium"
+        ))
+    elseif case_name == "GOM_LARGE"
+        return merge(base, (
+            matfile_path = raw"C:/Users/shaowen/mrst_jutul/lluis_field_case.mat",
+            restart_output_path = raw"G:/Shaowen/restart_gom_large",
+            vtu_path = raw"G:/Shaowen/visual_gom_large"
+        ))
+    elseif case_name == "FLUIDFLOWER"
+        return merge(base, (
+            matfile_path = raw"C:/Users/shaowen/OneDrive/MIT/mrst-2025a/SINTEF-AppliedCompSci-MRST-75749fa/core/output/jutul/fluidflower_4mm.mat",
+            restart_output_path = raw"G:/Shaowen/restart_output_fluidflower_4mm_diffusion",
+            vtu_path = raw"G:/Shaowen/visualization_fluidflower_4mm_diffusion",
+            report_co2_concentration = true,
+            max_timestep_cuts = 25,
+            enable_diffusion = true,
+            liquid_diffusion_coeff = 1.0e-9,
+            gas_diffusion_coeff = 0.0,
+            vtu_prefix = "fluidflower",
+            vtu_vars = [:Pressure, :Saturations, :Rs, :Concentration]
+        ))
+    else
+        error("Unknown CASE_NAME = $case_name. Valid options: GOM_SMALL, GOM_MEDIUM, GOM_LARGE, FLUIDFLOWER")
+    end
 end
 
-# =========================================================
-# Final paths
-# These can be overridden from the shell on HPC or desktop
-# =========================================================
-matfile_path = get_env_str("MATFILE_PATH", matfile_default)
-restart_output_path = get_env_str("RESTART_OUTPUT_PATH", restart_default)
-vtu_path = get_env_str("VTU_PATH", vtu_default)
-max_nonlinear_iterations = get_env_int("MAX_NONLINEAR_ITERATIONS", max_nonlinear_iterations_default)
-max_timestep_cuts = get_env_int("MAX_TIMESTEP_CUTS", max_timestep_cuts_default)
-info_level = get_env_int("INFO_LEVEL", info_level_default)
-report_level = get_env_int("REPORT_LEVEL", report_level_default)
-enable_diffusion = get_env_bool("ENABLE_DIFFUSION", enable_diffusion_default)
-liquid_diffusion_coeff = get_env_float("LIQUID_DIFFUSION_COEFF", liquid_diffusion_default)
-gas_diffusion_coeff = get_env_float("GAS_DIFFUSION_COEFF", gas_diffusion_default)
-diffusion = enable_diffusion ? (liquid_diffusion_coeff, gas_diffusion_coeff) : nothing
+function run_co2_blackoil(;
+        case_name::AbstractString = "GOM_SMALL",
+        julia_threads::Int = Threads.nthreads(),
+        hypre_threads::Int = 1,
+        matfile_path = nothing,
+        restart_output_path = nothing,
+        vtu_path = nothing,
+        restart::Bool = true,
+        write_incon_vtu::Bool = false,
+        write_state_vtu::Bool = false,
+        vtu_prefix = nothing,
+        vtu_vars = nothing,
+        report_gas_masses = nothing,
+        report_co2_concentration = nothing,
+        max_nonlinear_iterations = nothing,
+        max_timestep_cuts = nothing,
+        info_level = nothing,
+        report_level = nothing,
+        enable_diffusion = nothing,
+        liquid_diffusion_coeff = nothing,
+        gas_diffusion_coeff = nothing
+    )
+    case_name = uppercase(case_name)
+    defaults = co2_blackoil_case_defaults(case_name)
 
-println("Case name = ", case_name)
-println("matfile_path = ", matfile_path)
-println("restart_output_path = ", restart_output_path)
-println("vtu_path = ", vtu_path)
-println("restart = ", restart)
-println("write_incon_vtu = ", write_incon_vtu)
-println("write_state_vtu = ", write_state_vtu)
-println("max_nonlinear_iterations = ", max_nonlinear_iterations)
-println("max_timestep_cuts = ", max_timestep_cuts)
-println("info_level = ", info_level)
-println("report_level = ", report_level)
-println("enable_diffusion = ", enable_diffusion)
-if enable_diffusion
-    println("liquid_diffusion_coeff = ", liquid_diffusion_coeff)
-    println("gas_diffusion_coeff = ", gas_diffusion_coeff)
+    matfile_path = something(matfile_path, defaults.matfile_path)
+    restart_output_path = something(restart_output_path, defaults.restart_output_path)
+    vtu_path = something(vtu_path, defaults.vtu_path)
+    vtu_prefix = something(vtu_prefix, defaults.vtu_prefix)
+    vtu_vars = isnothing(vtu_vars) ? defaults.vtu_vars : vtu_vars
+    report_gas_masses = something(report_gas_masses, defaults.report_gas_masses)
+    report_co2_concentration = something(report_co2_concentration, defaults.report_co2_concentration)
+    max_nonlinear_iterations = something(max_nonlinear_iterations, defaults.max_nonlinear_iterations)
+    max_timestep_cuts = something(max_timestep_cuts, defaults.max_timestep_cuts)
+    info_level = something(info_level, defaults.info_level)
+    report_level = something(report_level, defaults.report_level)
+    enable_diffusion = something(enable_diffusion, defaults.enable_diffusion)
+    liquid_diffusion_coeff = something(liquid_diffusion_coeff, defaults.liquid_diffusion_coeff)
+    gas_diffusion_coeff = something(gas_diffusion_coeff, defaults.gas_diffusion_coeff)
+    diffusion = enable_diffusion ? (liquid_diffusion_coeff, gas_diffusion_coeff) : nothing
+
+    HYPRE.Init(nthreads = hypre_threads)
+
+    println("Julia threads available = ", Threads.nthreads())
+    println("Julia threads passed to simulate_mrst_case = ", julia_threads)
+    println("HYPRE threads = ", HYPRE.NumThreads())
+    println("Case name = ", case_name)
+    println("matfile_path = ", matfile_path)
+    println("restart_output_path = ", restart_output_path)
+    println("vtu_path = ", vtu_path)
+    println("restart = ", restart)
+    println("write_incon_vtu = ", write_incon_vtu)
+    println("write_state_vtu = ", write_state_vtu)
+    println("max_nonlinear_iterations = ", max_nonlinear_iterations)
+    println("max_timestep_cuts = ", max_timestep_cuts)
+    println("info_level = ", info_level)
+    println("report_level = ", report_level)
+    println("enable_diffusion = ", enable_diffusion)
+    if enable_diffusion
+        println("liquid_diffusion_coeff = ", liquid_diffusion_coeff)
+        println("gas_diffusion_coeff = ", gas_diffusion_coeff)
+    end
+
+    return simulate_mrst_case(
+        matfile_path;
+        output_path = restart_output_path,
+        restart = restart,
+        write_vtu = write_state_vtu,
+        vtu_outdir = vtu_path,
+        vtu_prefix = vtu_prefix,
+        vtu_vars = vtu_vars,
+        report_gas_masses = report_gas_masses,
+        report_co2_concentration = report_co2_concentration,
+        write_initial_step0 = write_incon_vtu,
+        nthreads = julia_threads,
+        max_nonlinear_iterations = max_nonlinear_iterations,
+        max_timestep_cuts = max_timestep_cuts,
+        info_level = info_level,
+        report_level = report_level,
+        diffusion = diffusion
+    )
 end
 
-# =========================================================
-# Run simulation
-# =========================================================
-simulate_mrst_case(
-    matfile_path;
-    output_path = restart_output_path,
-    restart = restart,
-    write_vtu = write_state_vtu,
-    vtu_outdir = vtu_path,
-    vtu_prefix = vtu_prefix,
-    vtu_vars = vtu_vars,  # Only write these reservoir state variables.
-    report_gas_masses = report_gas_masses,
-    report_co2_concentration = report_co2_concentration,
-    write_initial_step0 = write_incon_vtu,
-    nthreads = julia_threads,
-    max_nonlinear_iterations = max_nonlinear_iterations,
-    max_timestep_cuts = max_timestep_cuts,
-    info_level = info_level,
-    report_level = report_level,
-    diffusion = diffusion
-)
+function run_co2_blackoil_from_env()
+    case_name = uppercase(get_env_str("CASE_NAME", "GOM_SMALL"))
+    defaults = co2_blackoil_case_defaults(case_name)
+
+    return run_co2_blackoil(
+        case_name = case_name,
+        julia_threads = get_env_int("CASE_JULIA_THREADS", Threads.nthreads()),
+        hypre_threads = get_env_int("HYPRE_THREADS", 1),
+        matfile_path = get_env_str("MATFILE_PATH", defaults.matfile_path),
+        restart_output_path = get_env_str("RESTART_OUTPUT_PATH", defaults.restart_output_path),
+        vtu_path = get_env_str("VTU_PATH", defaults.vtu_path),
+        restart = get_env_bool("RESTART_RUN", true),
+        write_incon_vtu = get_env_bool("WRITE_INCON_VTU", false),
+        write_state_vtu = get_env_bool("WRITE_STATE_VTU", false),
+        vtu_prefix = get_env_str("VTU_PREFIX", defaults.vtu_prefix),
+        report_gas_masses = defaults.report_gas_masses,
+        report_co2_concentration = defaults.report_co2_concentration,
+        max_nonlinear_iterations = get_env_int("MAX_NONLINEAR_ITERATIONS", defaults.max_nonlinear_iterations),
+        max_timestep_cuts = get_env_int("MAX_TIMESTEP_CUTS", defaults.max_timestep_cuts),
+        info_level = get_env_int("INFO_LEVEL", defaults.info_level),
+        report_level = get_env_int("REPORT_LEVEL", defaults.report_level),
+        enable_diffusion = get_env_bool("ENABLE_DIFFUSION", defaults.enable_diffusion),
+        liquid_diffusion_coeff = get_env_float("LIQUID_DIFFUSION_COEFF", defaults.liquid_diffusion_coeff),
+        gas_diffusion_coeff = get_env_float("GAS_DIFFUSION_COEFF", defaults.gas_diffusion_coeff)
+    )
+end
+
+if abspath(PROGRAM_FILE) == @__FILE__
+    run_co2_blackoil_from_env()
+end
