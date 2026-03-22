@@ -1586,6 +1586,153 @@ function mrst_well_ctrl(model, wdata, is_comp, rhoS)
     return ctrl
 end
 
+function add_co2_concentration_to_state!(state, rmodel; label::AbstractString = "state")
+    res = reservoir_state_for_vtu(state)
+
+    if !haskey(res, :Saturations)
+        @warn "Skipping CO2 concentration for $label: missing :Saturations"
+        return false
+    end
+
+    sys = rmodel.system
+    disgas = has_disgas(sys)
+    nc = length(res[:Saturations][1, :])
+
+    if !disgas
+        res[:Concentration] = zeros(eltype(res[:Saturations]), nc)
+        return true
+    end
+
+    req = (:PhaseMassDensities, :ShrinkageFactors, :Rs)
+    missing = Symbol[]
+    for k in req
+        haskey(res, k) || push!(missing, k)
+    end
+    if !isempty(missing)
+        @warn "Skipping CO2 concentration for $label: missing variables." missing
+        return false
+    end
+
+    sw        = res[:Saturations][1, :]
+    rs        = res[:Rs]
+    bo        = res[:ShrinkageFactors][1, :]
+    bg        = res[:ShrinkageFactors][2, :]
+    rho_g_res = res[:PhaseMassDensities][2, :]
+
+    c = rs .* bo .* rho_g_res ./ bg
+    c = ifelse.(sw .> 0.0, c, 0.0)
+    res[:Concentration] = c
+    return true
+end
+
+"""
+    export_mrst_case_vtu_from_output(file_name, output_path; <keyword arguments>)
+
+Stream VTU export from saved Jutul `output_path` files without loading all
+states into memory at once. This is intended for post-processing after a
+simulation has completed.
+"""
+function export_mrst_case_vtu_from_output(fn, output_path;
+        backend = :csr,
+        nthreads = Threads.nthreads(),
+        minbatch = 1000,
+        split_wells = false,
+        report_co2_concentration::Bool = false,
+        write_initial_step0::Bool = false,
+        write_state_vtu::Bool = true,
+        vtu_outdir::AbstractString = "",
+        vtu_prefix::AbstractString = "case",
+        vtu_vars = [:Pressure, :Saturations],
+        ds_max = 0.2,
+        dz_max = 0.2,
+        dp_max_abs = nothing,
+        dp_max_rel = 0.2,
+        p_min = DEFAULT_MINIMUM_PRESSURE,
+        p_max = Inf,
+        verbose = true,
+        steps = :full,
+        general_ad = false,
+        wells = :simple,
+        linear_solver = :bicgstab,
+        diffusion = nothing,
+    )
+    ext = lowercase(last(splitext(fn)))
+    if ext == ".data"
+        error("Streaming VTU export from saved output is currently only supported for MRST .mat cases.")
+    end
+
+    fn = get_mrst_input_path(fn)
+    output_path = realpath(output_path)
+
+    if split_wells
+        fg = :perwell
+    else
+        fg = :onegroup
+    end
+    block_backend = linear_solver != :direct && linear_solver != :lu
+
+    case, mrst_data = setup_case_from_mrst(fn,
+        block_backend = block_backend,
+        steps = steps,
+        backend = backend,
+        nthreads = nthreads,
+        split_wells = split_wells,
+        facility_grouping = fg,
+        general_ad = general_ad,
+        minbatch = minbatch,
+        wells = wells,
+        dp_max_abs = dp_max_abs,
+        dp_max_rel = dp_max_rel,
+        p_min = p_min,
+        p_max = p_max,
+        dz_max = dz_max,
+        ds_max = ds_max,
+        diffusion = diffusion
+    )
+
+    model = case.model
+    rmodel = model.models[:Reservoir]
+    outdir_local = isempty(vtu_outdir) ? joinpath(pwd(), "paraview_states") : vtu_outdir
+
+    if write_initial_step0
+        vtu_vars0 = union(vtu_vars, [:Porosity, :Permeability])
+        export_initial_step0_vtu(fn, mrst_data;
+            outdir = outdir_local,
+            prefix = "$(vtu_prefix)_incon",
+            vtu_vars = vtu_vars0,
+            split_matrices = true,
+            write_regions = true
+        )
+    end
+
+    if !write_state_vtu
+        return (String[], Float64[], nothing)
+    end
+
+    has_regions = haskey(mrst_data, "rock") && haskey(mrst_data["rock"], "regions")
+    has_p0 = haskey(mrst_data, "state0") && haskey(mrst_data["state0"], "pressure")
+
+    state_transform! = nothing
+    if report_co2_concentration && (:Concentration in vtu_vars)
+        state_transform! = (state, step_no) -> add_co2_concentration_to_state!(state, rmodel; label = "saved state $step_no")
+    end
+
+    return report_times_vtu_export_from_output(mrst_data["G"], output_path;
+        outdir = outdir_local,
+        prefix = vtu_prefix,
+        vars = vtu_vars,
+        split_matrices = true,
+        write_pvd = true,
+        verbose = verbose,
+        write_regions = has_regions,
+        reservoir_regions = has_regions ? mrst_data["rock"]["regions"] : nothing,
+        write_dp = has_p0,
+        state0_pressure = has_p0 ? mrst_data["state0"]["pressure"] : nothing,
+        dp_name = "dP",
+        state_transform! = state_transform!
+    )
+end
+
 """
     ws, states = simulate_mrst_case(file_name)
     simulate_mrst_case(file_name; <keyword arguments>)
@@ -1895,50 +2042,11 @@ function simulate_mrst_case(fn;
 
         # Calculate concentration of dissolved CO2 in brine (kg/m^3 brine)
         if report_co2_concentration && (write_vtu && (:Concentration in vtu_vars))
-            sys = rmodel.system
-            disgas = has_disgas(sys)
-
             if isempty(states)
                 @warn "Skipping CO2 concentration: states is empty."
             else
                 for (i, st) in pairs(states)
-                    haskey(st, :Reservoir) || continue
-                    res = st[:Reservoir]
-
-                    # Need saturations just to know ncells; it's already pushed
-                    if !haskey(res, :Saturations)
-                        @warn "Skipping CO2 concentration for state $i: missing :Saturations"
-                        continue
-                    end
-                    nc = length(res[:Saturations][1, :])
-
-                    if !disgas
-                        # No dissolution modeled -> concentration = 0
-                        res[:Concentration] = zeros(eltype(res[:Saturations]), nc)
-                        continue
-                    end
-
-                    # dissolution modeled: require Rs + shrinkage + density
-                    req = (:PhaseMassDensities, :ShrinkageFactors, :Rs)
-                    missing = Symbol[]
-                    for k in req
-                        haskey(res, k) || push!(missing, k)
-                    end
-                    if !isempty(missing)
-                        @warn "Skipping CO2 concentration for state $i: missing variables." missing
-                        continue
-                    end
-
-                    sw        = res[:Saturations][1, :]
-                    rs        = res[:Rs]
-                    bo        = res[:ShrinkageFactors][1, :]
-                    bg        = res[:ShrinkageFactors][2, :]
-                    rho_g_res = res[:PhaseMassDensities][2, :]
-
-                    c = rs .* bo .* rho_g_res ./ bg
-                    c = ifelse.(sw .> 0.0, c, 0.0)
-
-                    res[:Concentration] = c
+                    add_co2_concentration_to_state!(st, rmodel; label = "state $i")
                 end
             end
         end
