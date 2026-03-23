@@ -233,7 +233,7 @@ function run_co2_blackoil(;
     println("HYPRE threads = ", HYPRE.NumThreads())
     print_co2_blackoil_options(opts; stage = "simulate")
 
-    return simulate_mrst_case(
+    return JutulDarcy.simulate_mrst_case(
         opts.matfile_path;
         output_path = opts.restart_output_path,
         restart = opts.restart,
@@ -305,7 +305,7 @@ function export_co2_blackoil_vtu(;
         return nothing
     end
 
-    return export_mrst_case_vtu_from_output(
+    return JutulDarcy.export_mrst_case_vtu_from_output(
         opts.matfile_path,
         opts.restart_output_path;
         write_initial_step0 = opts.write_incon_vtu,
