@@ -109,6 +109,7 @@ function co2_blackoil_options(;
         max_timestep_cuts = nothing,
         info_level = nothing,
         report_level = nothing,
+        load_all_states_after_sim::Bool = true,
         enable_diffusion = nothing,
         liquid_diffusion_coeff = nothing,
         gas_diffusion_coeff = nothing
@@ -150,6 +151,7 @@ function co2_blackoil_options(;
         max_timestep_cuts = max_timestep_cuts,
         info_level = info_level,
         report_level = report_level,
+        load_all_states_after_sim = load_all_states_after_sim,
         enable_diffusion = enable_diffusion,
         liquid_diffusion_coeff = liquid_diffusion_coeff,
         gas_diffusion_coeff = gas_diffusion_coeff,
@@ -177,6 +179,7 @@ function print_co2_blackoil_options(opts; stage::AbstractString)
         println("restart = ", opts.restart)
         println("report_gas_masses = ", opts.report_gas_masses)
         println("report_co2_concentration = ", opts.report_co2_concentration)
+        println("load_all_states_after_sim = ", opts.load_all_states_after_sim)
     end
     if opts.enable_diffusion
         println("liquid_diffusion_coeff = ", opts.liquid_diffusion_coeff)
@@ -202,6 +205,7 @@ function run_co2_blackoil(;
         max_timestep_cuts = nothing,
         info_level = nothing,
         report_level = nothing,
+        load_all_states_after_sim::Bool = true,
         enable_diffusion = nothing,
         liquid_diffusion_coeff = nothing,
         gas_diffusion_coeff = nothing
@@ -224,6 +228,7 @@ function run_co2_blackoil(;
         max_timestep_cuts = max_timestep_cuts,
         info_level = info_level,
         report_level = report_level,
+        load_all_states_after_sim = load_all_states_after_sim,
         enable_diffusion = enable_diffusion,
         liquid_diffusion_coeff = liquid_diffusion_coeff,
         gas_diffusion_coeff = gas_diffusion_coeff
@@ -249,6 +254,7 @@ function run_co2_blackoil(;
         max_timestep_cuts = opts.max_timestep_cuts,
         info_level = opts.info_level,
         report_level = opts.report_level,
+        load_all_states_after_sim = opts.load_all_states_after_sim,
         diffusion = opts.diffusion
     )
 end
@@ -271,6 +277,7 @@ function export_co2_blackoil_vtu(;
         max_timestep_cuts = nothing,
         info_level = nothing,
         report_level = nothing,
+        load_all_states_after_sim::Bool = true,
         enable_diffusion = nothing,
         liquid_diffusion_coeff = nothing,
         gas_diffusion_coeff = nothing
@@ -293,6 +300,7 @@ function export_co2_blackoil_vtu(;
         max_timestep_cuts = max_timestep_cuts,
         info_level = info_level,
         report_level = report_level,
+        load_all_states_after_sim = load_all_states_after_sim,
         enable_diffusion = enable_diffusion,
         liquid_diffusion_coeff = liquid_diffusion_coeff,
         gas_diffusion_coeff = gas_diffusion_coeff
@@ -322,6 +330,9 @@ function run_co2_blackoil_from_env()
     case_name = uppercase(get_env_str("CASE_NAME", "GOM_SMALL"))
     defaults = co2_blackoil_case_defaults(case_name)
     run_mode = lowercase(get_env_str("RUN_MODE", "simulate"))
+    # Simulation-only runs default to keeping state history on disk so large
+    # cases can be postprocessed later without reloading every timestep here.
+    load_states_default = !(run_mode in ("simulate", "both"))
 
     common_kwarg = (
         case_name = case_name,
@@ -340,6 +351,7 @@ function run_co2_blackoil_from_env()
         max_timestep_cuts = get_env_int("MAX_TIMESTEP_CUTS", defaults.max_timestep_cuts),
         info_level = get_env_int("INFO_LEVEL", defaults.info_level),
         report_level = get_env_int("REPORT_LEVEL", defaults.report_level),
+        load_all_states_after_sim = get_env_bool("LOAD_STATES_AFTER_SIM", load_states_default),
         enable_diffusion = get_env_bool("ENABLE_DIFFUSION", defaults.enable_diffusion),
         liquid_diffusion_coeff = get_env_float("LIQUID_DIFFUSION_COEFF", defaults.liquid_diffusion_coeff),
         gas_diffusion_coeff = get_env_float("GAS_DIFFUSION_COEFF", defaults.gas_diffusion_coeff)

@@ -1625,6 +1625,32 @@ function add_co2_concentration_to_state!(state, rmodel; label::AbstractString = 
     return true
 end
 
+function final_saved_state(output_path, states)
+    if !isempty(states)
+        return states[end]
+    end
+    if isnothing(output_path) || !isdir(output_path)
+        return nothing
+    end
+    indices = Jutul.valid_restart_indices(output_path)
+    isempty(indices) && return nothing
+    state, _ = Jutul.read_restart(output_path, last(indices); read_state = true, read_report = false)
+    if length(keys(state)) == 0
+        return nothing
+    end
+    return state
+end
+
+function completed_report_steps(states, reports)
+    if !isempty(states)
+        return length(states)
+    elseif isempty(reports)
+        return 0
+    else
+        return length(Jutul.report_timesteps(reports))
+    end
+end
+
 """
     export_mrst_case_vtu_from_output(file_name, output_path; <keyword arguments>)
 
@@ -1768,6 +1794,12 @@ Simulate a MRST case from `file_name` as exported by `writeJutulInput` in MRST.
 - `diffusion = nothing`: Optional diffusion override for MRST `.mat` cases.
   Scalars apply uniformly, vectors can be cellwise, and tuples/matrices can be
   used for per-phase values.
+- `load_all_states_after_sim::Bool = true`: If `false`, keep reports in memory
+  but avoid reading all saved states back from JLD2 at the end of the
+  simulation. Recommended for large simulation-only HPC jobs that use the
+  separate VTU postprocessing workflow. In this mode, the function returns a
+  lightweight named tuple with the raw `SimResult`, reports, output path, and
+  setup metadata instead of building a `ReservoirSimResult`.
 
 Additional input arguments are passed onto, [`setup_case_from_mrst`](@ref),
 [`setup_reservoir_simulator`](@ref) and [`simulator_config`](@ref) if
@@ -1809,6 +1841,7 @@ function simulate_mrst_case(fn;
         max_timestep_cuts::Union{Nothing, Int} = nothing,
         info_level::Union{Nothing, Int} = nothing,
         report_level::Union{Nothing, Int} = nothing,
+        load_all_states_after_sim::Bool = true,
         diffusion = nothing,
         kwarg...
     )
@@ -1922,11 +1955,23 @@ function simulate_mrst_case(fn;
     else
         output_path = nothing
     end
+    if !write_output && !load_all_states_after_sim
+        @warn "Forcing load_all_states_after_sim=true because write_output=false would otherwise discard all saved states."
+        load_all_states_after_sim = true
+    end
+    needs_state_history_in_memory = write_vtu || write_mrst || plot || legacy_output
+    if needs_state_history_in_memory && !load_all_states_after_sim
+        @warn "Forcing load_all_states_after_sim=true because the requested workflow needs in-memory states." write_vtu write_mrst plot legacy_output
+        load_all_states_after_sim = true
+    end
+    # Let Jutul keep the full state history on disk only when we are in the
+    # low-memory simulation workflow.
     sim, cfg = setup_reservoir_simulator(
         case;
         mode = mode,
         linear_solver = linear_solver,
         output_path = output_path,
+        output_states = load_all_states_after_sim,
         kwarg...
     )
 
@@ -1958,6 +2003,7 @@ function simulate_mrst_case(fn;
     ncomp = number_of_components(sys)
     nph = number_of_phases(sys)
     nc = number_of_cells(M.domain)
+    sim_result = nothing
     if do_sim
         if verbose
             jutul_message("MRST model", "Starting simulation of $s system with $nc cells and $nph phases and $ncomp components.")
@@ -1983,24 +2029,25 @@ function simulate_mrst_case(fn;
         end
 
         #result = simulate(sim, dt, forces = forces, config = cfg, restart = restart, start_date = start);
-        result = simulate(sim, dt;
-                          forces = forces, 
-                          config = cfg, 
-                          output_path = output_path, 
-                          restart = restart, 
-                          start_date = start 
+        sim_result = simulate(sim, dt;
+                          forces = forces,
+                          config = cfg,
+                          output_path = output_path,
+                          restart = restart,
+                          start_date = start
         )
 
-        states, reports = result
+        states, reports = sim_result
 
         # Calculate mass fractions of dissolved and free gas 
         if report_gas_masses
-            if isempty(states)
-                @warn "Skipping gas-mass report: states is empty."
-            elseif !haskey(states[end], :Reservoir)
+            final_state = final_saved_state(output_path, states)
+            if isnothing(final_state)
+                @warn "Skipping gas-mass report: final state is unavailable."
+            elseif !haskey(final_state, :Reservoir)
                 @warn "Skipping gas-mass report: final state has no :Reservoir."
             else
-                res = states[end][:Reservoir]
+                res = final_state[:Reservoir]
 
                 # Requirements
                 req = (:FluidVolume, :Saturations, :PhaseMassDensities)
@@ -2085,7 +2132,7 @@ function simulate_mrst_case(fn;
             end
             write_reservoir_simulator_output_to_mrst(sim.model, states, reports, forces, mrst_output_path, parameters = parameters)
         end
-        ns = length(states)
+        ns = completed_report_steps(states, reports)
         nt = length(dt)
         if verbose
             if ns == nt
@@ -2102,12 +2149,30 @@ function simulate_mrst_case(fn;
         end
     end
     if mode != :default
-        return result
+        return sim_result
     elseif legacy_output
         setup = (case = case, sim = sim, config = cfg, mrst = mrst_data)
         return (states, reports, output_path, setup)
+    elseif !do_sim
+        return (
+            case = case,
+            sim = sim,
+            config = cfg,
+            mrst = mrst_data,
+            output_path = output_path
+        )
+    elseif !load_all_states_after_sim
+        return (
+            result = sim_result,
+            reports = reports,
+            output_path = output_path,
+            case = case,
+            sim = sim,
+            config = cfg,
+            mrst = mrst_data
+        )
     else
-        result = ReservoirSimResult(model, result, forces,
+        result = ReservoirSimResult(model, sim_result, forces,
             case = case,
             sim = sim,
             config = cfg,
