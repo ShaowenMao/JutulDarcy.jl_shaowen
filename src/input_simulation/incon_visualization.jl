@@ -10,7 +10,7 @@ using MAT
 
 Export ONE VTU for the initial condition using:
 - grid from `mrst_data["G"]`
-- rock/state0/regions from the MAT file `fn` via MAT.matread
+- rock/state0/regions from `mrst_data`
 
 Permeability:
 - supports nc×1, nc×3, nc×6 in MAT export
@@ -26,7 +26,7 @@ function export_initial_step0_vtu(fn::AbstractString, mrst_data::Dict{String,Any
 
     mkpath(outdir)
 
-    exported = MAT.matread(fn)
+    exported = mrst_data
 
     st0 = Dict{Symbol, Any}(:Reservoir => Dict{Symbol, Any}())
     res0 = st0[:Reservoir]

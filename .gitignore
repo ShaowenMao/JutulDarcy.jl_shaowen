@@ -35,3 +35,4 @@ docs/package.json
 *.dat
 /docs/.vscode
 *.vtu
+local_runs/

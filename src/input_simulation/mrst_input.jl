@@ -85,11 +85,202 @@ function mrst_diffusion_override(diffusion, nc::Int)
     return out
 end
 
-function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid = false, diffusion = nothing)
-    fn = get_mrst_input_path(name)
-    @debug "Reading MAT file $fn..."
-    exported = MAT.matread(fn)
-    @debug "File read complete. Unpacking data..."
+function mrst_get_vec(d)
+    if isa(d, AbstractArray)
+        return vec(copy(d))
+    else
+        return [d]
+    end
+end
+
+function normalize_mrst_schedule_control!(mrst_data)
+    if !haskey(mrst_data, "schedule") || !haskey(mrst_data["schedule"], "control")
+        return mrst_data
+    end
+
+    schedule = mrst_data["schedule"]
+    ctrl = schedule["control"]
+
+    function wrap_well_set(w)
+        if w isa AbstractDict
+            return reshape(Any[w], 1, 1)
+        else
+            return w
+        end
+    end
+
+    if ctrl isa AbstractDict
+        array_lengths = Int[]
+        for v in values(ctrl)
+            if v isa AbstractArray
+                push!(array_lengths, length(v))
+            end
+        end
+        isempty(array_lengths) && return mrst_data
+        nctrl = maximum(array_lengths)
+        normalized = Matrix{Any}(undef, nctrl, 1)
+        for i in 1:nctrl
+            ctrl_i = Dict{String, Any}()
+            for (k, v) in pairs(ctrl)
+                key = String(k)
+                if v isa AbstractArray && length(v) == nctrl
+                    value = vec(v)[i]
+                else
+                    value = v
+                end
+                if key == "W"
+                    value = wrap_well_set(value)
+                end
+                ctrl_i[key] = value
+            end
+            normalized[i, 1] = ctrl_i
+        end
+        schedule["control"] = normalized
+    elseif ctrl isa AbstractArray
+        for ctrl_i in ctrl
+            if ctrl_i isa AbstractDict && haskey(ctrl_i, "W")
+                ctrl_i["W"] = wrap_well_set(ctrl_i["W"])
+            end
+        end
+    end
+    return mrst_data
+end
+
+function mrst_has_pressure_boundary_conditions(mrst_data)
+    if !haskey(mrst_data, "schedule") || !haskey(mrst_data["schedule"], "control")
+        return false
+    end
+    ctrl = mrst_data["schedule"]["control"]
+    controls = ctrl isa AbstractArray ? vec(ctrl) : [ctrl]
+    for ctrl_i in controls
+        if ctrl_i isa AbstractDict && haskey(ctrl_i, "bc")
+            bc = ctrl_i["bc"]
+            if length(bc) > 0
+                return true
+            end
+        end
+    end
+    return false
+end
+
+function restore_mrst_split_fault_tables!(assembled, fault)
+    if !haskey(fault, "fluid_tables")
+        return assembled
+    end
+    props = assembled["deck"]["PROPS"]
+    for (keyword, table_data) in pairs(fault["fluid_tables"])
+        key = String(keyword)
+        if !(table_data isa AbstractDict) || !haskey(table_data, "tables")
+            continue
+        end
+        haskey(props, key) || error("Split-specific file provides $key tables, but common deck.PROPS has no $key entry.")
+        haskey(table_data, "regions") || error("Split-specific fluid table $key is missing regions.")
+        regions = Int.(mrst_get_vec(table_data["regions"]))
+        tables = mrst_get_vec(table_data["tables"])
+        length(regions) == length(tables) || error("Split-specific fluid table $key has $(length(regions)) regions but $(length(tables)) tables.")
+        target = props[key]
+        for (region, table) in zip(regions, tables)
+            1 <= region <= length(target) || error("Split-specific fluid table $key region $region is outside common table length $(length(target)).")
+            target[region] = table
+        end
+    end
+    return assembled
+end
+
+function validate_mrst_split_case(assembled, specific)
+    errors = String[]
+    fault = haskey(specific, "fault") ? specific["fault"] : nothing
+    if isnothing(fault)
+        push!(errors, "specific file is missing top-level fault data")
+    else
+        for key in ("cells", "poro", "perm")
+            if !haskey(fault, key)
+                push!(errors, "specific fault block is missing $key")
+            end
+        end
+    end
+
+    if haskey(assembled, "rock")
+        rock = assembled["rock"]
+        if haskey(rock, "poro") && any(isnan, rock["poro"])
+            push!(errors, "assembled rock.poro still contains NaN values")
+        end
+        if haskey(rock, "perm") && any(isnan, rock["perm"])
+            push!(errors, "assembled rock.perm still contains NaN values")
+        end
+    else
+        push!(errors, "assembled case is missing rock data")
+    end
+
+    if haskey(assembled, "schedule") && haskey(assembled["schedule"], "control")
+        if assembled["schedule"]["control"] isa AbstractDict
+            push!(errors, "assembled schedule.control was not normalized to an array of controls")
+        end
+    end
+
+    if mrst_has_pressure_boundary_conditions(assembled) && !haskey(assembled, "T_all")
+        push!(errors, "pressure boundary conditions require T_all in the current MRST importer")
+    end
+
+    if !isempty(errors)
+        error("Invalid assembled MRST split case:\n - $(join(errors, "\n - "))")
+    end
+    return true
+end
+
+function assemble_mrst_split_case(common, specific; validate::Bool = true)
+    haskey(specific, "fault") || error("Specific MRST split file must contain a top-level fault block.")
+    assembled = deepcopy(common)
+    fault = specific["fault"]
+    cells = Int.(mrst_get_vec(fault["cells"]))
+    length(cells) == length(unique(cells)) || error("Split-specific fault cells must be unique.")
+
+    rock = assembled["rock"]
+    nc = length(vec(rock["poro"]))
+    all(c -> 1 <= c <= nc, cells) || error("Split-specific fault cells must be between 1 and $nc.")
+
+    poro = rock["poro"]
+    fault_poro = fault["poro"]
+    if poro isa AbstractVector
+        poro[cells] .= vec(fault_poro)
+    else
+        poro[cells, :] .= fault_poro
+    end
+
+    perm = rock["perm"]
+    fault_perm = fault["perm"]
+    if perm isa AbstractVector
+        perm[cells] .= vec(fault_perm)
+    else
+        perm[cells, :] .= fault_perm
+    end
+
+    restore_mrst_split_fault_tables!(assembled, fault)
+    normalize_mrst_schedule_control!(assembled)
+    if validate
+        validate_mrst_split_case(assembled, specific)
+    end
+    return assembled
+end
+
+function read_mrst_split_case(common_path::AbstractString, specific_path::AbstractString; validate::Bool = true)
+    common_fn = get_mrst_input_path(String(common_path))
+    specific_fn = get_mrst_input_path(String(specific_path))
+    @debug "Reading MRST split common MAT file $common_fn..."
+    common = MAT.matread(common_fn)
+    @debug "Reading MRST split specific MAT file $specific_fn..."
+    specific = MAT.matread(specific_fn)
+    assembled = assemble_mrst_split_case(common, specific; validate = validate)
+    assembled["split_input"] = Dict{String, Any}(
+        "common_path" => common_fn,
+        "specific_path" => specific_fn
+    )
+    return assembled
+end
+
+function reservoir_domain_from_mrst_data(exported; extraout = false, convert_grid = false, diffusion = nothing)
+    @debug "Unpacking MRST data..."
+    normalize_mrst_schedule_control!(exported)
     G_raw = exported["G"]
     if convert_grid && haskey(G_raw, "nodes")
         g = UnstructuredMesh(G_raw)
@@ -98,14 +289,7 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
     end
     has_trans = haskey(exported, "T") && length(exported["T"]) > 0
 
-    function get_vec(d)
-        if isa(d, AbstractArray)
-            return vec(copy(d))
-        else
-            return [d]
-        end
-    end
-    poro = get_vec(exported["rock"]["poro"])
+    poro = mrst_get_vec(exported["rock"]["poro"])
     perm = copy((exported["rock"]["perm"])')
 
     diffusion_coeff = mrst_diffusion_override(diffusion, length(poro))
@@ -117,12 +301,12 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
 
     if haskey(exported, "rock") && haskey(exported["rock"], "regions") &&
     haskey(exported["rock"]["regions"], "rocknum")
-        rocknum = Int64.(get_vec(exported["rock"]["regions"]["rocknum"]))
+        rocknum = Int64.(mrst_get_vec(exported["rock"]["regions"]["rocknum"]))
         domain[:rocknum, Cells()] = rocknum
     end
 
     if haskey(exported["rock"], "ntg")
-        ntg = get_vec(exported["rock"]["ntg"])
+        ntg = mrst_get_vec(exported["rock"]["ntg"])
         domain[:net_to_gross, Cells()] = ntg
         # TODO: MRST exporter assumes pv = vol*poro and defines poro from that.
         # We fix that calculation here in the Jutul side. If we fix it in the
@@ -146,7 +330,7 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
     # Deal with face data
     if has_trans
         @debug "Found precomputed transmissibilities, reusing"
-        T = get_vec(exported["T"])
+        T = mrst_get_vec(exported["T"])
         domain[:transmissibilities, Faces()] = T
     end
     if extraout
@@ -154,6 +338,17 @@ function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid
     else
         return domain
     end
+end
+
+function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid = false, diffusion = nothing)
+    fn = get_mrst_input_path(name)
+    @debug "Reading MAT file $fn..."
+    exported = MAT.matread(fn)
+    return reservoir_domain_from_mrst_data(exported;
+        extraout = extraout,
+        convert_grid = convert_grid,
+        diffusion = diffusion
+    )
 end
 
 function get_well_from_mrst_data(
@@ -1194,6 +1389,49 @@ end
 Set up a [`Jutul.JutulCase`](@ref) from a MRST-exported .mat file.
 """
 function setup_case_from_mrst(casename;
+        convert_grid = false,
+        diffusion = nothing,
+        kwarg...
+    )
+    data_domain, mrst_data = reservoir_domain_from_mrst(
+        casename,
+        extraout = true,
+        convert_grid = convert_grid,
+        diffusion = diffusion
+    )
+    return setup_case_from_mrst_data(data_domain, mrst_data;
+        convert_grid = convert_grid,
+        diffusion = diffusion,
+        kwarg...
+    )
+end
+
+"""
+    setup_case_from_mrst_split(common_path, specific_path; kwarg...)
+
+Set up a [`Jutul.JutulCase`](@ref) from a shared MRST common `.mat` file and a
+realization-specific `.mat` file. The split input is assembled in memory.
+"""
+function setup_case_from_mrst_split(common_path::AbstractString, specific_path::AbstractString;
+        convert_grid = false,
+        diffusion = nothing,
+        validate_split::Bool = true,
+        kwarg...
+    )
+    mrst_data = read_mrst_split_case(common_path, specific_path; validate = validate_split)
+    data_domain = reservoir_domain_from_mrst_data(mrst_data;
+        extraout = false,
+        convert_grid = convert_grid,
+        diffusion = diffusion
+    )
+    return setup_case_from_mrst_data(data_domain, mrst_data;
+        convert_grid = convert_grid,
+        diffusion = diffusion,
+        kwarg...
+    )
+end
+
+function setup_case_from_mrst_data(data_domain, mrst_data;
         wells = :simple,
         backend = :csr,
         block_backend = true,
@@ -1215,12 +1453,7 @@ function setup_case_from_mrst(casename;
         diffusion = nothing,
         kwarg...
     )
-    data_domain, mrst_data = reservoir_domain_from_mrst(
-        casename,
-        extraout = true,
-        convert_grid = convert_grid,
-        diffusion = diffusion
-    )
+    normalize_mrst_schedule_control!(mrst_data)
     G = discretized_domain_tpfv_flow(data_domain; kwarg...)
     if ismissing(facility_grouping)
         if split_wells
@@ -1659,6 +1892,9 @@ states into memory at once. This is intended for post-processing after a
 simulation has completed.
 """
 function export_mrst_case_vtu_from_output(fn, output_path;
+        common_mrst_path = nothing,
+        specific_mrst_path = nothing,
+        validate_split::Bool = true,
         backend = :csr,
         nthreads = Threads.nthreads(),
         minbatch = 1000,
@@ -1682,12 +1918,22 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         linear_solver = :bicgstab,
         diffusion = nothing,
     )
-    ext = lowercase(last(splitext(fn)))
-    if ext == ".data"
-        error("Streaming VTU export from saved output is currently only supported for MRST .mat cases.")
+    is_split_input = !isnothing(common_mrst_path) || !isnothing(specific_mrst_path)
+    if is_split_input
+        if isnothing(common_mrst_path) || isnothing(specific_mrst_path)
+            error("Both common_mrst_path and specific_mrst_path must be provided for split MRST input.")
+        end
+        common_mrst_path = get_mrst_input_path(String(common_mrst_path))
+        specific_mrst_path = get_mrst_input_path(String(specific_mrst_path))
+        fn = specific_mrst_path
+    else
+        ext = lowercase(last(splitext(fn)))
+        if ext == ".data"
+            error("Streaming VTU export from saved output is currently only supported for MRST .mat cases.")
+        end
+        fn = get_mrst_input_path(fn)
     end
 
-    fn = get_mrst_input_path(fn)
     output_path = realpath(output_path)
 
     if split_wells
@@ -1697,7 +1943,7 @@ function export_mrst_case_vtu_from_output(fn, output_path;
     end
     block_backend = linear_solver != :direct && linear_solver != :lu
 
-    case, mrst_data = setup_case_from_mrst(fn,
+    setup_kwargs = (
         block_backend = block_backend,
         steps = steps,
         backend = backend,
@@ -1715,6 +1961,14 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         ds_max = ds_max,
         diffusion = diffusion
     )
+    case, mrst_data = if is_split_input
+        setup_case_from_mrst_split(common_mrst_path, specific_mrst_path;
+            validate_split = validate_split,
+            setup_kwargs...
+        )
+    else
+        setup_case_from_mrst(fn; setup_kwargs...)
+    end
 
     model = case.model
     rmodel = model.models[:Reservoir]
@@ -1806,6 +2060,9 @@ Additional input arguments are passed onto, [`setup_case_from_mrst`](@ref),
 applicable.
 """
 function simulate_mrst_case(fn;
+        common_mrst_path = nothing,
+        specific_mrst_path = nothing,
+        validate_split::Bool = true,
         extra_outputs::Vector{Symbol} = [:Saturations],
         output_path = nothing,
         backend = :csr,
@@ -1845,10 +2102,21 @@ function simulate_mrst_case(fn;
         diffusion = nothing,
         kwarg...
     )
-    ext = lowercase(last(splitext(fn)))
-    is_data = ext == ".data"
-    if !is_data
-        fn = get_mrst_input_path(fn)
+    is_split_input = !isnothing(common_mrst_path) || !isnothing(specific_mrst_path)
+    if is_split_input
+        if isnothing(common_mrst_path) || isnothing(specific_mrst_path)
+            error("Both common_mrst_path and specific_mrst_path must be provided for split MRST input.")
+        end
+        common_mrst_path = get_mrst_input_path(String(common_mrst_path))
+        specific_mrst_path = get_mrst_input_path(String(specific_mrst_path))
+        fn = specific_mrst_path
+        is_data = false
+    else
+        ext = lowercase(last(splitext(fn)))
+        is_data = ext == ".data"
+        if !is_data
+            fn = get_mrst_input_path(fn)
+        end
     end
     if split_wells
         fg = :perwell
@@ -1862,7 +2130,11 @@ function simulate_mrst_case(fn;
         fg = :perwell
     end
     if verbose
-        jutul_message("MRST model", "Reading input file $fn.")
+        if is_split_input
+            jutul_message("MRST model", "Reading split input common=$common_mrst_path specific=$specific_mrst_path.")
+        else
+            jutul_message("MRST model", "Reading input file $fn.")
+        end
         @info "This is the first call to simulate_mrst_case. Compilation may take some time..." maxlog = 1
     end
     block_backend = linear_solver != :direct && linear_solver != :lu
@@ -1884,6 +2156,27 @@ function simulate_mrst_case(fn;
         )
         # A bit of a hack
         mrst_data = deck
+    elseif is_split_input
+        case, mrst_data = setup_case_from_mrst_split(common_mrst_path, specific_mrst_path;
+            validate_split = validate_split,
+            block_backend = block_backend,
+            steps = steps,
+            backend = backend,
+            nthreads = nthreads,
+            split_wells = split_wells,
+            facility_grouping = fg,
+            general_ad = general_ad,
+            minbatch = minbatch,
+            wells = wells,
+            dp_max_abs = dp_max_abs,
+            dp_max_rel = dp_max_rel,
+            p_min = p_min,
+            p_max = p_max,
+            dz_max = dz_max,
+            ds_max = ds_max,
+            diffusion = diffusion
+        )
+        deck = mrst_data["deck"]
     else
         case, mrst_data = setup_case_from_mrst(fn,
             block_backend = block_backend,
