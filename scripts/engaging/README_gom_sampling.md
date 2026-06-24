@@ -12,7 +12,7 @@ The whole cases are useful as baselines/checks. For large future sweeps, the spl
 The launcher requests the advanced CPU account/QOS:
 
 ```bash
-#SBATCH -A mit_amf_advanced
+#SBATCH -A mit_amf_advanced_cpu
 #SBATCH --qos=mit_amf_advanced_cpu
 ```
 

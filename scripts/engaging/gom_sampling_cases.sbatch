@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -p mit_normal
-#SBATCH -A mit_amf_advanced
+#SBATCH -A mit_amf_advanced_cpu
 #SBATCH --qos=mit_amf_advanced_cpu
 #SBATCH -J gom_sampling
 #SBATCH -c 8
