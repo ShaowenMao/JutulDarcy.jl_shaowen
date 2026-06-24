@@ -44,26 +44,22 @@ gom_sampling_inputs/
 
 If you put the files somewhere else, submit with `INPUT_ROOT=/path/to/gom_sampling_inputs`.
 
-## Submit All Eight Simulation Cases
+## Submit All Four Simulation Cases
 
 From the repository on Engaging:
 
 ```bash
 mkdir -p /home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs
-sbatch --array=1-8 scripts/engaging/gom_sampling_cases.sbatch
+sbatch --array=1-4 scripts/engaging/gom_sampling_cases.sbatch
 ```
 
 The array index maps to:
 
 ```text
-1 = all87_whole, MAX_TIMESTEP_CUTS=8
-2 = all87_split, MAX_TIMESTEP_CUTS=8
-3 = old86_whole, MAX_TIMESTEP_CUTS=8
-4 = old86_split, MAX_TIMESTEP_CUTS=8
-5 = all87_whole, MAX_TIMESTEP_CUTS=25
-6 = all87_split, MAX_TIMESTEP_CUTS=25
-7 = old86_whole, MAX_TIMESTEP_CUTS=25
-8 = old86_split, MAX_TIMESTEP_CUTS=25
+1 = all87_whole, MAX_TIMESTEP_CUTS=25
+2 = all87_split, MAX_TIMESTEP_CUTS=25
+3 = old86_whole, MAX_TIMESTEP_CUTS=25
+4 = old86_split, MAX_TIMESTEP_CUTS=25
 ```
 
 Simulation mode writes restart `.jld2` files only. It does not load all restart states at the end and does not write VTU files, so the simulation timing summary stays clean.
@@ -71,7 +67,7 @@ Simulation mode writes restart `.jld2` files only. It does not load all restart 
 If you want to limit how many run at once, use Slurm's array concurrency limit. For example, at most two at once:
 
 ```bash
-sbatch --array=1-8%2 scripts/engaging/gom_sampling_cases.sbatch
+sbatch --array=1-4%2 scripts/engaging/gom_sampling_cases.sbatch
 ```
 
 ## Submit One Simulation Case
@@ -81,16 +77,16 @@ mkdir -p /home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs
 sbatch --export=ALL,CASE_ID=all87_split_cuts25 scripts/engaging/gom_sampling_cases.sbatch
 ```
 
-Valid `CASE_ID` values are `all87_whole_cuts8`, `all87_split_cuts8`, `old86_whole_cuts8`, `old86_split_cuts8`, `all87_whole_cuts25`, `all87_split_cuts25`, `old86_whole_cuts25`, and `old86_split_cuts25`. The numeric values `1` through `8` also work.
+Valid default `CASE_ID` values are `all87_whole`, `all87_split`, `old86_whole`, `old86_split`, `all87_whole_cuts25`, `all87_split_cuts25`, `old86_whole_cuts25`, and `old86_split_cuts25`. The numeric values `1` through `4` also work.
 
-For backwards compatibility, `all87_whole`, `all87_split`, `old86_whole`, and `old86_split` still work and mean `MAX_TIMESTEP_CUTS=8`.
+For deliberate comparison reruns, explicit legacy names `all87_whole_cuts8`, `all87_split_cuts8`, `old86_whole_cuts8`, and `old86_split_cuts8` still work and mean `MAX_TIMESTEP_CUTS=8`.
 
 ## Submit Old GoM Large Control
 
 To compare the current driver/sbatch setup against the previous `gom_large_hys` input, run one control job using the old input file:
 
 ```bash
-sbatch --export=ALL,CASE_ID=gom_large_hys_control_cuts8 scripts/engaging/gom_sampling_cases.sbatch
+sbatch --export=ALL,CASE_ID=gom_large_hys_control scripts/engaging/gom_sampling_cases.sbatch
 ```
 
 By default this reads:
@@ -99,10 +95,10 @@ By default this reads:
 /home/$USER/orcd/pool/jutuldarcy_case/gom_inputs/lluis_field_case.mat
 ```
 
-To run the same control with `MAX_TIMESTEP_CUTS=25`, use:
+This defaults to `MAX_TIMESTEP_CUTS=25`. To deliberately rerun the old control with `MAX_TIMESTEP_CUTS=8`, use:
 
 ```bash
-sbatch --export=ALL,CASE_ID=gom_large_hys_control_cuts25 scripts/engaging/gom_sampling_cases.sbatch
+sbatch --export=ALL,CASE_ID=gom_large_hys_control_cuts8 scripts/engaging/gom_sampling_cases.sbatch
 ```
 
 If the old input lives somewhere else, override `GOM_LARGE_HYS_MATFILE_PATH`.
@@ -138,7 +134,6 @@ Slurm initially creates small `slurm-bootstrap-*.out` and `slurm-bootstrap-*.err
 By default, case folders include the timestep-cut setting and Slurm array job id, for example:
 
 ```text
-all87_split_cuts8_job16423849/
 all87_split_cuts25_job16423849/
 ```
 

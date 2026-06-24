@@ -5,7 +5,7 @@
 #SBATCH -J gom_sampling
 #SBATCH -c 8
 #SBATCH --mem=64G
-#SBATCH -t 12:00:00
+#SBATCH -t 24:00:00
 #SBATCH -o /home/%u/orcd/scratch/jutuldarcy_case/gom_sampling_runs/slurm-bootstrap-%x-%A_%a.out
 #SBATCH -e /home/%u/orcd/scratch/jutuldarcy_case/gom_sampling_runs/slurm-bootstrap-%x-%A_%a.err
 
@@ -25,52 +25,54 @@ unset COMMON_MATFILE_PATH
 unset SPECIFIC_MATFILE_PATH
 
 case "$CASE_ID" in
-    1|all87_whole|all87_whole_cut8|all87_whole_cuts8)
-        INPUT_CASE_ID=all87_whole
-        CASE_TIMESTEP_CUTS=8
-        ;;
-    2|all87_split|all87_split_cut8|all87_split_cuts8)
-        INPUT_CASE_ID=all87_split
-        CASE_TIMESTEP_CUTS=8
-        ;;
-    3|old86_whole|old86_whole_cut8|old86_whole_cuts8)
-        INPUT_CASE_ID=old86_whole
-        CASE_TIMESTEP_CUTS=8
-        ;;
-    4|old86_split|old86_split_cut8|old86_split_cuts8)
-        INPUT_CASE_ID=old86_split
-        CASE_TIMESTEP_CUTS=8
-        ;;
-    5|all87_whole_cut25|all87_whole_cuts25)
+    1|all87_whole|all87_whole_cut25|all87_whole_cuts25)
         INPUT_CASE_ID=all87_whole
         CASE_TIMESTEP_CUTS=25
         ;;
-    6|all87_split_cut25|all87_split_cuts25)
+    2|all87_split|all87_split_cut25|all87_split_cuts25)
         INPUT_CASE_ID=all87_split
         CASE_TIMESTEP_CUTS=25
         ;;
-    7|old86_whole_cut25|old86_whole_cuts25)
+    3|old86_whole|old86_whole_cut25|old86_whole_cuts25)
         INPUT_CASE_ID=old86_whole
         CASE_TIMESTEP_CUTS=25
         ;;
-    8|old86_split_cut25|old86_split_cuts25)
+    4|old86_split|old86_split_cut25|old86_split_cuts25)
         INPUT_CASE_ID=old86_split
         CASE_TIMESTEP_CUTS=25
         ;;
-    gom_large_hys_control|gom_large_hys_control_cut8|gom_large_hys_control_cuts8)
-        INPUT_CASE_ID=gom_large_hys_control
+    all87_whole_cut8|all87_whole_cuts8)
+        INPUT_CASE_ID=all87_whole
         CASE_TIMESTEP_CUTS=8
         ;;
-    gom_large_hys_control_cut25|gom_large_hys_control_cuts25)
+    all87_split_cut8|all87_split_cuts8)
+        INPUT_CASE_ID=all87_split
+        CASE_TIMESTEP_CUTS=8
+        ;;
+    old86_whole_cut8|old86_whole_cuts8)
+        INPUT_CASE_ID=old86_whole
+        CASE_TIMESTEP_CUTS=8
+        ;;
+    old86_split_cut8|old86_split_cuts8)
+        INPUT_CASE_ID=old86_split
+        CASE_TIMESTEP_CUTS=8
+        ;;
+    gom_large_hys_control|gom_large_hys_control_cut25|gom_large_hys_control_cuts25)
         INPUT_CASE_ID=gom_large_hys_control
         CASE_TIMESTEP_CUTS=25
+        ;;
+    gom_large_hys_control_cut8|gom_large_hys_control_cuts8)
+        INPUT_CASE_ID=gom_large_hys_control
+        CASE_TIMESTEP_CUTS=8
         ;;
     *)
         echo "Unknown CASE_ID=$CASE_ID"
-        echo "Valid numeric values: 1-8"
-        echo "Valid names: all87_whole_cuts8, all87_split_cuts8, old86_whole_cuts8, old86_split_cuts8,"
+        echo "Valid numeric values: 1-4"
+        echo "Default names use MAX_TIMESTEP_CUTS=25: all87_whole, all87_split, old86_whole, old86_split,"
         echo "             all87_whole_cuts25, all87_split_cuts25, old86_whole_cuts25, old86_split_cuts25,"
-        echo "             gom_large_hys_control_cuts8, gom_large_hys_control_cuts25"
+        echo "             gom_large_hys_control, gom_large_hys_control_cuts25"
+        echo "Legacy comparison names use MAX_TIMESTEP_CUTS=8: all87_whole_cuts8, all87_split_cuts8,"
+        echo "             old86_whole_cuts8, old86_split_cuts8, gom_large_hys_control_cuts8"
         exit 1
         ;;
 esac
