@@ -57,16 +57,29 @@ case "$CASE_ID" in
         INPUT_CASE_ID=old86_split
         CASE_TIMESTEP_CUTS=25
         ;;
+    gom_large_hys_control|gom_large_hys_control_cut8|gom_large_hys_control_cuts8)
+        INPUT_CASE_ID=gom_large_hys_control
+        CASE_TIMESTEP_CUTS=8
+        ;;
+    gom_large_hys_control_cut25|gom_large_hys_control_cuts25)
+        INPUT_CASE_ID=gom_large_hys_control
+        CASE_TIMESTEP_CUTS=25
+        ;;
     *)
         echo "Unknown CASE_ID=$CASE_ID"
         echo "Valid numeric values: 1-8"
         echo "Valid names: all87_whole_cuts8, all87_split_cuts8, old86_whole_cuts8, old86_split_cuts8,"
-        echo "             all87_whole_cuts25, all87_split_cuts25, old86_whole_cuts25, old86_split_cuts25"
+        echo "             all87_whole_cuts25, all87_split_cuts25, old86_whole_cuts25, old86_split_cuts25,"
+        echo "             gom_large_hys_control_cuts8, gom_large_hys_control_cuts25"
         exit 1
         ;;
 esac
 
 case "$INPUT_CASE_ID" in
+    gom_large_hys_control)
+        CASE_KEY=gom_large_hys_control
+        export MATFILE_PATH="${GOM_LARGE_HYS_MATFILE_PATH:-/home/$USER/orcd/pool/jutuldarcy_case/gom_inputs/lluis_field_case.mat}"
+        ;;
     all87_whole)
         CASE_KEY=all87_whole
         export MATFILE_PATH="$INPUT_ROOT/all87/jutul/lluis_field_case_87_all87_whole.mat"

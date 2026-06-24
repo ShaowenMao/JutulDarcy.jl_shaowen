@@ -85,6 +85,28 @@ Valid `CASE_ID` values are `all87_whole_cuts8`, `all87_split_cuts8`, `old86_whol
 
 For backwards compatibility, `all87_whole`, `all87_split`, `old86_whole`, and `old86_split` still work and mean `MAX_TIMESTEP_CUTS=8`.
 
+## Submit Old GoM Large Control
+
+To compare the current driver/sbatch setup against the previous `gom_large_hys` input, run one control job using the old input file:
+
+```bash
+sbatch --export=ALL,CASE_ID=gom_large_hys_control_cuts8 scripts/engaging/gom_sampling_cases.sbatch
+```
+
+By default this reads:
+
+```bash
+/home/$USER/orcd/pool/jutuldarcy_case/gom_inputs/lluis_field_case.mat
+```
+
+To run the same control with `MAX_TIMESTEP_CUTS=25`, use:
+
+```bash
+sbatch --export=ALL,CASE_ID=gom_large_hys_control_cuts25 scripts/engaging/gom_sampling_cases.sbatch
+```
+
+If the old input lives somewhere else, override `GOM_LARGE_HYS_MATFILE_PATH`.
+
 ## Generate VTU for One Completed Case
 
 After a simulation finishes, submit a separate VTU job for only the case you want to visualize:
