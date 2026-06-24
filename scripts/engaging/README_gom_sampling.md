@@ -9,6 +9,13 @@ This folder contains an Engaging `sbatch` launcher for the four 87-slice GoM inp
 
 The whole cases are useful as baselines/checks. For large future sweeps, the split cases are the cleaner production pattern because many realizations can share the same common file.
 
+The launcher requests the advanced CPU account/QOS:
+
+```bash
+#SBATCH -A mit_amf_advanced
+#SBATCH --qos=mit_amf_advanced_cpu
+```
+
 ## Expected Engaging Layout
 
 By default, the script expects the input files under:
@@ -128,3 +135,9 @@ sbatch --export=ALL,CASE_ID=all87_split_cuts25,CASE_TAG=all87_split_cuts25_retry
 ```
 
 For simulation jobs, the script defaults to `HYPRE_THREADS=8` and uses `SLURM_CPUS_PER_TASK` for Julia threads. For VTU-only jobs, it defaults to `HYPRE_THREADS=1`.
+
+After submission, confirm the account/QOS with:
+
+```bash
+scontrol show job <JOBID>_1 | grep -E "Account=|QOS=|Partition=|MinMemory"
+```

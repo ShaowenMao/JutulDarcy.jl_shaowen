@@ -1,5 +1,7 @@
 #!/bin/bash
 #SBATCH -p mit_normal
+#SBATCH -A mit_amf_advanced
+#SBATCH --qos=mit_amf_advanced_cpu
 #SBATCH -J gom_sampling
 #SBATCH -c 8
 #SBATCH --mem=64G
