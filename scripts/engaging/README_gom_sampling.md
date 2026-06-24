@@ -42,6 +42,7 @@ If you put the files somewhere else, submit with `INPUT_ROOT=/path/to/gom_sampli
 From the repository on Engaging:
 
 ```bash
+mkdir -p /home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs
 sbatch --array=1-4 scripts/engaging/gom_sampling_cases.sbatch
 ```
 
@@ -59,6 +60,7 @@ Simulation mode writes restart `.jld2` files only. It does not load all restart 
 ## Submit One Simulation Case
 
 ```bash
+mkdir -p /home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs
 sbatch --export=ALL,CASE_ID=all87_split scripts/engaging/gom_sampling_cases.sbatch
 ```
 
@@ -83,6 +85,14 @@ and writes visualization files to:
 ```bash
 $RUN_ROOT/$CASE_TAG/vtu
 ```
+
+Detailed stdout/stderr logs are written next to each case:
+
+```bash
+$RUN_ROOT/$CASE_TAG/logs
+```
+
+The small `slurm-bootstrap-*.out` and `slurm-bootstrap-*.err` files in `$RUN_ROOT` only exist so Slurm has an initial stdout/stderr target before the script redirects into the case-specific log folder.
 
 ## Useful Overrides
 

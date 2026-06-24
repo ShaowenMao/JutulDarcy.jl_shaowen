@@ -4,8 +4,8 @@
 #SBATCH -c 8
 #SBATCH --mem=128G
 #SBATCH -t 12:00:00
-#SBATCH -o slurm-%x-%A_%a.out
-#SBATCH -e slurm-%x-%A_%a.err
+#SBATCH -o /home/%u/orcd/scratch/jutuldarcy_case/gom_sampling_runs/slurm-bootstrap-%x-%A_%a.out
+#SBATCH -e /home/%u/orcd/scratch/jutuldarcy_case/gom_sampling_runs/slurm-bootstrap-%x-%A_%a.err
 
 set -euo pipefail
 
@@ -13,23 +13,9 @@ module purge
 module load community-modules
 module load julia/1.10.4
 
-echo "===== JOB ENV INFO ====="
-hostname
-date
-pwd
-which julia
-julia --version
-module list
-echo "SLURM_JOB_ID=${SLURM_JOB_ID:-}"
-echo "SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID:-}"
-echo "SLURM_CPUS_PER_TASK=${SLURM_CPUS_PER_TASK:-}"
-echo "========================"
-
 REPO_ROOT=${REPO_ROOT:-/home/$USER/projects/JutulDarcy.jl_shaowen}
 INPUT_ROOT=${INPUT_ROOT:-/home/$USER/orcd/pool/jutuldarcy_case/gom_sampling_inputs}
 RUN_ROOT=${RUN_ROOT:-/home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs}
-
-cd "$REPO_ROOT"
 
 CASE_ID=${CASE_ID:-${SLURM_ARRAY_TASK_ID:-all87_split}}
 
@@ -73,6 +59,33 @@ export VTU_PREFIX=${VTU_PREFIX:-$CASE_KEY}
 
 export RESTART_OUTPUT_PATH="$RUN_ROOT/$CASE_TAG/restart"
 export VTU_PATH="$RUN_ROOT/$CASE_TAG/vtu"
+export CASE_LOG_DIR="$RUN_ROOT/$CASE_TAG/logs"
+mkdir -p "$CASE_LOG_DIR"
+
+JOB_LABEL=${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-manual}}
+TASK_LABEL=${SLURM_ARRAY_TASK_ID:-0}
+LOG_BASENAME="slurm-${SLURM_JOB_NAME:-gom_sampling}-${JOB_LABEL}_${TASK_LABEL}"
+export CASE_STDOUT_PATH="$CASE_LOG_DIR/${LOG_BASENAME}.out"
+export CASE_STDERR_PATH="$CASE_LOG_DIR/${LOG_BASENAME}.err"
+
+exec > "$CASE_STDOUT_PATH" 2> "$CASE_STDERR_PATH"
+
+cd "$REPO_ROOT"
+
+echo "===== JOB ENV INFO ====="
+hostname
+date
+pwd
+which julia
+julia --version
+module list
+echo "SLURM_JOB_ID=${SLURM_JOB_ID:-}"
+echo "SLURM_ARRAY_JOB_ID=${SLURM_ARRAY_JOB_ID:-}"
+echo "SLURM_ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID:-}"
+echo "SLURM_CPUS_PER_TASK=${SLURM_CPUS_PER_TASK:-}"
+echo "CASE_STDOUT_PATH=$CASE_STDOUT_PATH"
+echo "CASE_STDERR_PATH=$CASE_STDERR_PATH"
+echo "========================"
 
 if [ "$RUN_MODE" = "simulate" ] || [ "$RUN_MODE" = "sim" ]; then
     export HYPRE_THREADS=${HYPRE_THREADS:-8}
