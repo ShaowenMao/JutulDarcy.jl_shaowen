@@ -90,7 +90,7 @@ For backwards compatibility, `all87_whole`, `all87_split`, `old86_whole`, and `o
 After a simulation finishes, submit a separate VTU job for only the case you want to visualize:
 
 ```bash
-sbatch --export=ALL,RUN_MODE=vtu,CASE_ID=all87_split_cuts25 scripts/engaging/gom_sampling_cases.sbatch
+sbatch --export=ALL,RUN_MODE=vtu,CASE_ID=all87_split_cuts25,CASE_TAG=all87_split_cuts25_job16423849 scripts/engaging/gom_sampling_cases.sbatch
 ```
 
 The VTU job uses the same `CASE_TAG` and `RUN_ROOT` convention as the simulation job, so it looks for restart files at:
@@ -111,13 +111,21 @@ Detailed stdout/stderr logs are written next to each case:
 $RUN_ROOT/$CASE_TAG/logs
 ```
 
-The small `slurm-bootstrap-*.out` and `slurm-bootstrap-*.err` files in `$RUN_ROOT` only exist so Slurm has an initial stdout/stderr target before the script redirects into the case-specific log folder.
+Slurm initially creates small `slurm-bootstrap-*.out` and `slurm-bootstrap-*.err` files in `$RUN_ROOT` because it needs a stdout/stderr target before the script can calculate the case folder.
 
-By default, case folders include the timestep-cut setting, for example:
+By default, case folders include the timestep-cut setting and Slurm array job id, for example:
 
 ```text
-all87_split_cuts8/
-all87_split_cuts25/
+all87_split_cuts8_job16423849/
+all87_split_cuts25_job16423849/
+```
+
+The script moves those bootstrap logs into the same `logs/` folder after startup. If a job fails before the script starts, a bootstrap log can still remain directly under `$RUN_ROOT`.
+
+Because a later VTU-only job has a different Slurm job id, pass the simulation `CASE_TAG` explicitly when exporting visualization from a completed run:
+
+```bash
+sbatch --export=ALL,RUN_MODE=vtu,CASE_ID=all87_split_cuts25,CASE_TAG=all87_split_cuts25_job16423849 scripts/engaging/gom_sampling_cases.sbatch
 ```
 
 ## Useful Overrides
@@ -128,7 +136,7 @@ Use these when the repository, inputs, or output folder differ from the defaults
 sbatch --export=ALL,REPO_ROOT=/path/to/repo,INPUT_ROOT=/path/to/inputs,RUN_ROOT=/path/to/runs,CASE_ID=old86_split_cuts25 scripts/engaging/gom_sampling_cases.sbatch
 ```
 
-By default, `CASE_TAG` is the case key plus timestep-cut setting, for example `all87_split_cuts25`. If you want a separate output folder for a rerun, set `CASE_TAG`:
+By default, `CASE_TAG` is the case key plus timestep-cut setting plus Slurm array job id, for example `all87_split_cuts25_job16423849`. If you want a custom output folder for a rerun, set `CASE_TAG`:
 
 ```bash
 sbatch --export=ALL,CASE_ID=all87_split_cuts25,CASE_TAG=all87_split_cuts25_retry01 scripts/engaging/gom_sampling_cases.sbatch
