@@ -23,39 +23,81 @@ unset COMMON_MATFILE_PATH
 unset SPECIFIC_MATFILE_PATH
 
 case "$CASE_ID" in
-    1|all87_whole)
+    1|all87_whole|all87_whole_cut8|all87_whole_cuts8)
+        INPUT_CASE_ID=all87_whole
+        CASE_TIMESTEP_CUTS=8
+        ;;
+    2|all87_split|all87_split_cut8|all87_split_cuts8)
+        INPUT_CASE_ID=all87_split
+        CASE_TIMESTEP_CUTS=8
+        ;;
+    3|old86_whole|old86_whole_cut8|old86_whole_cuts8)
+        INPUT_CASE_ID=old86_whole
+        CASE_TIMESTEP_CUTS=8
+        ;;
+    4|old86_split|old86_split_cut8|old86_split_cuts8)
+        INPUT_CASE_ID=old86_split
+        CASE_TIMESTEP_CUTS=8
+        ;;
+    5|all87_whole_cut25|all87_whole_cuts25)
+        INPUT_CASE_ID=all87_whole
+        CASE_TIMESTEP_CUTS=25
+        ;;
+    6|all87_split_cut25|all87_split_cuts25)
+        INPUT_CASE_ID=all87_split
+        CASE_TIMESTEP_CUTS=25
+        ;;
+    7|old86_whole_cut25|old86_whole_cuts25)
+        INPUT_CASE_ID=old86_whole
+        CASE_TIMESTEP_CUTS=25
+        ;;
+    8|old86_split_cut25|old86_split_cuts25)
+        INPUT_CASE_ID=old86_split
+        CASE_TIMESTEP_CUTS=25
+        ;;
+    *)
+        echo "Unknown CASE_ID=$CASE_ID"
+        echo "Valid numeric values: 1-8"
+        echo "Valid names: all87_whole_cuts8, all87_split_cuts8, old86_whole_cuts8, old86_split_cuts8,"
+        echo "             all87_whole_cuts25, all87_split_cuts25, old86_whole_cuts25, old86_split_cuts25"
+        exit 1
+        ;;
+esac
+
+case "$INPUT_CASE_ID" in
+    all87_whole)
         CASE_KEY=all87_whole
         export MATFILE_PATH="$INPUT_ROOT/all87/jutul/lluis_field_case_87_all87_whole.mat"
         ;;
-    2|all87_split)
+    all87_split)
         CASE_KEY=all87_split
         export COMMON_MATFILE_PATH="$INPUT_ROOT/all87/jutul_split/lluis_field_case_87_all87_common.mat"
         export SPECIFIC_MATFILE_PATH="$INPUT_ROOT/all87/jutul_split/lluis_field_case_87_all87_realization_0001_specific.mat"
         export MATFILE_PATH="$SPECIFIC_MATFILE_PATH"
         ;;
-    3|old86_whole)
+    old86_whole)
         CASE_KEY=old86_whole
         export MATFILE_PATH="$INPUT_ROOT/old86/jutul/lluis_field_case_87_old86_whole.mat"
         ;;
-    4|old86_split)
+    old86_split)
         CASE_KEY=old86_split
         export COMMON_MATFILE_PATH="$INPUT_ROOT/old86/jutul_split/lluis_field_case_87_old86_common.mat"
         export SPECIFIC_MATFILE_PATH="$INPUT_ROOT/old86/jutul_split/lluis_field_case_87_old86_realization_0001_specific.mat"
         export MATFILE_PATH="$SPECIFIC_MATFILE_PATH"
         ;;
     *)
-        echo "Unknown CASE_ID=$CASE_ID"
-        echo "Valid values: 1/all87_whole, 2/all87_split, 3/old86_whole, 4/old86_split"
+        echo "Internal error: unknown INPUT_CASE_ID=$INPUT_CASE_ID from CASE_ID=$CASE_ID"
         exit 1
         ;;
 esac
 
 export CASE_NAME=GOM_LARGE
-export CASE_TAG=${CASE_TAG:-$CASE_KEY}
+export MAX_TIMESTEP_CUTS=${MAX_TIMESTEP_CUTS:-$CASE_TIMESTEP_CUTS}
+export CASE_TAG=${CASE_TAG:-${CASE_KEY}_cuts${MAX_TIMESTEP_CUTS}}
 export RUN_MODE=${RUN_MODE:-simulate}
 export JULIA_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
 export CASE_JULIA_THREADS=${SLURM_CPUS_PER_TASK:-8}
-export VTU_PREFIX=${VTU_PREFIX:-$CASE_KEY}
+export VTU_PREFIX=${VTU_PREFIX:-$CASE_TAG}
 
 export RESTART_OUTPUT_PATH="$RUN_ROOT/$CASE_TAG/restart"
 export VTU_PATH="$RUN_ROOT/$CASE_TAG/vtu"
@@ -112,9 +154,11 @@ fi
 
 echo "===== CASE INFO ====="
 echo "CASE_ID=$CASE_ID"
+echo "INPUT_CASE_ID=$INPUT_CASE_ID"
 echo "CASE_KEY=$CASE_KEY"
 echo "CASE_TAG=$CASE_TAG"
 echo "RUN_MODE=$RUN_MODE"
+echo "MAX_TIMESTEP_CUTS=$MAX_TIMESTEP_CUTS"
 echo "MATFILE_PATH=$MATFILE_PATH"
 echo "COMMON_MATFILE_PATH=${COMMON_MATFILE_PATH:-}"
 echo "SPECIFIC_MATFILE_PATH=${SPECIFIC_MATFILE_PATH:-}"
