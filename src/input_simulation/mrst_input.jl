@@ -278,6 +278,24 @@ function read_mrst_split_case(common_path::AbstractString, specific_path::Abstra
     return assembled
 end
 
+function disable_mrst_hysteresis!(mrst_data)
+    if !(haskey(mrst_data, "deck") && haskey(mrst_data["deck"], "RUNSPEC"))
+        @warn "DISABLE_HYSTERESIS=true was requested, but the MRST data has no deck RUNSPEC."
+        return false
+    end
+
+    runspec = mrst_data["deck"]["RUNSPEC"]
+    runspec["NOHYST"] = true
+
+    props = get(mrst_data["deck"], "PROPS", Dict{String, Any}())
+    if haskey(props, "EHYSTR")
+        jutul_message("MRST model", "DISABLE_HYSTERESIS=true: ignoring EHYSTR through RUNSPEC NOHYST.", color = :yellow)
+    else
+        jutul_message("MRST model", "DISABLE_HYSTERESIS=true: RUNSPEC NOHYST set, but no EHYSTR table was present.", color = :yellow)
+    end
+    return true
+end
+
 function reservoir_domain_from_mrst_data(exported; extraout = false, convert_grid = false, diffusion = nothing)
     @debug "Unpacking MRST data..."
     normalize_mrst_schedule_control!(exported)
@@ -1451,9 +1469,13 @@ function setup_case_from_mrst_data(data_domain, mrst_data;
         p_max = Inf,
         dr_max = Inf,
         diffusion = nothing,
+        disable_hysteresis::Bool = false,
         kwarg...
     )
     normalize_mrst_schedule_control!(mrst_data)
+    if disable_hysteresis
+        disable_mrst_hysteresis!(mrst_data)
+    end
     G = discretized_domain_tpfv_flow(data_domain; kwarg...)
     if ismissing(facility_grouping)
         if split_wells
@@ -1917,6 +1939,7 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         wells = :simple,
         linear_solver = :bicgstab,
         diffusion = nothing,
+        disable_hysteresis::Bool = false,
     )
     is_split_input = !isnothing(common_mrst_path) || !isnothing(specific_mrst_path)
     if is_split_input
@@ -1959,7 +1982,8 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         p_max = p_max,
         dz_max = dz_max,
         ds_max = ds_max,
-        diffusion = diffusion
+        diffusion = diffusion,
+        disable_hysteresis = disable_hysteresis
     )
     case, mrst_data = if is_split_input
         setup_case_from_mrst_split(common_mrst_path, specific_mrst_path;
@@ -2048,6 +2072,9 @@ Simulate a MRST case from `file_name` as exported by `writeJutulInput` in MRST.
 - `diffusion = nothing`: Optional diffusion override for MRST `.mat` cases.
   Scalars apply uniformly, vectors can be cellwise, and tuples/matrices can be
   used for per-phase values.
+- `disable_hysteresis::Bool = false`: If `true`, set `RUNSPEC["NOHYST"]` on
+  MRST `.mat` input after reading it so EHYSTR hysteresis tables are ignored
+  without modifying the original input file.
 - `load_all_states_after_sim::Bool = true`: If `false`, keep reports in memory
   but avoid reading all saved states back from JLD2 at the end of the
   simulation. Recommended for large simulation-only HPC jobs that use the
@@ -2100,6 +2127,7 @@ function simulate_mrst_case(fn;
         report_level::Union{Nothing, Int} = nothing,
         load_all_states_after_sim::Bool = true,
         diffusion = nothing,
+        disable_hysteresis::Bool = false,
         kwarg...
     )
     is_split_input = !isnothing(common_mrst_path) || !isnothing(specific_mrst_path)
@@ -2156,6 +2184,9 @@ function simulate_mrst_case(fn;
         )
         # A bit of a hack
         mrst_data = deck
+        if disable_hysteresis
+            @warn "DISABLE_HYSTERESIS=true currently only rewrites MRST .mat deck data. For .data input, include NOHYST in the deck itself."
+        end
     elseif is_split_input
         case, mrst_data = setup_case_from_mrst_split(common_mrst_path, specific_mrst_path;
             validate_split = validate_split,
@@ -2174,7 +2205,8 @@ function simulate_mrst_case(fn;
             p_max = p_max,
             dz_max = dz_max,
             ds_max = ds_max,
-            diffusion = diffusion
+            diffusion = diffusion,
+            disable_hysteresis = disable_hysteresis
         )
         deck = mrst_data["deck"]
     else
@@ -2194,7 +2226,8 @@ function simulate_mrst_case(fn;
             p_max = p_max,
             dz_max = dz_max,
             ds_max = ds_max,
-            diffusion = diffusion
+            diffusion = diffusion,
+            disable_hysteresis = disable_hysteresis
         )
         deck = mrst_data["deck"]
     end

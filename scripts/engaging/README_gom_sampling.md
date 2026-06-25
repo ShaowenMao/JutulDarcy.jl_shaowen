@@ -64,6 +64,18 @@ The array index maps to:
 
 Simulation mode writes restart `.jld2` files only. It does not load all restart states at the end and does not write VTU files, so the simulation timing summary stays clean.
 
+To run the same four cases with EHYSTR hysteresis disabled without modifying the `.mat` files, set `DISABLE_HYSTERESIS=true`:
+
+```bash
+sbatch --export=ALL,DISABLE_HYSTERESIS=true --array=1-4 scripts/engaging/gom_sampling_cases.sbatch
+```
+
+Those folders include `_nohyst`, for example:
+
+```text
+all87_split_cuts25_nohyst_job16482723/
+```
+
 If you want to limit how many run at once, use Slurm's array concurrency limit. For example, at most two at once:
 
 ```bash
