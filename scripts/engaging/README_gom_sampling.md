@@ -123,6 +123,43 @@ After a simulation finishes, submit a separate VTU job for only the case you wan
 sbatch --export=ALL,RUN_MODE=vtu,CASE_ID=all87_split_cuts25,CASE_TAG=all87_split_cuts25_job16423849 scripts/engaging/gom_sampling_cases.sbatch
 ```
 
+## Generate VTU for the Eight Hysteresis Comparison Cases
+
+For the current hysteresis-on job `16482723` and no-hysteresis job `16536683`, submit:
+
+```bash
+sbatch --array=1-8%4 scripts/engaging/gom_sampling_vtu_8cases.sbatch
+```
+
+The wrapper exports VTU files for:
+
+```text
+1 = all87_whole_cuts25_job16482723
+2 = all87_split_cuts25_job16482723
+3 = old86_whole_cuts25_job16482723
+4 = old86_split_cuts25_job16482723
+5 = all87_whole_cuts25_nohyst_job16536683
+6 = all87_split_cuts25_nohyst_job16536683
+7 = old86_whole_cuts25_nohyst_job16536683
+8 = old86_split_cuts25_nohyst_job16536683
+```
+
+The hysteresis-on failed cases still have partial restart files, so their VTU
+exports are useful for inspecting how far they got before the crash. Each case
+writes VTU files to:
+
+```bash
+$RUN_ROOT/$CASE_TAG/vtu
+```
+
+If you rerun the simulations and get different Slurm job ids, override them:
+
+```bash
+sbatch --array=1-8%4 \
+  --export=ALL,HYST_JOB_ID=<hysteresis_job_id>,NOHYST_JOB_ID=<nohyst_job_id> \
+  scripts/engaging/gom_sampling_vtu_8cases.sbatch
+```
+
 The VTU job uses the same `CASE_TAG` and `RUN_ROOT` convention as the simulation job, so it looks for restart files at:
 
 ```bash
