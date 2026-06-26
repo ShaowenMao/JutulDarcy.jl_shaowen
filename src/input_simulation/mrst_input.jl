@@ -296,6 +296,32 @@ function disable_mrst_hysteresis!(mrst_data)
     return true
 end
 
+function override_mrst_hysteresis_s_min!(mrst_data, hysteresis_s_min)
+    isnothing(hysteresis_s_min) && return false
+
+    if !(haskey(mrst_data, "deck") && haskey(mrst_data["deck"], "PROPS"))
+        @warn "HYSTERESIS_S_MIN=$hysteresis_s_min was requested, but the MRST data has no deck PROPS."
+        return false
+    end
+
+    props = mrst_data["deck"]["PROPS"]
+    if !haskey(props, "EHYSTR")
+        @warn "HYSTERESIS_S_MIN=$hysteresis_s_min was requested, but no EHYSTR table was present."
+        return false
+    end
+
+    ehystr = props["EHYSTR"]
+    if length(ehystr) < 12
+        @warn "HYSTERESIS_S_MIN=$hysteresis_s_min was requested, but EHYSTR has length $(length(ehystr)) < 12."
+        return false
+    end
+
+    old_s_min = ehystr[12]
+    ehystr[12] = Float64(hysteresis_s_min)
+    jutul_message("MRST model", "HYSTERESIS_S_MIN=$(ehystr[12]): overriding EHYSTR[12] from $old_s_min.", color = :yellow)
+    return true
+end
+
 function reservoir_domain_from_mrst_data(exported; extraout = false, convert_grid = false, diffusion = nothing)
     @debug "Unpacking MRST data..."
     normalize_mrst_schedule_control!(exported)
@@ -1470,11 +1496,17 @@ function setup_case_from_mrst_data(data_domain, mrst_data;
         dr_max = Inf,
         diffusion = nothing,
         disable_hysteresis::Bool = false,
+        hysteresis_s_min::Union{Nothing, Float64} = nothing,
         kwarg...
     )
     normalize_mrst_schedule_control!(mrst_data)
     if disable_hysteresis
+        if !isnothing(hysteresis_s_min)
+            @warn "Both DISABLE_HYSTERESIS=true and HYSTERESIS_S_MIN=$hysteresis_s_min were set. NOHYST disables hysteresis, so HYSTERESIS_S_MIN is ignored."
+        end
         disable_mrst_hysteresis!(mrst_data)
+    elseif !isnothing(hysteresis_s_min)
+        override_mrst_hysteresis_s_min!(mrst_data, hysteresis_s_min)
     end
     G = discretized_domain_tpfv_flow(data_domain; kwarg...)
     if ismissing(facility_grouping)
@@ -1940,6 +1972,7 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         linear_solver = :bicgstab,
         diffusion = nothing,
         disable_hysteresis::Bool = false,
+        hysteresis_s_min::Union{Nothing, Float64} = nothing,
     )
     is_split_input = !isnothing(common_mrst_path) || !isnothing(specific_mrst_path)
     if is_split_input
@@ -1983,7 +2016,8 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         dz_max = dz_max,
         ds_max = ds_max,
         diffusion = diffusion,
-        disable_hysteresis = disable_hysteresis
+        disable_hysteresis = disable_hysteresis,
+        hysteresis_s_min = hysteresis_s_min
     )
     case, mrst_data = if is_split_input
         setup_case_from_mrst_split(common_mrst_path, specific_mrst_path;
@@ -2128,6 +2162,7 @@ function simulate_mrst_case(fn;
         load_all_states_after_sim::Bool = true,
         diffusion = nothing,
         disable_hysteresis::Bool = false,
+        hysteresis_s_min::Union{Nothing, Float64} = nothing,
         kwarg...
     )
     is_split_input = !isnothing(common_mrst_path) || !isnothing(specific_mrst_path)
@@ -2187,6 +2222,9 @@ function simulate_mrst_case(fn;
         if disable_hysteresis
             @warn "DISABLE_HYSTERESIS=true currently only rewrites MRST .mat deck data. For .data input, include NOHYST in the deck itself."
         end
+        if !isnothing(hysteresis_s_min)
+            @warn "HYSTERESIS_S_MIN=$hysteresis_s_min currently only rewrites MRST .mat deck data. For .data input, edit EHYSTR in the deck itself."
+        end
     elseif is_split_input
         case, mrst_data = setup_case_from_mrst_split(common_mrst_path, specific_mrst_path;
             validate_split = validate_split,
@@ -2206,7 +2244,8 @@ function simulate_mrst_case(fn;
             dz_max = dz_max,
             ds_max = ds_max,
             diffusion = diffusion,
-            disable_hysteresis = disable_hysteresis
+            disable_hysteresis = disable_hysteresis,
+            hysteresis_s_min = hysteresis_s_min
         )
         deck = mrst_data["deck"]
     else
@@ -2227,7 +2266,8 @@ function simulate_mrst_case(fn;
             dz_max = dz_max,
             ds_max = ds_max,
             diffusion = diffusion,
-            disable_hysteresis = disable_hysteresis
+            disable_hysteresis = disable_hysteresis,
+            hysteresis_s_min = hysteresis_s_min
         )
         deck = mrst_data["deck"]
     end

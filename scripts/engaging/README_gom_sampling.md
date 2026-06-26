@@ -76,6 +76,20 @@ Those folders include `_nohyst`, for example:
 all87_split_cuts25_nohyst_job16482723/
 ```
 
+To keep hysteresis enabled but raise the Killough hysteresis `s_min` threshold
+from the `.mat` deck, set `HYSTERESIS_S_MIN`. This is the targeted stability
+test for the hysteresis cases:
+
+```bash
+sbatch --export=ALL,HYSTERESIS_S_MIN=0.05 --array=1-4 scripts/engaging/gom_sampling_cases.sbatch
+```
+
+Those folders include the threshold, for example:
+
+```text
+all87_split_cuts25_smin0p05_job16482723/
+```
+
 If you want to limit how many run at once, use Slurm's array concurrency limit. For example, at most two at once:
 
 ```bash
