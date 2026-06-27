@@ -137,10 +137,44 @@ if [ -n "$HYSTERESIS_S_MIN" ]; then
 else
     HYSTERESIS_S_MIN_TAG=""
 fi
+export USE_MRST_TRANSMISSIBILITY=${USE_MRST_TRANSMISSIBILITY:-true}
+export IGNORE_MRST_T=${IGNORE_MRST_T:-false}
+IGNORE_MRST_T_LC=$(echo "$IGNORE_MRST_T" | tr '[:upper:]' '[:lower:]')
+case "$IGNORE_MRST_T_LC" in
+    1|true|yes|y)
+        export IGNORE_MRST_T=true
+        export USE_MRST_TRANSMISSIBILITY=false
+        TRANSMISSIBILITY_TAG="_jutult"
+        ;;
+    0|false|no|n)
+        export IGNORE_MRST_T=false
+        USE_MRST_TRANSMISSIBILITY_LC=$(echo "$USE_MRST_TRANSMISSIBILITY" | tr '[:upper:]' '[:lower:]')
+        case "$USE_MRST_TRANSMISSIBILITY_LC" in
+            1|true|yes|y)
+                export USE_MRST_TRANSMISSIBILITY=true
+                TRANSMISSIBILITY_TAG=""
+                ;;
+            0|false|no|n)
+                export USE_MRST_TRANSMISSIBILITY=false
+                TRANSMISSIBILITY_TAG="_jutult"
+                ;;
+            *)
+                echo "Unknown USE_MRST_TRANSMISSIBILITY=$USE_MRST_TRANSMISSIBILITY"
+                echo "Valid values: true/false, yes/no, 1/0"
+                exit 1
+                ;;
+        esac
+        ;;
+    *)
+        echo "Unknown IGNORE_MRST_T=$IGNORE_MRST_T"
+        echo "Valid values: true/false, yes/no, 1/0"
+        exit 1
+        ;;
+esac
 JOB_LABEL=${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-manual}}
 TASK_LABEL=${SLURM_ARRAY_TASK_ID:-0}
 BOOTSTRAP_TASK_LABEL=${SLURM_ARRAY_TASK_ID:-4294967294}
-export CASE_TAG=${CASE_TAG:-${CASE_KEY}_cuts${MAX_TIMESTEP_CUTS}${HYSTERESIS_TAG}${HYSTERESIS_S_MIN_TAG}_job${JOB_LABEL}}
+export CASE_TAG=${CASE_TAG:-${CASE_KEY}_cuts${MAX_TIMESTEP_CUTS}${HYSTERESIS_TAG}${HYSTERESIS_S_MIN_TAG}${TRANSMISSIBILITY_TAG}_job${JOB_LABEL}}
 export RUN_MODE=${RUN_MODE:-simulate}
 export JULIA_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
 export CASE_JULIA_THREADS=${SLURM_CPUS_PER_TASK:-8}
@@ -217,6 +251,8 @@ echo "RUN_MODE=$RUN_MODE"
 echo "MAX_TIMESTEP_CUTS=$MAX_TIMESTEP_CUTS"
 echo "DISABLE_HYSTERESIS=$DISABLE_HYSTERESIS"
 echo "HYSTERESIS_S_MIN=$HYSTERESIS_S_MIN"
+echo "USE_MRST_TRANSMISSIBILITY=$USE_MRST_TRANSMISSIBILITY"
+echo "IGNORE_MRST_T=$IGNORE_MRST_T"
 echo "MATFILE_PATH=$MATFILE_PATH"
 echo "COMMON_MATFILE_PATH=${COMMON_MATFILE_PATH:-}"
 echo "SPECIFIC_MATFILE_PATH=${SPECIFIC_MATFILE_PATH:-}"

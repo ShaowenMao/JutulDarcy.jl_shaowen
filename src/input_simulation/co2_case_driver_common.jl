@@ -45,6 +45,22 @@ function co2_get_env_bool(name::String, default::Bool)
     return val in ("1", "true", "yes", "y")
 end
 
+function co2_get_env_optional_bool(name::String)
+    val = strip(lowercase(get(ENV, name, "")))
+    isempty(val) && return nothing
+    val in ("1", "true", "yes", "y") && return true
+    val in ("0", "false", "no", "n") && return false
+    error("Invalid boolean value for $name=$val. Valid values: true/false, yes/no, 1/0")
+end
+
+function co2_get_transmissibility_policy(default::Bool)
+    ignore_mrst_t = co2_get_env_optional_bool("IGNORE_MRST_T")
+    if !isnothing(ignore_mrst_t)
+        return !ignore_mrst_t
+    end
+    return co2_get_env_bool("USE_MRST_TRANSMISSIBILITY", default)
+end
+
 function co2_case_defaults(case_name::AbstractString)
     case_name = uppercase(case_name)
     base = (
@@ -58,6 +74,7 @@ function co2_case_defaults(case_name::AbstractString)
         report_level = 1,
         disable_hysteresis = false,
         hysteresis_s_min = nothing,
+        use_mrst_transmissibility = true,
         enable_diffusion = false,
         liquid_diffusion_coeff = 0.0,
         gas_diffusion_coeff = 0.0
@@ -122,6 +139,7 @@ function co2_case_options(;
         load_all_states_after_sim::Bool = true,
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
+        use_mrst_transmissibility = nothing,
         enable_diffusion = nothing,
         liquid_diffusion_coeff = nothing,
         gas_diffusion_coeff = nothing
@@ -145,6 +163,7 @@ function co2_case_options(;
     report_level = something(report_level, defaults.report_level)
     disable_hysteresis = something(disable_hysteresis, defaults.disable_hysteresis)
     hysteresis_s_min = isnothing(hysteresis_s_min) ? defaults.hysteresis_s_min : hysteresis_s_min
+    use_mrst_transmissibility = something(use_mrst_transmissibility, defaults.use_mrst_transmissibility)
     enable_diffusion = something(enable_diffusion, defaults.enable_diffusion)
     liquid_diffusion_coeff = something(liquid_diffusion_coeff, defaults.liquid_diffusion_coeff)
     gas_diffusion_coeff = something(gas_diffusion_coeff, defaults.gas_diffusion_coeff)
@@ -173,6 +192,7 @@ function co2_case_options(;
         load_all_states_after_sim = load_all_states_after_sim,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
+        use_mrst_transmissibility = use_mrst_transmissibility,
         enable_diffusion = enable_diffusion,
         liquid_diffusion_coeff = liquid_diffusion_coeff,
         gas_diffusion_coeff = gas_diffusion_coeff,
@@ -199,6 +219,7 @@ function co2_print_case_options(opts; stage::AbstractString)
     println("report_level = ", opts.report_level)
     println("disable_hysteresis = ", opts.disable_hysteresis)
     println("hysteresis_s_min = ", opts.hysteresis_s_min)
+    println("use_mrst_transmissibility = ", opts.use_mrst_transmissibility)
     println("enable_diffusion = ", opts.enable_diffusion)
     if stage == "simulate"
         println("Julia threads available = ", Threads.nthreads())
@@ -237,6 +258,7 @@ function run_co2_case(;
         load_all_states_after_sim::Bool = true,
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
+        use_mrst_transmissibility = nothing,
         enable_diffusion = nothing,
         liquid_diffusion_coeff = nothing,
         gas_diffusion_coeff = nothing
@@ -264,6 +286,7 @@ function run_co2_case(;
         load_all_states_after_sim = load_all_states_after_sim,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
+        use_mrst_transmissibility = use_mrst_transmissibility,
         enable_diffusion = enable_diffusion,
         liquid_diffusion_coeff = liquid_diffusion_coeff,
         gas_diffusion_coeff = gas_diffusion_coeff
@@ -294,6 +317,7 @@ function run_co2_case(;
         load_all_states_after_sim = opts.load_all_states_after_sim,
         disable_hysteresis = opts.disable_hysteresis,
         hysteresis_s_min = opts.hysteresis_s_min,
+        use_mrst_transmissibility = opts.use_mrst_transmissibility,
         diffusion = opts.diffusion
     )
 end
@@ -321,6 +345,7 @@ function export_co2_case_vtu(;
         load_all_states_after_sim::Bool = true,
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
+        use_mrst_transmissibility = nothing,
         enable_diffusion = nothing,
         liquid_diffusion_coeff = nothing,
         gas_diffusion_coeff = nothing
@@ -348,6 +373,7 @@ function export_co2_case_vtu(;
         load_all_states_after_sim = load_all_states_after_sim,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
+        use_mrst_transmissibility = use_mrst_transmissibility,
         enable_diffusion = enable_diffusion,
         liquid_diffusion_coeff = liquid_diffusion_coeff,
         gas_diffusion_coeff = gas_diffusion_coeff
@@ -373,6 +399,7 @@ function export_co2_case_vtu(;
         report_co2_concentration = opts.report_co2_concentration,
         disable_hysteresis = opts.disable_hysteresis,
         hysteresis_s_min = opts.hysteresis_s_min,
+        use_mrst_transmissibility = opts.use_mrst_transmissibility,
         diffusion = opts.diffusion
     )
 end
@@ -427,6 +454,7 @@ function run_co2_case_from_env(; default_case_name::AbstractString, allowed_case
         load_all_states_after_sim = co2_get_env_bool("LOAD_STATES_AFTER_SIM", load_states_default),
         disable_hysteresis = co2_get_env_bool("DISABLE_HYSTERESIS", defaults.disable_hysteresis),
         hysteresis_s_min = co2_get_env_optional_float("HYSTERESIS_S_MIN"),
+        use_mrst_transmissibility = co2_get_transmissibility_policy(defaults.use_mrst_transmissibility),
         enable_diffusion = co2_get_env_bool("ENABLE_DIFFUSION", defaults.enable_diffusion),
         liquid_diffusion_coeff = co2_get_env_float("LIQUID_DIFFUSION_COEFF", defaults.liquid_diffusion_coeff),
         gas_diffusion_coeff = co2_get_env_float("GAS_DIFFUSION_COEFF", defaults.gas_diffusion_coeff)

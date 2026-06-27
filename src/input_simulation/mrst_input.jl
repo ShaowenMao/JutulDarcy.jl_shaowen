@@ -322,7 +322,12 @@ function override_mrst_hysteresis_s_min!(mrst_data, hysteresis_s_min)
     return true
 end
 
-function reservoir_domain_from_mrst_data(exported; extraout = false, convert_grid = false, diffusion = nothing)
+function reservoir_domain_from_mrst_data(exported;
+        extraout = false,
+        convert_grid = false,
+        diffusion = nothing,
+        use_mrst_transmissibility::Bool = true
+    )
     @debug "Unpacking MRST data..."
     normalize_mrst_schedule_control!(exported)
     G_raw = exported["G"]
@@ -331,7 +336,8 @@ function reservoir_domain_from_mrst_data(exported; extraout = false, convert_gri
     else
         g = MRSTWrapMesh(G_raw)
     end
-    has_trans = haskey(exported, "T") && length(exported["T"]) > 0
+    has_exported_trans = haskey(exported, "T") && length(exported["T"]) > 0
+    has_trans = use_mrst_transmissibility && has_exported_trans
 
     poro = mrst_get_vec(exported["rock"]["poro"])
     perm = copy((exported["rock"]["perm"])')
@@ -376,6 +382,8 @@ function reservoir_domain_from_mrst_data(exported; extraout = false, convert_gri
         @debug "Found precomputed transmissibilities, reusing"
         T = mrst_get_vec(exported["T"])
         domain[:transmissibilities, Faces()] = T
+    elseif has_exported_trans
+        jutul_message("MRST model", "Ignoring exported MRST transmissibilities; JutulDarcy will compute T from grid and rock.", color = :yellow)
     end
     if extraout
         return (domain, exported)
@@ -384,14 +392,20 @@ function reservoir_domain_from_mrst_data(exported; extraout = false, convert_gri
     end
 end
 
-function reservoir_domain_from_mrst(name::String; extraout = false, convert_grid = false, diffusion = nothing)
+function reservoir_domain_from_mrst(name::String;
+        extraout = false,
+        convert_grid = false,
+        diffusion = nothing,
+        use_mrst_transmissibility::Bool = true
+    )
     fn = get_mrst_input_path(name)
     @debug "Reading MAT file $fn..."
     exported = MAT.matread(fn)
     return reservoir_domain_from_mrst_data(exported;
         extraout = extraout,
         convert_grid = convert_grid,
-        diffusion = diffusion
+        diffusion = diffusion,
+        use_mrst_transmissibility = use_mrst_transmissibility
     )
 end
 
@@ -1435,13 +1449,15 @@ Set up a [`Jutul.JutulCase`](@ref) from a MRST-exported .mat file.
 function setup_case_from_mrst(casename;
         convert_grid = false,
         diffusion = nothing,
+        use_mrst_transmissibility::Bool = true,
         kwarg...
     )
     data_domain, mrst_data = reservoir_domain_from_mrst(
         casename,
         extraout = true,
         convert_grid = convert_grid,
-        diffusion = diffusion
+        diffusion = diffusion,
+        use_mrst_transmissibility = use_mrst_transmissibility
     )
     return setup_case_from_mrst_data(data_domain, mrst_data;
         convert_grid = convert_grid,
@@ -1460,13 +1476,15 @@ function setup_case_from_mrst_split(common_path::AbstractString, specific_path::
         convert_grid = false,
         diffusion = nothing,
         validate_split::Bool = true,
+        use_mrst_transmissibility::Bool = true,
         kwarg...
     )
     mrst_data = read_mrst_split_case(common_path, specific_path; validate = validate_split)
     data_domain = reservoir_domain_from_mrst_data(mrst_data;
         extraout = false,
         convert_grid = convert_grid,
-        diffusion = diffusion
+        diffusion = diffusion,
+        use_mrst_transmissibility = use_mrst_transmissibility
     )
     return setup_case_from_mrst_data(data_domain, mrst_data;
         convert_grid = convert_grid,
@@ -1973,6 +1991,7 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         diffusion = nothing,
         disable_hysteresis::Bool = false,
         hysteresis_s_min::Union{Nothing, Float64} = nothing,
+        use_mrst_transmissibility::Bool = true,
     )
     is_split_input = !isnothing(common_mrst_path) || !isnothing(specific_mrst_path)
     if is_split_input
@@ -2017,7 +2036,8 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         ds_max = ds_max,
         diffusion = diffusion,
         disable_hysteresis = disable_hysteresis,
-        hysteresis_s_min = hysteresis_s_min
+        hysteresis_s_min = hysteresis_s_min,
+        use_mrst_transmissibility = use_mrst_transmissibility
     )
     case, mrst_data = if is_split_input
         setup_case_from_mrst_split(common_mrst_path, specific_mrst_path;
@@ -2163,6 +2183,7 @@ function simulate_mrst_case(fn;
         diffusion = nothing,
         disable_hysteresis::Bool = false,
         hysteresis_s_min::Union{Nothing, Float64} = nothing,
+        use_mrst_transmissibility::Bool = true,
         kwarg...
     )
     is_split_input = !isnothing(common_mrst_path) || !isnothing(specific_mrst_path)
@@ -2245,7 +2266,8 @@ function simulate_mrst_case(fn;
             ds_max = ds_max,
             diffusion = diffusion,
             disable_hysteresis = disable_hysteresis,
-            hysteresis_s_min = hysteresis_s_min
+            hysteresis_s_min = hysteresis_s_min,
+            use_mrst_transmissibility = use_mrst_transmissibility
         )
         deck = mrst_data["deck"]
     else
@@ -2267,7 +2289,8 @@ function simulate_mrst_case(fn;
             ds_max = ds_max,
             diffusion = diffusion,
             disable_hysteresis = disable_hysteresis,
-            hysteresis_s_min = hysteresis_s_min
+            hysteresis_s_min = hysteresis_s_min,
+            use_mrst_transmissibility = use_mrst_transmissibility
         )
         deck = mrst_data["deck"]
     end

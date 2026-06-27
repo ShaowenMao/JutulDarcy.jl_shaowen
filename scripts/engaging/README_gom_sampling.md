@@ -90,6 +90,21 @@ Those folders include the threshold, for example:
 all87_split_cuts25_smin0p05_job16482723/
 ```
 
+To force a whole `.mat` file to ignore exported MRST transmissibilities `T` and
+let JutulDarcy compute transmissibilities from grid and rock, set
+`USE_MRST_TRANSMISSIBILITY=false`:
+
+```bash
+sbatch --export=ALL,CASE_ID=all87_whole,HYSTERESIS_S_MIN=0.05,USE_MRST_TRANSMISSIBILITY=false scripts/engaging/gom_sampling_cases.sbatch
+```
+
+The alias `IGNORE_MRST_T=true` is equivalent and takes precedence if both are
+set. These folders include `_jutult`, for example:
+
+```text
+all87_whole_cuts25_smin0p05_jutult_job16482723/
+```
+
 If you want to limit how many run at once, use Slurm's array concurrency limit. For example, at most two at once:
 
 ```bash
