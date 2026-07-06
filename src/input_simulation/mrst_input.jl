@@ -187,6 +187,162 @@ function restore_mrst_split_fault_tables!(assembled, fault)
     return assembled
 end
 
+function normalize_mrst_fault_saturation_domain_mode(mode)
+    if isnothing(mode)
+        return "input"
+    elseif mode isa Symbol
+        return lowercase(String(mode))
+    else
+        return lowercase(strip(String(mode)))
+    end
+end
+
+function mrst_window_x_groups(assembled, window_cells)
+    centroids = assembled["G"]["cells"]["centroids"]
+    groups = Vector{Vector{Float64}}(undef, length(window_cells))
+    for (i, cells_i_raw) in enumerate(window_cells)
+        cells_i = Int.(mrst_get_vec(cells_i_raw))
+        x_i = centroids[cells_i, 1]
+        groups[i] = sort(unique(vec(x_i)))
+    end
+    return groups
+end
+
+function mrst_lookup_x_group(x_to_group, x)
+    if haskey(x_to_group, x)
+        return x_to_group[x]
+    end
+
+    # The x values come from the same centroid array, so exact lookup should
+    # normally work. Keep a tiny nearest fallback to make the remap robust to
+    # harmless MAT roundoff or future centroid formatting changes.
+    keys_x = collect(keys(x_to_group))
+    _, ix = findmin(abs.(keys_x .- x))
+    nearest = keys_x[ix]
+    tol = max(1.0e-8, 1.0e-10*max(abs(x), abs(nearest), 1.0))
+    if abs(nearest - x) <= tol
+        return x_to_group[nearest]
+    end
+    error("Could not map fault-cell x centroid $x to a PREDICT draw group.")
+end
+
+function update_mrst_tabdims_num_saturation_tables!(assembled, n_tables::Int)
+    if haskey(assembled, "deck") && haskey(assembled["deck"], "RUNSPEC")
+        runspec = assembled["deck"]["RUNSPEC"]
+        if haskey(runspec, "TABDIMS") && length(runspec["TABDIMS"]) >= 1
+            runspec["TABDIMS"][1] = Float64(n_tables)
+        end
+    end
+    return assembled
+end
+
+function expand_mrst_predict_fault_saturation_domains!(assembled, specific)
+    haskey(specific, "fault") || error("PREDICT fault saturation-domain remap requires specific[\"fault\"].")
+    haskey(specific, "predict_sample_ids") || error("PREDICT fault saturation-domain remap requires specific[\"predict_sample_ids\"].")
+
+    fault = specific["fault"]
+    rock = assembled["rock"]
+    regions = rock["regions"]
+    haskey(regions, "saturation") || error("PREDICT fault saturation-domain remap requires rock.regions.saturation.")
+    haskey(fault, "cells") || error("PREDICT fault saturation-domain remap requires fault.cells.")
+    haskey(fault, "window_index") || error("PREDICT fault saturation-domain remap requires fault.window_index.")
+    haskey(assembled, "masks") && haskey(assembled["masks"], "windowCells") || error("PREDICT fault saturation-domain remap requires masks.windowCells in the common input.")
+
+    cells = Int.(mrst_get_vec(fault["cells"]))
+    window_index = Int.(mrst_get_vec(fault["window_index"]))
+    length(cells) == length(window_index) || error("fault.cells and fault.window_index have different lengths.")
+    nwindows = maximum(window_index)
+    all((1 .<= window_index) .& (window_index .<= nwindows)) || error("fault.window_index must use positive contiguous window ids.")
+
+    sample_ids = specific["predict_sample_ids"]["ids"]
+    nsamples = if ndims(sample_ids) == 2 && size(sample_ids, 1) == nwindows
+        size(sample_ids, 2)
+    elseif ndims(sample_ids) == 2 && size(sample_ids, 2) == nwindows
+        size(sample_ids, 1)
+    else
+        error("predict_sample_ids.ids has size $(size(sample_ids)), which does not match $nwindows fault windows.")
+    end
+
+    window_cells = mrst_get_vec(assembled["masks"]["windowCells"])
+    length(window_cells) == nwindows || error("masks.windowCells has $(length(window_cells)) windows but fault.window_index uses $nwindows.")
+    x_groups = mrst_window_x_groups(assembled, window_cells)
+    all(length(g) == nsamples for g in x_groups) || error("Window x-group counts $(length.(x_groups)) do not match $nsamples PREDICT samples.")
+    x_to_group = [Dict(x => j for (j, x) in enumerate(groups_i)) for groups_i in x_groups]
+
+    sat_raw = regions["saturation"]
+    old_sat = Int.(vec(sat_raw))
+    old_fault_sat = old_sat[cells]
+    base_regions = minimum(old_fault_sat) - 1
+    old_predict_regions = sort(unique(old_fault_sat))
+    expected_old_predict_regions = collect((base_regions + 1):(base_regions + nwindows))
+    old_predict_regions == expected_old_predict_regions || error(
+        "Expected old PREDICT fault saturation regions $expected_old_predict_regions, got $old_predict_regions."
+    )
+
+    sat = vec(sat_raw)
+    centroids = assembled["G"]["cells"]["centroids"]
+    for (cell, win) in zip(cells, window_index)
+        x = centroids[cell, 1]
+        draw_group = mrst_lookup_x_group(x_to_group[win], x)
+        sat[cell] = base_regions + (draw_group - 1)*nwindows + win
+    end
+
+    new_drainage_regions = base_regions + nsamples*nwindows
+    if haskey(regions, "imbibition")
+        imb = vec(regions["imbibition"])
+        imb .= vec(sat_raw) .+ new_drainage_regions
+    end
+
+    props = assembled["deck"]["PROPS"]
+    haskey(props, "SGOF") || error("PREDICT fault saturation-domain remap requires deck.PROPS.SGOF.")
+    old_tables = mrst_get_vec(props["SGOF"])
+    iseven(length(old_tables)) || error("Expected drainage/imbibition SGOF pairs, got $(length(old_tables)) tables.")
+    old_drainage_regions = length(old_tables) ÷ 2
+    maximum(old_sat) <= old_drainage_regions || error("Old SATNUM maximum $(maximum(old_sat)) exceeds drainage SGOF table count $old_drainage_regions.")
+    base_regions < old_drainage_regions || error("Base saturation-domain count $base_regions is incompatible with $old_drainage_regions old drainage tables.")
+
+    new_tables = Vector{Any}(undef, 2*new_drainage_regions)
+    for reg in 1:base_regions
+        new_tables[reg] = deepcopy(old_tables[reg])
+        new_tables[new_drainage_regions + reg] = deepcopy(old_tables[old_drainage_regions + reg])
+    end
+    for draw_group in 1:nsamples, win in 1:nwindows
+        old_reg = base_regions + win
+        new_reg = base_regions + (draw_group - 1)*nwindows + win
+        new_tables[new_reg] = deepcopy(old_tables[old_reg])
+        new_tables[new_drainage_regions + new_reg] = deepcopy(old_tables[old_drainage_regions + old_reg])
+    end
+    props["SGOF"] = reshape(new_tables, :, 1)
+    update_mrst_tabdims_num_saturation_tables!(assembled, length(new_tables))
+
+    assembled["fault_saturation_domain_mode"] = "predict_sample"
+    assembled["fault_saturation_domain_summary"] = Dict{String, Any}(
+        "base_regions" => base_regions,
+        "fault_windows" => nwindows,
+        "predict_samples_per_window" => nsamples,
+        "predict_fault_regions" => nsamples*nwindows,
+        "drainage_regions" => new_drainage_regions,
+        "sgof_tables" => length(new_tables)
+    )
+    jutul_message(
+        "MRST split input",
+        "FAULT_SATURATION_DOMAIN_MODE=predict_sample: remapped $(length(cells)) PREDICT fault cells to $(nsamples*nwindows) fault saturation domains ($(length(new_tables)) SGOF tables including imbibition).",
+        color = :yellow
+    )
+    return assembled
+end
+
+function apply_mrst_fault_saturation_domain_mode!(assembled, specific, mode)
+    normalized = normalize_mrst_fault_saturation_domain_mode(mode)
+    if normalized in ("", "input", "default", "none", "off", "false", "0")
+        return assembled
+    elseif normalized in ("predict_sample", "predict_samples", "predict_sample_522", "sample", "samples")
+        return expand_mrst_predict_fault_saturation_domains!(assembled, specific)
+    else
+        error("Unknown FAULT_SATURATION_DOMAIN_MODE=$mode. Valid options: input, predict_sample.")
+    end
+end
+
 function validate_mrst_split_case(assembled, specific)
     errors = String[]
     fault = haskey(specific, "fault") ? specific["fault"] : nothing
@@ -228,7 +384,7 @@ function validate_mrst_split_case(assembled, specific)
     return true
 end
 
-function assemble_mrst_split_case(common, specific; validate::Bool = true)
+function assemble_mrst_split_case(common, specific; validate::Bool = true, fault_saturation_domain_mode = "input")
     haskey(specific, "fault") || error("Specific MRST split file must contain a top-level fault block.")
     assembled = deepcopy(common)
     fault = specific["fault"]
@@ -256,6 +412,7 @@ function assemble_mrst_split_case(common, specific; validate::Bool = true)
     end
 
     restore_mrst_split_fault_tables!(assembled, fault)
+    apply_mrst_fault_saturation_domain_mode!(assembled, specific, fault_saturation_domain_mode)
     normalize_mrst_schedule_control!(assembled)
     if validate
         validate_mrst_split_case(assembled, specific)
@@ -263,14 +420,17 @@ function assemble_mrst_split_case(common, specific; validate::Bool = true)
     return assembled
 end
 
-function read_mrst_split_case(common_path::AbstractString, specific_path::AbstractString; validate::Bool = true)
+function read_mrst_split_case(common_path::AbstractString, specific_path::AbstractString; validate::Bool = true, fault_saturation_domain_mode = "input")
     common_fn = get_mrst_input_path(String(common_path))
     specific_fn = get_mrst_input_path(String(specific_path))
     @debug "Reading MRST split common MAT file $common_fn..."
     common = MAT.matread(common_fn)
     @debug "Reading MRST split specific MAT file $specific_fn..."
     specific = MAT.matread(specific_fn)
-    assembled = assemble_mrst_split_case(common, specific; validate = validate)
+    assembled = assemble_mrst_split_case(common, specific;
+        validate = validate,
+        fault_saturation_domain_mode = fault_saturation_domain_mode
+    )
     assembled["split_input"] = Dict{String, Any}(
         "common_path" => common_fn,
         "specific_path" => specific_fn
@@ -1477,9 +1637,13 @@ function setup_case_from_mrst_split(common_path::AbstractString, specific_path::
         diffusion = nothing,
         validate_split::Bool = true,
         use_mrst_transmissibility::Bool = true,
+        fault_saturation_domain_mode = "input",
         kwarg...
     )
-    mrst_data = read_mrst_split_case(common_path, specific_path; validate = validate_split)
+    mrst_data = read_mrst_split_case(common_path, specific_path;
+        validate = validate_split,
+        fault_saturation_domain_mode = fault_saturation_domain_mode
+    )
     data_domain = reservoir_domain_from_mrst_data(mrst_data;
         extraout = false,
         convert_grid = convert_grid,
@@ -1992,6 +2156,7 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         disable_hysteresis::Bool = false,
         hysteresis_s_min::Union{Nothing, Float64} = nothing,
         use_mrst_transmissibility::Bool = true,
+        fault_saturation_domain_mode = "input",
     )
     is_split_input = !isnothing(common_mrst_path) || !isnothing(specific_mrst_path)
     if is_split_input
@@ -2037,7 +2202,8 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         diffusion = diffusion,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
-        use_mrst_transmissibility = use_mrst_transmissibility
+        use_mrst_transmissibility = use_mrst_transmissibility,
+        fault_saturation_domain_mode = fault_saturation_domain_mode
     )
     case, mrst_data = if is_split_input
         setup_case_from_mrst_split(common_mrst_path, specific_mrst_path;
@@ -2135,6 +2301,9 @@ Simulate a MRST case from `file_name` as exported by `writeJutulInput` in MRST.
   separate VTU postprocessing workflow. In this mode, the function returns a
   lightweight named tuple with the raw `SimResult`, reports, output path, and
   setup metadata instead of building a `ReservoirSimResult`.
+- `fault_saturation_domain_mode = "input"`: For split MRST GoM inputs, set to
+  `"predict_sample"` to relabel each independent PREDICT fault sample into its
+  own saturation domain while cloning the original Pc/Kr tables.
 
 Additional input arguments are passed onto, [`setup_case_from_mrst`](@ref),
 [`setup_reservoir_simulator`](@ref) and [`simulator_config`](@ref) if
@@ -2184,6 +2353,7 @@ function simulate_mrst_case(fn;
         disable_hysteresis::Bool = false,
         hysteresis_s_min::Union{Nothing, Float64} = nothing,
         use_mrst_transmissibility::Bool = true,
+        fault_saturation_domain_mode = "input",
         kwarg...
     )
     is_split_input = !isnothing(common_mrst_path) || !isnothing(specific_mrst_path)
@@ -2267,7 +2437,8 @@ function simulate_mrst_case(fn;
             diffusion = diffusion,
             disable_hysteresis = disable_hysteresis,
             hysteresis_s_min = hysteresis_s_min,
-            use_mrst_transmissibility = use_mrst_transmissibility
+            use_mrst_transmissibility = use_mrst_transmissibility,
+            fault_saturation_domain_mode = fault_saturation_domain_mode
         )
         deck = mrst_data["deck"]
     else

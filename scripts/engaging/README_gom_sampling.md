@@ -90,6 +90,23 @@ Those folders include the threshold, for example:
 all87_split_cuts25_smin0p05_job16482723/
 ```
 
+To run the all87 split case with one cloned saturation domain for each
+independent PREDICT fault sample, set `FAULT_SATURATION_DOMAIN_MODE`:
+
+```bash
+sbatch --export=ALL,CASE_ID=all87_split_cuts25,HYSTERESIS_S_MIN=0.05,FAULT_SATURATION_DOMAIN_MODE=predict_sample scripts/engaging/gom_sampling_cases.sbatch
+```
+
+This keeps the all87 split porosity, permeability, wells, schedule, and original
+Pc/Kr curves unchanged. The script relabels the 87 x 6 PREDICT fault sample
+groups into 522 fault saturation domains and clones the corresponding
+drainage/imbibition SGOF tables. These folders include `_satpredict`, for
+example:
+
+```text
+all87_split_cuts25_smin0p05_satpredict_job16482723/
+```
+
 To force a whole `.mat` file to ignore exported MRST transmissibilities `T` and
 let JutulDarcy compute transmissibilities from grid and rock, set
 `USE_MRST_TRANSMISSIBILITY=false`:

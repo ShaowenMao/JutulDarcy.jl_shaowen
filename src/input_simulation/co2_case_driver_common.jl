@@ -75,6 +75,7 @@ function co2_case_defaults(case_name::AbstractString)
         disable_hysteresis = false,
         hysteresis_s_min = nothing,
         use_mrst_transmissibility = true,
+        fault_saturation_domain_mode = "input",
         enable_diffusion = false,
         liquid_diffusion_coeff = 0.0,
         gas_diffusion_coeff = 0.0
@@ -140,6 +141,7 @@ function co2_case_options(;
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
         use_mrst_transmissibility = nothing,
+        fault_saturation_domain_mode = nothing,
         enable_diffusion = nothing,
         liquid_diffusion_coeff = nothing,
         gas_diffusion_coeff = nothing
@@ -164,6 +166,7 @@ function co2_case_options(;
     disable_hysteresis = something(disable_hysteresis, defaults.disable_hysteresis)
     hysteresis_s_min = isnothing(hysteresis_s_min) ? defaults.hysteresis_s_min : hysteresis_s_min
     use_mrst_transmissibility = something(use_mrst_transmissibility, defaults.use_mrst_transmissibility)
+    fault_saturation_domain_mode = something(fault_saturation_domain_mode, defaults.fault_saturation_domain_mode)
     enable_diffusion = something(enable_diffusion, defaults.enable_diffusion)
     liquid_diffusion_coeff = something(liquid_diffusion_coeff, defaults.liquid_diffusion_coeff)
     gas_diffusion_coeff = something(gas_diffusion_coeff, defaults.gas_diffusion_coeff)
@@ -193,6 +196,7 @@ function co2_case_options(;
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
         use_mrst_transmissibility = use_mrst_transmissibility,
+        fault_saturation_domain_mode = fault_saturation_domain_mode,
         enable_diffusion = enable_diffusion,
         liquid_diffusion_coeff = liquid_diffusion_coeff,
         gas_diffusion_coeff = gas_diffusion_coeff,
@@ -220,6 +224,7 @@ function co2_print_case_options(opts; stage::AbstractString)
     println("disable_hysteresis = ", opts.disable_hysteresis)
     println("hysteresis_s_min = ", opts.hysteresis_s_min)
     println("use_mrst_transmissibility = ", opts.use_mrst_transmissibility)
+    println("fault_saturation_domain_mode = ", opts.fault_saturation_domain_mode)
     println("enable_diffusion = ", opts.enable_diffusion)
     if stage == "simulate"
         println("Julia threads available = ", Threads.nthreads())
@@ -259,6 +264,7 @@ function run_co2_case(;
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
         use_mrst_transmissibility = nothing,
+        fault_saturation_domain_mode = nothing,
         enable_diffusion = nothing,
         liquid_diffusion_coeff = nothing,
         gas_diffusion_coeff = nothing
@@ -287,6 +293,7 @@ function run_co2_case(;
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
         use_mrst_transmissibility = use_mrst_transmissibility,
+        fault_saturation_domain_mode = fault_saturation_domain_mode,
         enable_diffusion = enable_diffusion,
         liquid_diffusion_coeff = liquid_diffusion_coeff,
         gas_diffusion_coeff = gas_diffusion_coeff
@@ -318,6 +325,7 @@ function run_co2_case(;
         disable_hysteresis = opts.disable_hysteresis,
         hysteresis_s_min = opts.hysteresis_s_min,
         use_mrst_transmissibility = opts.use_mrst_transmissibility,
+        fault_saturation_domain_mode = opts.fault_saturation_domain_mode,
         diffusion = opts.diffusion
     )
 end
@@ -346,6 +354,7 @@ function export_co2_case_vtu(;
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
         use_mrst_transmissibility = nothing,
+        fault_saturation_domain_mode = nothing,
         enable_diffusion = nothing,
         liquid_diffusion_coeff = nothing,
         gas_diffusion_coeff = nothing
@@ -374,6 +383,7 @@ function export_co2_case_vtu(;
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
         use_mrst_transmissibility = use_mrst_transmissibility,
+        fault_saturation_domain_mode = fault_saturation_domain_mode,
         enable_diffusion = enable_diffusion,
         liquid_diffusion_coeff = liquid_diffusion_coeff,
         gas_diffusion_coeff = gas_diffusion_coeff
@@ -400,6 +410,7 @@ function export_co2_case_vtu(;
         disable_hysteresis = opts.disable_hysteresis,
         hysteresis_s_min = opts.hysteresis_s_min,
         use_mrst_transmissibility = opts.use_mrst_transmissibility,
+        fault_saturation_domain_mode = opts.fault_saturation_domain_mode,
         diffusion = opts.diffusion
     )
 end
@@ -455,6 +466,7 @@ function run_co2_case_from_env(; default_case_name::AbstractString, allowed_case
         disable_hysteresis = co2_get_env_bool("DISABLE_HYSTERESIS", defaults.disable_hysteresis),
         hysteresis_s_min = co2_get_env_optional_float("HYSTERESIS_S_MIN"),
         use_mrst_transmissibility = co2_get_transmissibility_policy(defaults.use_mrst_transmissibility),
+        fault_saturation_domain_mode = co2_get_env_str("FAULT_SATURATION_DOMAIN_MODE", defaults.fault_saturation_domain_mode),
         enable_diffusion = co2_get_env_bool("ENABLE_DIFFUSION", defaults.enable_diffusion),
         liquid_diffusion_coeff = co2_get_env_float("LIQUID_DIFFUSION_COEFF", defaults.liquid_diffusion_coeff),
         gas_diffusion_coeff = co2_get_env_float("GAS_DIFFUSION_COEFF", defaults.gas_diffusion_coeff)

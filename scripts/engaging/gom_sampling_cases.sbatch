@@ -5,7 +5,7 @@
 #SBATCH -J gom_sampling
 #SBATCH -c 8
 #SBATCH --mem=64G
-#SBATCH -t 24:00:00
+#SBATCH -t 4-00:00:00
 #SBATCH -o /home/%u/orcd/scratch/jutuldarcy_case/gom_sampling_runs/slurm-bootstrap-%x-%A_%a.out
 #SBATCH -e /home/%u/orcd/scratch/jutuldarcy_case/gom_sampling_runs/slurm-bootstrap-%x-%A_%a.err
 
@@ -171,10 +171,29 @@ case "$IGNORE_MRST_T_LC" in
         exit 1
         ;;
 esac
+
+export FAULT_SATURATION_DOMAIN_MODE=${FAULT_SATURATION_DOMAIN_MODE:-input}
+FAULT_SATURATION_DOMAIN_MODE_LC=$(echo "$FAULT_SATURATION_DOMAIN_MODE" | tr '[:upper:]' '[:lower:]')
+case "$FAULT_SATURATION_DOMAIN_MODE_LC" in
+    ""|input|default|none|off|false|0)
+        export FAULT_SATURATION_DOMAIN_MODE=input
+        SAT_DOMAIN_TAG=""
+        ;;
+    predict_sample|predict_samples|predict_sample_522|sample|samples)
+        export FAULT_SATURATION_DOMAIN_MODE=predict_sample
+        SAT_DOMAIN_TAG="_satpredict"
+        ;;
+    *)
+        echo "Unknown FAULT_SATURATION_DOMAIN_MODE=$FAULT_SATURATION_DOMAIN_MODE"
+        echo "Valid values: input, predict_sample"
+        exit 1
+        ;;
+esac
+
 JOB_LABEL=${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-manual}}
 TASK_LABEL=${SLURM_ARRAY_TASK_ID:-0}
 BOOTSTRAP_TASK_LABEL=${SLURM_ARRAY_TASK_ID:-4294967294}
-export CASE_TAG=${CASE_TAG:-${CASE_KEY}_cuts${MAX_TIMESTEP_CUTS}${HYSTERESIS_TAG}${HYSTERESIS_S_MIN_TAG}${TRANSMISSIBILITY_TAG}_job${JOB_LABEL}}
+export CASE_TAG=${CASE_TAG:-${CASE_KEY}_cuts${MAX_TIMESTEP_CUTS}${HYSTERESIS_TAG}${HYSTERESIS_S_MIN_TAG}${SAT_DOMAIN_TAG}${TRANSMISSIBILITY_TAG}_job${JOB_LABEL}}
 export RUN_MODE=${RUN_MODE:-simulate}
 export JULIA_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
 export CASE_JULIA_THREADS=${SLURM_CPUS_PER_TASK:-8}
@@ -253,6 +272,7 @@ echo "DISABLE_HYSTERESIS=$DISABLE_HYSTERESIS"
 echo "HYSTERESIS_S_MIN=$HYSTERESIS_S_MIN"
 echo "USE_MRST_TRANSMISSIBILITY=$USE_MRST_TRANSMISSIBILITY"
 echo "IGNORE_MRST_T=$IGNORE_MRST_T"
+echo "FAULT_SATURATION_DOMAIN_MODE=$FAULT_SATURATION_DOMAIN_MODE"
 echo "MATFILE_PATH=$MATFILE_PATH"
 echo "COMMON_MATFILE_PATH=${COMMON_MATFILE_PATH:-}"
 echo "SPECIFIC_MATFILE_PATH=${SPECIFIC_MATFILE_PATH:-}"
