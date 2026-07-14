@@ -187,6 +187,97 @@ function restore_mrst_split_fault_tables!(assembled, fault)
     return assembled
 end
 
+function mrst_has_explicit_fault_saturation_data(specific)
+    return haskey(specific, "fault") &&
+           haskey(specific["fault"], "saturation_region")
+end
+
+function apply_mrst_explicit_fault_saturation_data!(assembled, specific)
+    fault = specific["fault"]
+    for key in ("cells", "saturation_region", "fluid_tables")
+        haskey(fault, key) || error("Explicit fault saturation data is missing fault[\"$key\"].")
+    end
+
+    cells = Int.(mrst_get_vec(fault["cells"]))
+    cell_regions = Int.(mrst_get_vec(fault["saturation_region"]))
+    length(cells) == length(cell_regions) || error(
+        "fault.cells has $(length(cells)) entries but fault.saturation_region has $(length(cell_regions))."
+    )
+
+    fluid_tables = fault["fluid_tables"]
+    haskey(fluid_tables, "SGOF") || error("Explicit fault saturation data requires fault.fluid_tables.SGOF.")
+    sgof_data = fluid_tables["SGOF"]
+    haskey(sgof_data, "regions") || error("Explicit fault SGOF data is missing regions.")
+    haskey(sgof_data, "tables") || error("Explicit fault SGOF data is missing tables.")
+
+    custom_regions = Int.(mrst_get_vec(sgof_data["regions"]))
+    custom_tables = mrst_get_vec(sgof_data["tables"])
+    length(custom_regions) == length(custom_tables) || error(
+        "Explicit fault SGOF data has $(length(custom_regions)) regions but $(length(custom_tables)) tables."
+    )
+    length(unique(custom_regions)) == length(custom_regions) || error("Explicit fault SGOF regions must be unique.")
+
+    order = sortperm(custom_regions)
+    custom_regions = custom_regions[order]
+    custom_tables = custom_tables[order]
+    base_regions = minimum(custom_regions) - 1
+    maximum_region = maximum(custom_regions)
+    custom_regions == collect((base_regions + 1):maximum_region) || error(
+        "Explicit fault SGOF regions must be contiguous after the $base_regions shared base regions."
+    )
+    all(in(custom_regions), cell_regions) || error(
+        "fault.saturation_region contains ids outside the explicit SGOF region set."
+    )
+
+    rock_regions = assembled["rock"]["regions"]
+    haskey(rock_regions, "saturation") || error("Explicit fault saturation data requires rock.regions.saturation.")
+    sat = vec(rock_regions["saturation"])
+    all(c -> 1 <= c <= length(sat), cells) || error("Explicit fault cells are outside rock.regions.saturation.")
+    sat[cells] .= cell_regions
+
+    props = assembled["deck"]["PROPS"]
+    haskey(props, "SGOF") || error("Explicit fault saturation data requires deck.PROPS.SGOF.")
+    old_tables = mrst_get_vec(props["SGOF"])
+    length(old_tables) >= base_regions || error(
+        "Common SGOF data has $(length(old_tables)) tables, fewer than the $base_regions shared base regions."
+    )
+
+    new_tables = Vector{Any}(undef, maximum_region)
+    for region in 1:base_regions
+        isempty(old_tables[region]) && error("Common SGOF base region $region is empty.")
+        new_tables[region] = deepcopy(old_tables[region])
+    end
+    for (region, table) in zip(custom_regions, custom_tables)
+        isempty(table) && error("Explicit fault SGOF region $region is empty.")
+        new_tables[region] = table
+    end
+    props["SGOF"] = reshape(new_tables, :, 1)
+
+    # The reservoir-ready package currently provides drainage curves only.
+    # Remove stale imbibition-region ids and force the deck onto drainage.
+    if haskey(rock_regions, "imbibition")
+        delete!(rock_regions, "imbibition")
+    end
+    runspec = assembled["deck"]["RUNSPEC"]
+    runspec["NOHYST"] = true
+    update_mrst_tabdims_num_saturation_tables!(assembled, maximum_region)
+
+    assembled["fault_saturation_domain_mode"] = "reservoir_ready_explicit"
+    assembled["fault_saturation_domain_summary"] = Dict{String, Any}(
+        "base_regions" => base_regions,
+        "fault_regions" => length(custom_regions),
+        "drainage_regions" => maximum_region,
+        "sgof_tables" => length(new_tables),
+        "hysteresis" => "disabled"
+    )
+    jutul_message(
+        "MRST split input",
+        "Applied $(length(custom_regions)) explicit reservoir-ready fault saturation regions and SGOF tables; hysteresis disabled.",
+        color = :yellow
+    )
+    return assembled
+end
+
 function normalize_mrst_fault_saturation_domain_mode(mode)
     if isnothing(mode)
         return "input"
@@ -411,8 +502,16 @@ function assemble_mrst_split_case(common, specific; validate::Bool = true, fault
         perm[cells, :] .= fault_perm
     end
 
-    restore_mrst_split_fault_tables!(assembled, fault)
-    apply_mrst_fault_saturation_domain_mode!(assembled, specific, fault_saturation_domain_mode)
+    if mrst_has_explicit_fault_saturation_data(specific)
+        normalized_mode = normalize_mrst_fault_saturation_domain_mode(fault_saturation_domain_mode)
+        if !(normalized_mode in ("", "input", "default", "none", "off", "false", "0"))
+            error("Explicit reservoir-ready fault saturation data must use fault_saturation_domain_mode=\"input\".")
+        end
+        apply_mrst_explicit_fault_saturation_data!(assembled, specific)
+    else
+        restore_mrst_split_fault_tables!(assembled, fault)
+        apply_mrst_fault_saturation_domain_mode!(assembled, specific, fault_saturation_domain_mode)
+    end
     normalize_mrst_schedule_control!(assembled)
     if validate
         validate_mrst_split_case(assembled, specific)

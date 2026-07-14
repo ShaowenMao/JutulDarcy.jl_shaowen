@@ -28,6 +28,10 @@ end
     include("mrst_cases.jl")
 end
 
+@testitem "MRST split input" begin
+    include("mrst_split.jl")
+end
+
 @testitem "PArray solve" begin
     include("parray.jl")
 end
