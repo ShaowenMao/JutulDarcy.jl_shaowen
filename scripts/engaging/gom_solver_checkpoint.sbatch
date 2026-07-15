@@ -18,7 +18,7 @@ module load julia/1.10.4
 REPO_ROOT=${REPO_ROOT:-/home/$USER/projects/JutulDarcy.jl_shaowen}
 INPUT_ROOT=${INPUT_ROOT:-/home/$USER/orcd/pool/jutuldarcy_case/gom_sampling_inputs}
 CHECKPOINT_ROOT=${CHECKPOINT_ROOT:-/home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs/solver_checkpoints}
-SOURCE_RESTART_PATH=${SOURCE_RESTART_PATH:?Set SOURCE_RESTART_PATH to the original run's restart directory.}
+SOURCE_RESTART_PATH=${SOURCE_RESTART_PATH:?Set SOURCE_RESTART_PATH to the original restart directory.}
 TARGET_REPORT_STEP=${TARGET_REPORT_STEP:-63}
 
 export COMMON_MATFILE_PATH=${COMMON_MATFILE_PATH:-$INPUT_ROOT/all87/jutul_split/lluis_field_case_87_all87_common.mat}
