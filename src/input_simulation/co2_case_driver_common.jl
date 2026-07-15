@@ -31,6 +31,11 @@ function co2_get_env_int(name::String, default::Int)
     return parse(Int, get(ENV, name, string(default)))
 end
 
+function co2_get_env_optional_int(name::String)
+    val = strip(get(ENV, name, ""))
+    return isempty(val) ? nothing : parse(Int, val)
+end
+
 function co2_get_env_float(name::String, default::Real)
     return parse(Float64, get(ENV, name, string(default)))
 end
@@ -72,6 +77,12 @@ function co2_case_defaults(case_name::AbstractString)
         max_timestep_cuts = 8,
         info_level = 1,
         report_level = 1,
+        nonlinear_relaxation = false,
+        target_its = 8.0,
+        target_ds = Inf,
+        timestep_max_increase = 10.0,
+        dr_max = Inf,
+        in_memory_reports = 10,
         disable_hysteresis = false,
         hysteresis_s_min = nothing,
         use_mrst_transmissibility = true,
@@ -130,6 +141,8 @@ function co2_case_options(;
         restart_output_path = nothing,
         vtu_path = nothing,
         restart::Bool = true,
+        restart_step = nothing,
+        stop_after_report_step = nothing,
         write_incon_vtu::Bool = false,
         write_state_vtu::Bool = false,
         vtu_prefix = nothing,
@@ -141,6 +154,13 @@ function co2_case_options(;
         info_level = nothing,
         report_level = nothing,
         load_all_states_after_sim::Bool = true,
+        load_all_reports_after_sim::Bool = true,
+        nonlinear_relaxation = nothing,
+        target_its = nothing,
+        target_ds = nothing,
+        timestep_max_increase = nothing,
+        dr_max = nothing,
+        in_memory_reports = nothing,
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
         use_mrst_transmissibility = nothing,
@@ -169,6 +189,12 @@ function co2_case_options(;
     max_timestep_cuts = something(max_timestep_cuts, defaults.max_timestep_cuts)
     info_level = something(info_level, defaults.info_level)
     report_level = something(report_level, defaults.report_level)
+    nonlinear_relaxation = something(nonlinear_relaxation, defaults.nonlinear_relaxation)
+    target_its = something(target_its, defaults.target_its)
+    target_ds = something(target_ds, defaults.target_ds)
+    timestep_max_increase = something(timestep_max_increase, defaults.timestep_max_increase)
+    dr_max = something(dr_max, defaults.dr_max)
+    in_memory_reports = something(in_memory_reports, defaults.in_memory_reports)
     disable_hysteresis = something(disable_hysteresis, defaults.disable_hysteresis)
     hysteresis_s_min = isnothing(hysteresis_s_min) ? defaults.hysteresis_s_min : hysteresis_s_min
     use_mrst_transmissibility = something(use_mrst_transmissibility, defaults.use_mrst_transmissibility)
@@ -181,6 +207,21 @@ function co2_case_options(;
     gas_diffusion_coeff = something(gas_diffusion_coeff, defaults.gas_diffusion_coeff)
     diffusion = enable_diffusion ? (liquid_diffusion_coeff, gas_diffusion_coeff) : nothing
 
+    if !isnothing(restart_step)
+        restart_step >= 2 || error("RESTART_STEP must be at least 2 so a previous saved state exists.")
+    end
+    if !isnothing(stop_after_report_step)
+        stop_after_report_step >= 1 || error("STOP_AFTER_REPORT_STEP must be positive.")
+        if !isnothing(restart_step) && restart_step > stop_after_report_step
+            error("RESTART_STEP=$restart_step is after STOP_AFTER_REPORT_STEP=$stop_after_report_step.")
+        end
+    end
+    target_its > 0 || error("TARGET_ITS must be positive.")
+    target_ds > 0 || error("TARGET_DS must be positive or Inf.")
+    timestep_max_increase >= 1 || error("TIMESTEP_MAX_INCREASE must be at least 1.")
+    dr_max > 0 || error("DR_MAX must be positive or Inf.")
+    in_memory_reports >= 1 || error("IN_MEMORY_REPORTS must be at least 1.")
+
     return (
         case_name = case_name,
         julia_threads = julia_threads,
@@ -191,6 +232,8 @@ function co2_case_options(;
         restart_output_path = restart_output_path,
         vtu_path = vtu_path,
         restart = restart,
+        restart_step = restart_step,
+        stop_after_report_step = stop_after_report_step,
         write_incon_vtu = write_incon_vtu,
         write_state_vtu = write_state_vtu,
         vtu_prefix = vtu_prefix,
@@ -202,6 +245,13 @@ function co2_case_options(;
         info_level = info_level,
         report_level = report_level,
         load_all_states_after_sim = load_all_states_after_sim,
+        load_all_reports_after_sim = load_all_reports_after_sim,
+        nonlinear_relaxation = nonlinear_relaxation,
+        target_its = target_its,
+        target_ds = target_ds,
+        timestep_max_increase = timestep_max_increase,
+        dr_max = dr_max,
+        in_memory_reports = in_memory_reports,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
         use_mrst_transmissibility = use_mrst_transmissibility,
@@ -245,9 +295,18 @@ function co2_print_case_options(opts; stage::AbstractString)
         println("Julia threads available = ", Threads.nthreads())
         println("Julia threads passed to simulate_mrst_case = ", opts.julia_threads)
         println("restart = ", opts.restart)
+        println("restart_step = ", opts.restart_step)
+        println("stop_after_report_step = ", opts.stop_after_report_step)
+        println("nonlinear_relaxation = ", opts.nonlinear_relaxation)
+        println("target_its = ", opts.target_its)
+        println("target_ds = ", opts.target_ds)
+        println("timestep_max_increase = ", opts.timestep_max_increase)
+        println("dr_max = ", opts.dr_max)
+        println("in_memory_reports = ", opts.in_memory_reports)
         println("report_gas_masses = ", opts.report_gas_masses)
         println("report_co2_concentration = ", opts.report_co2_concentration)
         println("load_all_states_after_sim = ", opts.load_all_states_after_sim)
+        println("load_all_reports_after_sim = ", opts.load_all_reports_after_sim)
     end
     if opts.enable_diffusion
         println("liquid_diffusion_coeff = ", opts.liquid_diffusion_coeff)
@@ -265,6 +324,8 @@ function run_co2_case(;
         restart_output_path = nothing,
         vtu_path = nothing,
         restart::Bool = true,
+        restart_step = nothing,
+        stop_after_report_step = nothing,
         write_incon_vtu::Bool = false,
         write_state_vtu::Bool = false,
         vtu_prefix = nothing,
@@ -276,6 +337,13 @@ function run_co2_case(;
         info_level = nothing,
         report_level = nothing,
         load_all_states_after_sim::Bool = true,
+        load_all_reports_after_sim::Bool = true,
+        nonlinear_relaxation = nothing,
+        target_its = nothing,
+        target_ds = nothing,
+        timestep_max_increase = nothing,
+        dr_max = nothing,
+        in_memory_reports = nothing,
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
         use_mrst_transmissibility = nothing,
@@ -297,6 +365,8 @@ function run_co2_case(;
         restart_output_path = restart_output_path,
         vtu_path = vtu_path,
         restart = restart,
+        restart_step = restart_step,
+        stop_after_report_step = stop_after_report_step,
         write_incon_vtu = write_incon_vtu,
         write_state_vtu = write_state_vtu,
         vtu_prefix = vtu_prefix,
@@ -308,6 +378,13 @@ function run_co2_case(;
         info_level = info_level,
         report_level = report_level,
         load_all_states_after_sim = load_all_states_after_sim,
+        load_all_reports_after_sim = load_all_reports_after_sim,
+        nonlinear_relaxation = nonlinear_relaxation,
+        target_its = target_its,
+        target_ds = target_ds,
+        timestep_max_increase = timestep_max_increase,
+        dr_max = dr_max,
+        in_memory_reports = in_memory_reports,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
         use_mrst_transmissibility = use_mrst_transmissibility,
@@ -329,7 +406,8 @@ function run_co2_case(;
         common_mrst_path = opts.common_matfile_path,
         specific_mrst_path = opts.specific_matfile_path,
         output_path = opts.restart_output_path,
-        restart = opts.restart,
+        restart = isnothing(opts.restart_step) ? opts.restart : opts.restart_step,
+        stop_after_report_step = opts.stop_after_report_step,
         write_vtu = opts.write_state_vtu,
         vtu_outdir = opts.vtu_path,
         vtu_prefix = opts.vtu_prefix,
@@ -343,6 +421,13 @@ function run_co2_case(;
         info_level = opts.info_level,
         report_level = opts.report_level,
         load_all_states_after_sim = opts.load_all_states_after_sim,
+        load_all_reports_after_sim = opts.load_all_reports_after_sim,
+        nonlinear_relaxation = opts.nonlinear_relaxation,
+        target_its = opts.target_its,
+        target_ds = opts.target_ds,
+        timestep_max_increase = opts.timestep_max_increase,
+        dr_max = opts.dr_max,
+        in_memory_reports = opts.in_memory_reports,
         disable_hysteresis = opts.disable_hysteresis,
         hysteresis_s_min = opts.hysteresis_s_min,
         use_mrst_transmissibility = opts.use_mrst_transmissibility,
@@ -364,6 +449,8 @@ function export_co2_case_vtu(;
         restart_output_path = nothing,
         vtu_path = nothing,
         restart::Bool = true,
+        restart_step = nothing,
+        stop_after_report_step = nothing,
         write_incon_vtu::Bool = false,
         write_state_vtu::Bool = true,
         vtu_prefix = nothing,
@@ -375,6 +462,13 @@ function export_co2_case_vtu(;
         info_level = nothing,
         report_level = nothing,
         load_all_states_after_sim::Bool = true,
+        load_all_reports_after_sim::Bool = true,
+        nonlinear_relaxation = nothing,
+        target_its = nothing,
+        target_ds = nothing,
+        timestep_max_increase = nothing,
+        dr_max = nothing,
+        in_memory_reports = nothing,
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
         use_mrst_transmissibility = nothing,
@@ -396,6 +490,8 @@ function export_co2_case_vtu(;
         restart_output_path = restart_output_path,
         vtu_path = vtu_path,
         restart = restart,
+        restart_step = restart_step,
+        stop_after_report_step = stop_after_report_step,
         write_incon_vtu = write_incon_vtu,
         write_state_vtu = write_state_vtu,
         vtu_prefix = vtu_prefix,
@@ -407,6 +503,13 @@ function export_co2_case_vtu(;
         info_level = info_level,
         report_level = report_level,
         load_all_states_after_sim = load_all_states_after_sim,
+        load_all_reports_after_sim = load_all_reports_after_sim,
+        nonlinear_relaxation = nonlinear_relaxation,
+        target_its = target_its,
+        target_ds = target_ds,
+        timestep_max_increase = timestep_max_increase,
+        dr_max = dr_max,
+        in_memory_reports = in_memory_reports,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
         use_mrst_transmissibility = use_mrst_transmissibility,
@@ -486,6 +589,8 @@ function run_co2_case_from_env(; default_case_name::AbstractString, allowed_case
         restart_output_path = co2_get_env_str("RESTART_OUTPUT_PATH", defaults.restart_output_path),
         vtu_path = co2_get_env_str("VTU_PATH", defaults.vtu_path),
         restart = co2_get_env_bool("RESTART_RUN", true),
+        restart_step = co2_get_env_optional_int("RESTART_STEP"),
+        stop_after_report_step = co2_get_env_optional_int("STOP_AFTER_REPORT_STEP"),
         write_incon_vtu = co2_get_env_bool("WRITE_INCON_VTU", false),
         write_state_vtu = co2_get_env_bool("WRITE_STATE_VTU", false),
         vtu_prefix = co2_get_env_str("VTU_PREFIX", defaults.vtu_prefix),
@@ -496,6 +601,13 @@ function run_co2_case_from_env(; default_case_name::AbstractString, allowed_case
         info_level = co2_get_env_int("INFO_LEVEL", defaults.info_level),
         report_level = co2_get_env_int("REPORT_LEVEL", defaults.report_level),
         load_all_states_after_sim = co2_get_env_bool("LOAD_STATES_AFTER_SIM", load_states_default),
+        load_all_reports_after_sim = co2_get_env_bool("LOAD_REPORTS_AFTER_SIM", true),
+        nonlinear_relaxation = co2_get_env_bool("NONLINEAR_RELAXATION", defaults.nonlinear_relaxation),
+        target_its = co2_get_env_float("TARGET_ITS", defaults.target_its),
+        target_ds = co2_get_env_float("TARGET_DS", defaults.target_ds),
+        timestep_max_increase = co2_get_env_float("TIMESTEP_MAX_INCREASE", defaults.timestep_max_increase),
+        dr_max = co2_get_env_float("DR_MAX", defaults.dr_max),
+        in_memory_reports = co2_get_env_int("IN_MEMORY_REPORTS", defaults.in_memory_reports),
         disable_hysteresis = co2_get_env_bool("DISABLE_HYSTERESIS", defaults.disable_hysteresis),
         hysteresis_s_min = co2_get_env_optional_float("HYSTERESIS_S_MIN"),
         use_mrst_transmissibility = co2_get_transmissibility_policy(defaults.use_mrst_transmissibility),

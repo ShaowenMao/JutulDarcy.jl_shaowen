@@ -277,3 +277,30 @@ After submission, confirm the account/QOS with:
 ```bash
 scontrol show job <JOBID>_1 | grep -E "Account=|QOS=|Partition=|MinMemory"
 ```
+
+## Solver Checkpoint Experiment
+
+`gom_solver_checkpoint.sbatch` compares four numerical policies from the same
+saved state without rerunning the earlier report steps:
+
+| Task | Relaxation | Timestep policy |
+|---|---|---|
+| 1 | off | `TARGET_ITS=8`, `TARGET_DS=Inf`, maximum increase `10.0` |
+| 2 | on | `TARGET_ITS=8`, `TARGET_DS=Inf`, maximum increase `10.0` |
+| 3 | off | `TARGET_ITS=5`, `TARGET_DS=0.05`, maximum increase `1.25` |
+| 4 | on | `TARGET_ITS=5`, `TARGET_DS=0.05`, maximum increase `1.25` |
+
+Create the bootstrap-log directory and submit all four tasks with the restart
+folder from the original run:
+
+```bash
+mkdir -p /home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs/solver_checkpoints
+
+sbatch --array=1-4 \
+  --export=ALL,SOURCE_RESTART_PATH=/path/to/original/restart,TARGET_REPORT_STEP=63 \
+  scripts/engaging/gom_solver_checkpoint.sbatch
+```
+
+Each task links `jutul_62.jld2` into its own job-numbered folder, solves only
+report step 63, and leaves the source restart folder unchanged. Set
+`TARGET_REPORT_STEP=105` to repeat the comparison from `jutul_104.jld2`.

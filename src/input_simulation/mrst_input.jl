@@ -2364,13 +2364,17 @@ function final_saved_state(output_path, states)
     return state
 end
 
-function completed_report_steps(states, reports)
-    if !isempty(states)
+function completed_report_steps(states, reports, output_path = nothing)
+    if !isnothing(output_path) && isdir(output_path)
+        indices = Jutul.valid_restart_indices(output_path)
+        return isempty(indices) ? 0 : maximum(indices)
+    elseif !isempty(states)
         return length(states)
     elseif isempty(reports)
         return 0
     else
-        return length(Jutul.report_timesteps(reports))
+        last_report = findlast(report -> !ismissing(report), reports)
+        return isnothing(last_report) ? 0 : last_report
     end
 end
 
@@ -2597,6 +2601,7 @@ function simulate_mrst_case(fn;
         write_mrst = false,
         write_output = true,
         ds_max = 0.2,
+        dr_max = Inf,
         dz_max = 0.2,
         dp_max_abs = nothing,
         dp_max_rel = 0.2,
@@ -2608,6 +2613,7 @@ function simulate_mrst_case(fn;
         general_ad = false,
         legacy_output = false,
         restart = false,
+        stop_after_report_step::Union{Nothing, Int} = nothing,
         wells = :simple,
         plot = false,
         linear_solver = :bicgstab,
@@ -2616,6 +2622,12 @@ function simulate_mrst_case(fn;
         info_level::Union{Nothing, Int} = nothing,
         report_level::Union{Nothing, Int} = nothing,
         load_all_states_after_sim::Bool = true,
+        load_all_reports_after_sim::Bool = true,
+        in_memory_reports::Int = 10,
+        nonlinear_relaxation::Bool = false,
+        target_its::Real = 8,
+        target_ds::Real = Inf,
+        timestep_max_increase::Real = 10.0,
         diffusion = nothing,
         disable_hysteresis::Bool = false,
         hysteresis_s_min::Union{Nothing, Float64} = nothing,
@@ -2704,6 +2716,7 @@ function simulate_mrst_case(fn;
             p_max = p_max,
             dz_max = dz_max,
             ds_max = ds_max,
+            dr_max = dr_max,
             diffusion = diffusion,
             disable_hysteresis = disable_hysteresis,
             hysteresis_s_min = hysteresis_s_min,
@@ -2731,6 +2744,7 @@ function simulate_mrst_case(fn;
             p_max = p_max,
             dz_max = dz_max,
             ds_max = ds_max,
+            dr_max = dr_max,
             diffusion = diffusion,
             disable_hysteresis = disable_hysteresis,
             hysteresis_s_min = hysteresis_s_min,
@@ -2741,6 +2755,26 @@ function simulate_mrst_case(fn;
     model = case.model
     forces = case.forces
     dt = case.dt
+    if !isnothing(stop_after_report_step)
+        nreport = length(dt)
+        1 <= stop_after_report_step <= nreport || error(
+            "STOP_AFTER_REPORT_STEP=$stop_after_report_step must be between 1 and $nreport."
+        )
+        if restart isa Integer && !(restart isa Bool) && restart > stop_after_report_step
+            error("Restart step $restart is after STOP_AFTER_REPORT_STEP=$stop_after_report_step.")
+        end
+        dt = dt[1:stop_after_report_step]
+        if forces isa AbstractVector
+            length(forces) == nreport || error(
+                "Cannot truncate a force vector with $(length(forces)) entries for a $nreport-step schedule."
+            )
+            forces = forces[1:stop_after_report_step]
+        end
+        verbose && jutul_message(
+            "MRST checkpoint",
+            "Schedule truncated after report step $stop_after_report_step."
+        )
+    end
     parameters = case.parameters
     models = model.models
     rmodel = models[:Reservoir]
@@ -2805,6 +2839,12 @@ function simulate_mrst_case(fn;
         linear_solver = linear_solver,
         output_path = output_path,
         output_states = load_all_states_after_sim,
+        output_reports = load_all_reports_after_sim,
+        in_memory_reports = in_memory_reports,
+        relaxation = nonlinear_relaxation,
+        target_its = target_its,
+        target_ds = target_ds,
+        timestep_max_increase = Float64(timestep_max_increase),
         kwarg...
     )
 
@@ -2965,7 +3005,7 @@ function simulate_mrst_case(fn;
             end
             write_reservoir_simulator_output_to_mrst(sim.model, states, reports, forces, mrst_output_path, parameters = parameters)
         end
-        ns = completed_report_steps(states, reports)
+        ns = completed_report_steps(states, reports, output_path)
         nt = length(dt)
         if verbose
             if ns == nt
