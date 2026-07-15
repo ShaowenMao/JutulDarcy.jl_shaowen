@@ -192,6 +192,16 @@ function mrst_has_explicit_fault_saturation_data(specific)
            haskey(specific["fault"], "saturation_region")
 end
 
+function normalize_mrst_explicit_fault_hysteresis_mode(mode)
+    if isnothing(mode)
+        return "disable"
+    elseif mode isa Symbol
+        return lowercase(String(mode))
+    else
+        return lowercase(strip(String(mode)))
+    end
+end
+
 function normalize_mrst_fault_pc_entry_treatment(treatment)
     if isnothing(treatment)
         return "none"
@@ -255,8 +265,15 @@ end
 
 function apply_mrst_explicit_fault_saturation_data!(assembled, specific;
         fault_pc_entry_treatment = "none",
-        fault_pc_entry_sg_max::Real = 1.0e-4
+        fault_pc_entry_sg_max::Real = 1.0e-4,
+        explicit_fault_hysteresis_mode = "disable"
     )
+    hyst_mode = normalize_mrst_explicit_fault_hysteresis_mode(explicit_fault_hysteresis_mode)
+    if !(hyst_mode in ("", "disable", "disabled", "none", "off", "false", "0", "reservoir", "reservoir_only", "reservoir-only"))
+        error("Unknown EXPLICIT_FAULT_HYSTERESIS_MODE=$explicit_fault_hysteresis_mode. Valid options: disable, reservoir.")
+    end
+    reservoir_hysteresis = hyst_mode in ("reservoir", "reservoir_only", "reservoir-only")
+
     fault = specific["fault"]
     for key in ("cells", "saturation_region", "fluid_tables")
         haskey(fault, key) || error("Explicit fault saturation data is missing fault[\"$key\"].")
@@ -312,25 +329,67 @@ function apply_mrst_explicit_fault_saturation_data!(assembled, specific;
         "Common SGOF data has $(length(old_tables)) tables, fewer than the $base_regions shared base regions."
     )
 
-    new_tables = Vector{Any}(undef, maximum_region)
-    for region in 1:base_regions
-        isempty(old_tables[region]) && error("Common SGOF base region $region is empty.")
-        new_tables[region] = deepcopy(old_tables[region])
-    end
-    for (region, table) in zip(custom_regions, custom_tables)
-        isempty(table) && error("Explicit fault SGOF region $region is empty.")
-        new_tables[region] = table
-    end
-    props["SGOF"] = reshape(new_tables, :, 1)
-
-    # The reservoir-ready package currently provides drainage curves only.
-    # Remove stale imbibition-region ids and force the deck onto drainage.
-    if haskey(rock_regions, "imbibition")
-        delete!(rock_regions, "imbibition")
-    end
     runspec = assembled["deck"]["RUNSPEC"]
-    runspec["NOHYST"] = true
-    update_mrst_tabdims_num_saturation_tables!(assembled, maximum_region)
+    hysteresis_summary = "disabled"
+    if reservoir_hysteresis
+        haskey(props, "EHYSTR") || error(
+            "EXPLICIT_FAULT_HYSTERESIS_MODE=reservoir requires common deck.PROPS.EHYSTR."
+        )
+        iseven(length(old_tables)) || error(
+            "EXPLICIT_FAULT_HYSTERESIS_MODE=reservoir requires common drainage/imbibition SGOF pairs, got $(length(old_tables)) tables."
+        )
+        old_drainage_regions = length(old_tables) ÷ 2
+        length(old_tables) >= 2*base_regions || error(
+            "Common SGOF data has $(length(old_tables)) tables, fewer than paired base regions require."
+        )
+
+        new_tables = Vector{Any}(undef, 2*maximum_region)
+        for region in 1:base_regions
+            isempty(old_tables[region]) && error("Common drainage SGOF base region $region is empty.")
+            isempty(old_tables[old_drainage_regions + region]) && error("Common imbibition SGOF base region $region is empty.")
+            new_tables[region] = deepcopy(old_tables[region])
+            new_tables[maximum_region + region] = deepcopy(old_tables[old_drainage_regions + region])
+        end
+        for (region, table) in zip(custom_regions, custom_tables)
+            isempty(table) && error("Explicit fault SGOF region $region is empty.")
+            new_tables[region] = table
+            # Fault-specific imbibition curves are not provided. Duplicate the
+            # drainage table so reservoir hysteresis can remain active while
+            # fault regions behave as drainage-only.
+            new_tables[maximum_region + region] = deepcopy(table)
+        end
+        props["SGOF"] = reshape(new_tables, :, 1)
+        if haskey(rock_regions, "imbibition")
+            imb = vec(rock_regions["imbibition"])
+            imb .= sat .+ maximum_region
+        end
+        if haskey(runspec, "NOHYST")
+            delete!(runspec, "NOHYST")
+        end
+        update_mrst_tabdims_num_saturation_tables!(assembled, length(new_tables))
+        hysteresis_summary = "reservoir_only_fault_drainage_duplicate"
+    else
+        new_tables = Vector{Any}(undef, maximum_region)
+        for region in 1:base_regions
+            isempty(old_tables[region]) && error("Common SGOF base region $region is empty.")
+            new_tables[region] = deepcopy(old_tables[region])
+        end
+        for (region, table) in zip(custom_regions, custom_tables)
+            isempty(table) && error("Explicit fault SGOF region $region is empty.")
+            new_tables[region] = table
+        end
+        props["SGOF"] = reshape(new_tables, :, 1)
+
+        # The reservoir-ready package commonly provides drainage curves only.
+        # Keep the default conservative behavior: remove stale imbibition ids
+        # and force the deck onto drainage unless reservoir-only hysteresis is
+        # explicitly requested.
+        if haskey(rock_regions, "imbibition")
+            delete!(rock_regions, "imbibition")
+        end
+        runspec["NOHYST"] = true
+        update_mrst_tabdims_num_saturation_tables!(assembled, maximum_region)
+    end
 
     assembled["fault_saturation_domain_mode"] = "reservoir_ready_explicit"
     assembled["fault_saturation_domain_summary"] = Dict{String, Any}(
@@ -338,12 +397,12 @@ function apply_mrst_explicit_fault_saturation_data!(assembled, specific;
         "fault_regions" => length(custom_regions),
         "drainage_regions" => maximum_region,
         "sgof_tables" => length(new_tables),
-        "hysteresis" => "disabled",
+        "hysteresis" => hysteresis_summary,
         "pc_entry_treatment" => isnothing(pc_entry_summary) ? Dict{String, Any}("treatment" => "none") : pc_entry_summary
     )
     jutul_message(
         "MRST split input",
-        "Applied $(length(custom_regions)) explicit reservoir-ready fault saturation regions and SGOF tables; hysteresis disabled.",
+        "Applied $(length(custom_regions)) explicit reservoir-ready fault saturation regions and SGOF tables; hysteresis=$hysteresis_summary.",
         color = :yellow
     )
     return assembled
@@ -550,7 +609,8 @@ function assemble_mrst_split_case(common, specific;
         validate::Bool = true,
         fault_saturation_domain_mode = "input",
         fault_pc_entry_treatment = "none",
-        fault_pc_entry_sg_max::Real = 1.0e-4
+        fault_pc_entry_sg_max::Real = 1.0e-4,
+        explicit_fault_hysteresis_mode = "disable"
     )
     haskey(specific, "fault") || error("Specific MRST split file must contain a top-level fault block.")
     assembled = deepcopy(common)
@@ -585,7 +645,8 @@ function assemble_mrst_split_case(common, specific;
         end
         apply_mrst_explicit_fault_saturation_data!(assembled, specific;
             fault_pc_entry_treatment = fault_pc_entry_treatment,
-            fault_pc_entry_sg_max = fault_pc_entry_sg_max
+            fault_pc_entry_sg_max = fault_pc_entry_sg_max,
+            explicit_fault_hysteresis_mode = explicit_fault_hysteresis_mode
         )
     else
         restore_mrst_split_fault_tables!(assembled, fault)
@@ -602,7 +663,8 @@ function read_mrst_split_case(common_path::AbstractString, specific_path::Abstra
         validate::Bool = true,
         fault_saturation_domain_mode = "input",
         fault_pc_entry_treatment = "none",
-        fault_pc_entry_sg_max::Real = 1.0e-4
+        fault_pc_entry_sg_max::Real = 1.0e-4,
+        explicit_fault_hysteresis_mode = "disable"
     )
     common_fn = get_mrst_input_path(String(common_path))
     specific_fn = get_mrst_input_path(String(specific_path))
@@ -614,7 +676,8 @@ function read_mrst_split_case(common_path::AbstractString, specific_path::Abstra
         validate = validate,
         fault_saturation_domain_mode = fault_saturation_domain_mode,
         fault_pc_entry_treatment = fault_pc_entry_treatment,
-        fault_pc_entry_sg_max = fault_pc_entry_sg_max
+        fault_pc_entry_sg_max = fault_pc_entry_sg_max,
+        explicit_fault_hysteresis_mode = explicit_fault_hysteresis_mode
     )
     assembled["split_input"] = Dict{String, Any}(
         "common_path" => common_fn,
@@ -1825,13 +1888,15 @@ function setup_case_from_mrst_split(common_path::AbstractString, specific_path::
         fault_saturation_domain_mode = "input",
         fault_pc_entry_treatment = "none",
         fault_pc_entry_sg_max::Real = 1.0e-4,
+        explicit_fault_hysteresis_mode = "disable",
         kwarg...
     )
     mrst_data = read_mrst_split_case(common_path, specific_path;
         validate = validate_split,
         fault_saturation_domain_mode = fault_saturation_domain_mode,
         fault_pc_entry_treatment = fault_pc_entry_treatment,
-        fault_pc_entry_sg_max = fault_pc_entry_sg_max
+        fault_pc_entry_sg_max = fault_pc_entry_sg_max,
+        explicit_fault_hysteresis_mode = explicit_fault_hysteresis_mode
     )
     data_domain = reservoir_domain_from_mrst_data(mrst_data;
         extraout = false,
@@ -2348,6 +2413,7 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         fault_saturation_domain_mode = "input",
         fault_pc_entry_treatment = "none",
         fault_pc_entry_sg_max::Real = 1.0e-4,
+        explicit_fault_hysteresis_mode = "disable",
     )
     is_split_input = !isnothing(common_mrst_path) || !isnothing(specific_mrst_path)
     if is_split_input
@@ -2396,7 +2462,8 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         use_mrst_transmissibility = use_mrst_transmissibility,
         fault_saturation_domain_mode = fault_saturation_domain_mode,
         fault_pc_entry_treatment = fault_pc_entry_treatment,
-        fault_pc_entry_sg_max = fault_pc_entry_sg_max
+        fault_pc_entry_sg_max = fault_pc_entry_sg_max,
+        explicit_fault_hysteresis_mode = explicit_fault_hysteresis_mode
     )
     case, mrst_data = if is_split_input
         setup_case_from_mrst_split(common_mrst_path, specific_mrst_path;
@@ -2500,6 +2567,10 @@ Simulate a MRST case from `file_name` as exported by `writeJutulInput` in MRST.
 - `fault_pc_entry_treatment = "none"`: For explicit split fault SGOF tables,
   set to `"plateau"` to replace `Pc(Sg=0)=0` with the first positive entry
   pressure when the second saturation point is below `fault_pc_entry_sg_max`.
+- `explicit_fault_hysteresis_mode = "disable"`: For explicit split fault
+  SGOF tables, keep the conservative default of disabling hysteresis. Set to
+  `"reservoir"` to keep reservoir hysteresis active while duplicating each
+  fault drainage table as its own imbibition table.
 
 Additional input arguments are passed onto, [`setup_case_from_mrst`](@ref),
 [`setup_reservoir_simulator`](@ref) and [`simulator_config`](@ref) if
@@ -2552,6 +2623,7 @@ function simulate_mrst_case(fn;
         fault_saturation_domain_mode = "input",
         fault_pc_entry_treatment = "none",
         fault_pc_entry_sg_max::Real = 1.0e-4,
+        explicit_fault_hysteresis_mode = "disable",
         kwarg...
     )
     is_split_input = !isnothing(common_mrst_path) || !isnothing(specific_mrst_path)
@@ -2638,7 +2710,8 @@ function simulate_mrst_case(fn;
             use_mrst_transmissibility = use_mrst_transmissibility,
             fault_saturation_domain_mode = fault_saturation_domain_mode,
             fault_pc_entry_treatment = fault_pc_entry_treatment,
-            fault_pc_entry_sg_max = fault_pc_entry_sg_max
+            fault_pc_entry_sg_max = fault_pc_entry_sg_max,
+            explicit_fault_hysteresis_mode = explicit_fault_hysteresis_mode
         )
         deck = mrst_data["deck"]
     else

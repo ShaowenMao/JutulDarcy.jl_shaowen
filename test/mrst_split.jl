@@ -87,4 +87,38 @@ end
     @test entry_summary["treatment"] == "plateau"
     @test entry_summary["adjusted_tables"] == 2
     @test entry_summary["skipped_tables"] == 0
+
+    base_imbibition_table = split_test_sgof(1.5)
+    common_hysteresis = deepcopy(common)
+    common_hysteresis["deck"]["PROPS"]["EHYSTR"] = Any[0, 3, 0, 0.0, "KR", 0, 0, "DEFAULT", 0, 0, 0, 0.05]
+    common_hysteresis["deck"]["PROPS"]["SGOF"] = reshape(
+        Any[base_table, zeros(0, 0), zeros(0, 0), base_imbibition_table, zeros(0, 0), zeros(0, 0)],
+        :,
+        1
+    )
+    common_hysteresis["deck"]["RUNSPEC"]["TABDIMS"] = [6.0]
+
+    reservoir_hyst_assembled = JutulDarcy.assemble_mrst_split_case(
+        common_hysteresis,
+        entry_specific;
+        fault_pc_entry_treatment = "plateau",
+        fault_pc_entry_sg_max = 1.0e-4,
+        explicit_fault_hysteresis_mode = "reservoir"
+    )
+    reservoir_hyst_regions = reservoir_hyst_assembled["rock"]["regions"]
+    reservoir_hyst_sgof = vec(reservoir_hyst_assembled["deck"]["PROPS"]["SGOF"])
+    reservoir_hyst_summary = reservoir_hyst_assembled["fault_saturation_domain_summary"]
+
+    @test length(reservoir_hyst_sgof) == 6
+    @test reservoir_hyst_sgof[1] == base_table
+    @test reservoir_hyst_sgof[4] == base_imbibition_table
+    @test reservoir_hyst_sgof[5] == reservoir_hyst_sgof[2]
+    @test reservoir_hyst_sgof[6] == reservoir_hyst_sgof[3]
+    @test reservoir_hyst_sgof[2][1, 4] == reservoir_hyst_sgof[2][2, 4]
+    @test !haskey(reservoir_hyst_assembled["deck"]["RUNSPEC"], "NOHYST")
+    @test Int.(vec(reservoir_hyst_regions["saturation"])) == [1, 1, 2, 3]
+    @test Int.(vec(reservoir_hyst_regions["imbibition"])) == [4, 4, 5, 6]
+    @test reservoir_hyst_assembled["deck"]["RUNSPEC"]["TABDIMS"][1] == 6.0
+    @test reservoir_hyst_summary["hysteresis"] == "reservoir_only_fault_drainage_duplicate"
+    @test reservoir_hyst_summary["pc_entry_treatment"]["adjusted_tables"] == 2
 end

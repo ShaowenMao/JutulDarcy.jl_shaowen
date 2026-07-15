@@ -78,6 +78,7 @@ function co2_case_defaults(case_name::AbstractString)
         fault_saturation_domain_mode = "input",
         fault_pc_entry_treatment = "none",
         fault_pc_entry_sg_max = 1.0e-4,
+        explicit_fault_hysteresis_mode = "disable",
         enable_diffusion = false,
         liquid_diffusion_coeff = 0.0,
         gas_diffusion_coeff = 0.0
@@ -146,6 +147,7 @@ function co2_case_options(;
         fault_saturation_domain_mode = nothing,
         fault_pc_entry_treatment = nothing,
         fault_pc_entry_sg_max = nothing,
+        explicit_fault_hysteresis_mode = nothing,
         enable_diffusion = nothing,
         liquid_diffusion_coeff = nothing,
         gas_diffusion_coeff = nothing
@@ -173,6 +175,7 @@ function co2_case_options(;
     fault_saturation_domain_mode = something(fault_saturation_domain_mode, defaults.fault_saturation_domain_mode)
     fault_pc_entry_treatment = something(fault_pc_entry_treatment, defaults.fault_pc_entry_treatment)
     fault_pc_entry_sg_max = something(fault_pc_entry_sg_max, defaults.fault_pc_entry_sg_max)
+    explicit_fault_hysteresis_mode = something(explicit_fault_hysteresis_mode, defaults.explicit_fault_hysteresis_mode)
     enable_diffusion = something(enable_diffusion, defaults.enable_diffusion)
     liquid_diffusion_coeff = something(liquid_diffusion_coeff, defaults.liquid_diffusion_coeff)
     gas_diffusion_coeff = something(gas_diffusion_coeff, defaults.gas_diffusion_coeff)
@@ -205,6 +208,7 @@ function co2_case_options(;
         fault_saturation_domain_mode = fault_saturation_domain_mode,
         fault_pc_entry_treatment = fault_pc_entry_treatment,
         fault_pc_entry_sg_max = fault_pc_entry_sg_max,
+        explicit_fault_hysteresis_mode = explicit_fault_hysteresis_mode,
         enable_diffusion = enable_diffusion,
         liquid_diffusion_coeff = liquid_diffusion_coeff,
         gas_diffusion_coeff = gas_diffusion_coeff,
@@ -235,6 +239,7 @@ function co2_print_case_options(opts; stage::AbstractString)
     println("fault_saturation_domain_mode = ", opts.fault_saturation_domain_mode)
     println("fault_pc_entry_treatment = ", opts.fault_pc_entry_treatment)
     println("fault_pc_entry_sg_max = ", opts.fault_pc_entry_sg_max)
+    println("explicit_fault_hysteresis_mode = ", opts.explicit_fault_hysteresis_mode)
     println("enable_diffusion = ", opts.enable_diffusion)
     if stage == "simulate"
         println("Julia threads available = ", Threads.nthreads())
@@ -277,6 +282,7 @@ function run_co2_case(;
         fault_saturation_domain_mode = nothing,
         fault_pc_entry_treatment = nothing,
         fault_pc_entry_sg_max = nothing,
+        explicit_fault_hysteresis_mode = nothing,
         enable_diffusion = nothing,
         liquid_diffusion_coeff = nothing,
         gas_diffusion_coeff = nothing
@@ -308,6 +314,7 @@ function run_co2_case(;
         fault_saturation_domain_mode = fault_saturation_domain_mode,
         fault_pc_entry_treatment = fault_pc_entry_treatment,
         fault_pc_entry_sg_max = fault_pc_entry_sg_max,
+        explicit_fault_hysteresis_mode = explicit_fault_hysteresis_mode,
         enable_diffusion = enable_diffusion,
         liquid_diffusion_coeff = liquid_diffusion_coeff,
         gas_diffusion_coeff = gas_diffusion_coeff
@@ -342,6 +349,7 @@ function run_co2_case(;
         fault_saturation_domain_mode = opts.fault_saturation_domain_mode,
         fault_pc_entry_treatment = opts.fault_pc_entry_treatment,
         fault_pc_entry_sg_max = opts.fault_pc_entry_sg_max,
+        explicit_fault_hysteresis_mode = opts.explicit_fault_hysteresis_mode,
         diffusion = opts.diffusion
     )
 end
@@ -373,6 +381,7 @@ function export_co2_case_vtu(;
         fault_saturation_domain_mode = nothing,
         fault_pc_entry_treatment = nothing,
         fault_pc_entry_sg_max = nothing,
+        explicit_fault_hysteresis_mode = nothing,
         enable_diffusion = nothing,
         liquid_diffusion_coeff = nothing,
         gas_diffusion_coeff = nothing
@@ -404,6 +413,7 @@ function export_co2_case_vtu(;
         fault_saturation_domain_mode = fault_saturation_domain_mode,
         fault_pc_entry_treatment = fault_pc_entry_treatment,
         fault_pc_entry_sg_max = fault_pc_entry_sg_max,
+        explicit_fault_hysteresis_mode = explicit_fault_hysteresis_mode,
         enable_diffusion = enable_diffusion,
         liquid_diffusion_coeff = liquid_diffusion_coeff,
         gas_diffusion_coeff = gas_diffusion_coeff
@@ -433,6 +443,7 @@ function export_co2_case_vtu(;
         fault_saturation_domain_mode = opts.fault_saturation_domain_mode,
         fault_pc_entry_treatment = opts.fault_pc_entry_treatment,
         fault_pc_entry_sg_max = opts.fault_pc_entry_sg_max,
+        explicit_fault_hysteresis_mode = opts.explicit_fault_hysteresis_mode,
         diffusion = opts.diffusion
     )
 end
@@ -491,6 +502,7 @@ function run_co2_case_from_env(; default_case_name::AbstractString, allowed_case
         fault_saturation_domain_mode = co2_get_env_str("FAULT_SATURATION_DOMAIN_MODE", defaults.fault_saturation_domain_mode),
         fault_pc_entry_treatment = co2_get_env_str("FAULT_PC_ENTRY_TREATMENT", defaults.fault_pc_entry_treatment),
         fault_pc_entry_sg_max = co2_get_env_float("FAULT_PC_ENTRY_SG_MAX", defaults.fault_pc_entry_sg_max),
+        explicit_fault_hysteresis_mode = co2_get_env_str("EXPLICIT_FAULT_HYSTERESIS_MODE", defaults.explicit_fault_hysteresis_mode),
         enable_diffusion = co2_get_env_bool("ENABLE_DIFFUSION", defaults.enable_diffusion),
         liquid_diffusion_coeff = co2_get_env_float("LIQUID_DIFFUSION_COEFF", defaults.liquid_diffusion_coeff),
         gas_diffusion_coeff = co2_get_env_float("GAS_DIFFUSION_COEFF", defaults.gas_diffusion_coeff)

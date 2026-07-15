@@ -264,6 +264,14 @@ sbatch --export=ALL,CASE_ID=all87_split_cuts25,FAULT_PC_ENTRY_TREATMENT=plateau,
 
 This only changes explicit split-input fault `SGOF` tables where the first point is `Sg=0, Pc=0` and the second point is a very small positive gas saturation. The case folder gets a `_pcplateau` tag.
 
+To keep reservoir hysteresis active for explicit split fault tables while leaving fault curves drainage-only, add:
+
+```bash
+EXPLICIT_FAULT_HYSTERESIS_MODE=reservoir,HYSTERESIS_S_MIN=0.05
+```
+
+The script duplicates each explicit fault drainage table as its own imbibition table and preserves the common reservoir imbibition tables. The case folder gets a `_reshyst` tag.
+
 After submission, confirm the account/QOS with:
 
 ```bash
