@@ -107,9 +107,26 @@ case "$CHECKPOINT_EXPERIMENT" in
                 ;;
         esac
         ;;
+    timestep_reference)
+        EXPERIMENT_MAX_NONLINEAR_ITERATIONS=10
+        export NONLINEAR_RELAXATION=true
+        export TARGET_ITS=5
+        export TIMESTEP_MAX_INCREASE=1.25
+        case "$ARRAY_TASK_ID" in
+            1)
+                TARGET_REPORT_STEP=105
+                SOLVER_VARIANT=relaxation_ds0p005
+                export TARGET_DS=0.005
+                ;;
+            *)
+                echo "Unknown timestep_reference task $ARRAY_TASK_ID. Valid task is 1."
+                exit 1
+                ;;
+        esac
+        ;;
     *)
         echo "Unknown CHECKPOINT_EXPERIMENT=$CHECKPOINT_EXPERIMENT."
-        echo "Valid values: solver_matrix, timestep_refinement"
+        echo "Valid values: solver_matrix, timestep_refinement, timestep_reference"
         exit 1
         ;;
 esac
@@ -175,12 +192,14 @@ export WRITE_STATE_VTU=false
 
 # Physical model controls are fixed across every checkpoint experiment.
 export DISABLE_HYSTERESIS=true
+export HYSTERESIS_S_MIN=
 export USE_MRST_TRANSMISSIBILITY=true
 export IGNORE_MRST_T=false
 export FAULT_SATURATION_DOMAIN_MODE=input
 export FAULT_PC_ENTRY_TREATMENT=plateau
 export FAULT_PC_ENTRY_SG_MAX=1.0e-4
 export EXPLICIT_FAULT_HYSTERESIS_MODE=disable
+export ENABLE_DIFFUSION=false
 
 cd "$REPO_ROOT"
 

@@ -315,3 +315,27 @@ sbatch --array=1-6 \
   --export=ALL,CHECKPOINT_EXPERIMENT=timestep_refinement,MAX_NONLINEAR_ITERATIONS=10,SOURCE_RESTART_PATH=/path/to/original/restart \
   scripts/engaging/gom_solver_checkpoint.sbatch
 ```
+
+Use the one-task reference mode to solve step 105 with `TARGET_DS=0.005` from
+the same `jutul_104.jld2` checkpoint:
+
+```bash
+sbatch --array=1 \
+  --export=ALL,CHECKPOINT_EXPERIMENT=timestep_reference,SOURCE_RESTART_PATH=/path/to/original/restart \
+  scripts/engaging/gom_solver_checkpoint.sbatch
+```
+
+## Solver Full-Run Comparison
+
+`gom_solver_fullrun.sbatch` runs the `s05_c012_case01` split realization from
+time zero with the validated relaxation policy. Task 1 uses `TARGET_DS=0.05`
+and task 2 uses `TARGET_DS=0.02`; all physical-model and other solver controls
+are identical.
+
+```bash
+sbatch --array=1-2 scripts/engaging/gom_solver_fullrun.sbatch
+```
+
+The two cases use the advanced CPU account, 8 Julia/HYPRE threads, 64 GB per
+task, and a four-day wall-time limit. Restart and case-local log files are
+written below `gom_sampling_runs`; VTU export remains disabled.
