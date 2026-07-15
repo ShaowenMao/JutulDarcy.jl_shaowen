@@ -19,43 +19,97 @@ REPO_ROOT=${REPO_ROOT:-/home/$USER/projects/JutulDarcy.jl_shaowen}
 INPUT_ROOT=${INPUT_ROOT:-/home/$USER/orcd/pool/jutuldarcy_case/gom_sampling_inputs}
 CHECKPOINT_ROOT=${CHECKPOINT_ROOT:-/home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs/solver_checkpoints}
 SOURCE_RESTART_PATH=${SOURCE_RESTART_PATH:?Set SOURCE_RESTART_PATH to the original restart directory.}
-TARGET_REPORT_STEP=${TARGET_REPORT_STEP:-63}
+CHECKPOINT_EXPERIMENT=${CHECKPOINT_EXPERIMENT:-solver_matrix}
+ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID:?Submit this script as a Slurm array.}
 
 export COMMON_MATFILE_PATH=${COMMON_MATFILE_PATH:-$INPUT_ROOT/all87/jutul_split/lluis_field_case_87_all87_common.mat}
 export SPECIFIC_MATFILE_PATH=${SPECIFIC_MATFILE_PATH:-$INPUT_ROOT/all87/jutul_split/lluis_field_case_87_slices_s05_c012_case01_specific.mat}
 export MATFILE_PATH=$SPECIFIC_MATFILE_PATH
 
-case "${SLURM_ARRAY_TASK_ID:?Submit this script as an array with tasks 1-4.}" in
-    1)
-        SOLVER_VARIANT=reference
-        export NONLINEAR_RELAXATION=false
-        export TARGET_ITS=8
-        export TARGET_DS=Inf
-        export TIMESTEP_MAX_INCREASE=10.0
+case "$CHECKPOINT_EXPERIMENT" in
+    solver_matrix)
+        TARGET_REPORT_STEP=${TARGET_REPORT_STEP:-63}
+        EXPERIMENT_MAX_NONLINEAR_ITERATIONS=20
+        case "$ARRAY_TASK_ID" in
+            1)
+                SOLVER_VARIANT=reference
+                export NONLINEAR_RELAXATION=false
+                export TARGET_ITS=8
+                export TARGET_DS=Inf
+                export TIMESTEP_MAX_INCREASE=10.0
+                ;;
+            2)
+                SOLVER_VARIANT=relaxation
+                export NONLINEAR_RELAXATION=true
+                export TARGET_ITS=8
+                export TARGET_DS=Inf
+                export TIMESTEP_MAX_INCREASE=10.0
+                ;;
+            3)
+                SOLVER_VARIANT=conservative_dt
+                export NONLINEAR_RELAXATION=false
+                export TARGET_ITS=5
+                export TARGET_DS=0.05
+                export TIMESTEP_MAX_INCREASE=1.25
+                ;;
+            4)
+                SOLVER_VARIANT=relaxation_conservative_dt
+                export NONLINEAR_RELAXATION=true
+                export TARGET_ITS=5
+                export TARGET_DS=0.05
+                export TIMESTEP_MAX_INCREASE=1.25
+                ;;
+            *)
+                echo "Unknown solver_matrix task $ARRAY_TASK_ID. Valid tasks are 1-4."
+                exit 1
+                ;;
+        esac
         ;;
-    2)
-        SOLVER_VARIANT=relaxation
+    timestep_refinement)
+        EXPERIMENT_MAX_NONLINEAR_ITERATIONS=10
         export NONLINEAR_RELAXATION=true
-        export TARGET_ITS=8
-        export TARGET_DS=Inf
-        export TIMESTEP_MAX_INCREASE=10.0
-        ;;
-    3)
-        SOLVER_VARIANT=conservative_dt
-        export NONLINEAR_RELAXATION=false
         export TARGET_ITS=5
-        export TARGET_DS=0.05
         export TIMESTEP_MAX_INCREASE=1.25
-        ;;
-    4)
-        SOLVER_VARIANT=relaxation_conservative_dt
-        export NONLINEAR_RELAXATION=true
-        export TARGET_ITS=5
-        export TARGET_DS=0.05
-        export TIMESTEP_MAX_INCREASE=1.25
+        case "$ARRAY_TASK_ID" in
+            1)
+                TARGET_REPORT_STEP=63
+                SOLVER_VARIANT=relaxation_ds0p02
+                export TARGET_DS=0.02
+                ;;
+            2)
+                TARGET_REPORT_STEP=63
+                SOLVER_VARIANT=relaxation_ds0p01
+                export TARGET_DS=0.01
+                ;;
+            3)
+                TARGET_REPORT_STEP=105
+                SOLVER_VARIANT=relaxation_dsinf
+                export TARGET_DS=Inf
+                ;;
+            4)
+                TARGET_REPORT_STEP=105
+                SOLVER_VARIANT=relaxation_ds0p05
+                export TARGET_DS=0.05
+                ;;
+            5)
+                TARGET_REPORT_STEP=105
+                SOLVER_VARIANT=relaxation_ds0p02
+                export TARGET_DS=0.02
+                ;;
+            6)
+                TARGET_REPORT_STEP=105
+                SOLVER_VARIANT=relaxation_ds0p01
+                export TARGET_DS=0.01
+                ;;
+            *)
+                echo "Unknown timestep_refinement task $ARRAY_TASK_ID. Valid tasks are 1-6."
+                exit 1
+                ;;
+        esac
         ;;
     *)
-        echo "Unknown SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID. Valid tasks are 1-4."
+        echo "Unknown CHECKPOINT_EXPERIMENT=$CHECKPOINT_EXPERIMENT."
+        echo "Valid values: solver_matrix, timestep_refinement"
         exit 1
         ;;
 esac
@@ -107,7 +161,7 @@ done
 export JULIA_NUM_THREADS=${SLURM_CPUS_PER_TASK:-8}
 export CASE_JULIA_THREADS=${SLURM_CPUS_PER_TASK:-8}
 export HYPRE_THREADS=${HYPRE_THREADS:-8}
-export MAX_NONLINEAR_ITERATIONS=${MAX_NONLINEAR_ITERATIONS:-20}
+export MAX_NONLINEAR_ITERATIONS=${MAX_NONLINEAR_ITERATIONS:-$EXPERIMENT_MAX_NONLINEAR_ITERATIONS}
 export MAX_TIMESTEP_CUTS=${MAX_TIMESTEP_CUTS:-25}
 export DR_MAX=${DR_MAX:-Inf}
 export RESTART_RUN=false
@@ -119,7 +173,7 @@ export IN_MEMORY_REPORTS=1
 export WRITE_INCON_VTU=false
 export WRITE_STATE_VTU=false
 
-# Physical model controls are fixed across the four numerical experiments.
+# Physical model controls are fixed across every checkpoint experiment.
 export DISABLE_HYSTERESIS=true
 export USE_MRST_TRANSMISSIBILITY=true
 export IGNORE_MRST_T=false
@@ -136,6 +190,7 @@ echo "date=$(date)"
 echo "SLURM_JOB_ID=$SLURM_JOB_ID"
 echo "SLURM_ARRAY_JOB_ID=${SLURM_ARRAY_JOB_ID:-}"
 echo "SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID"
+echo "CHECKPOINT_EXPERIMENT=$CHECKPOINT_EXPERIMENT"
 echo "CASE_TAG=$CASE_TAG"
 echo "SOLVER_VARIANT=$SOLVER_VARIANT"
 echo "SOURCE_RESTART_FILE=$SOURCE_RESTART_FILE"

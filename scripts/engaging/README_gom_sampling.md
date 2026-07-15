@@ -304,3 +304,14 @@ sbatch --array=1-4 \
 Each task links `jutul_62.jld2` into its own job-numbered folder, solves only
 report step 63, and leaves the source restart folder unchanged. Set
 `TARGET_REPORT_STEP=105` to repeat the comparison from `jutul_104.jld2`.
+
+For the relaxation timestep-refinement experiment, tasks 1-2 solve step 63 at
+`TARGET_DS=0.02/0.01`. Tasks 3-6 solve step 105 at
+`TARGET_DS=Inf/0.05/0.02/0.01`. All six use relaxation, `TARGET_ITS=5`, a
+maximum timestep increase of `1.25`, and 10 maximum nonlinear iterations:
+
+```bash
+sbatch --array=1-6 \
+  --export=ALL,CHECKPOINT_EXPERIMENT=timestep_refinement,MAX_NONLINEAR_ITERATIONS=10,SOURCE_RESTART_PATH=/path/to/original/restart \
+  scripts/engaging/gom_solver_checkpoint.sbatch
+```
