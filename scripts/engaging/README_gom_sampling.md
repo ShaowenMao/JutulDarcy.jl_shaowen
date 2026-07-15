@@ -256,6 +256,14 @@ sbatch --export=ALL,CASE_ID=all87_split_cuts25,CASE_TAG=all87_split_cuts25_retry
 
 For simulation jobs, the script defaults to `HYPRE_THREADS=8` and uses `SLURM_CPUS_PER_TASK` for Julia threads. For VTU-only jobs, it defaults to `HYPRE_THREADS=1`.
 
+For the fault Pc entry-pressure convergence experiment, use:
+
+```bash
+sbatch --export=ALL,CASE_ID=all87_split_cuts25,FAULT_PC_ENTRY_TREATMENT=plateau,FAULT_PC_ENTRY_SG_MAX=1.0e-4 scripts/engaging/gom_sampling_cases.sbatch
+```
+
+This only changes explicit split-input fault `SGOF` tables where the first point is `Sg=0, Pc=0` and the second point is a very small positive gas saturation. The case folder gets a `_pcplateau` tag.
+
 After submission, confirm the account/QOS with:
 
 ```bash

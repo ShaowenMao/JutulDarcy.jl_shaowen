@@ -192,7 +192,71 @@ function mrst_has_explicit_fault_saturation_data(specific)
            haskey(specific["fault"], "saturation_region")
 end
 
-function apply_mrst_explicit_fault_saturation_data!(assembled, specific)
+function normalize_mrst_fault_pc_entry_treatment(treatment)
+    if isnothing(treatment)
+        return "none"
+    elseif treatment isa Symbol
+        return lowercase(String(treatment))
+    else
+        return lowercase(strip(String(treatment)))
+    end
+end
+
+function apply_mrst_fault_pc_entry_treatment!(tables, regions;
+        treatment = "none",
+        sg_max::Real = 1.0e-4
+    )
+    normalized = normalize_mrst_fault_pc_entry_treatment(treatment)
+    normalized in ("", "none", "off", "false", "0") && return nothing
+
+    if !(normalized in ("plateau", "entry_plateau", "pc_plateau"))
+        error("Unknown FAULT_PC_ENTRY_TREATMENT=$treatment. Valid options: none, plateau.")
+    end
+
+    adjusted = 0
+    skipped = 0
+    max_old_slope = 0.0
+    max_entry_pressure = 0.0
+    for (region, table) in zip(regions, tables)
+        if !(table isa AbstractMatrix) || size(table, 1) < 2 || size(table, 2) < 4
+            skipped += 1
+            continue
+        end
+        sg1 = table[1, 1]
+        sg2 = table[2, 1]
+        pc1 = table[1, 4]
+        pc2 = table[2, 4]
+        if sg1 == 0 && pc1 == 0 && sg2 > sg1 && sg2 <= sg_max && pc2 > 0
+            old_slope = (pc2 - pc1)/(sg2 - sg1)
+            max_old_slope = max(max_old_slope, old_slope)
+            max_entry_pressure = max(max_entry_pressure, pc2)
+            table[1, 4] = pc2
+            adjusted += 1
+        else
+            skipped += 1
+        end
+    end
+
+    summary = Dict{String, Any}(
+        "treatment" => normalized,
+        "sg_max" => Float64(sg_max),
+        "adjusted_tables" => adjusted,
+        "skipped_tables" => skipped,
+        "max_original_initial_slope" => max_old_slope,
+        "max_entry_pressure" => max_entry_pressure
+    )
+    jutul_message(
+        "MRST split input",
+        "FAULT_PC_ENTRY_TREATMENT=$normalized: adjusted $adjusted fault SGOF Pc tables with Sg[2] <= $sg_max.",
+        color = :yellow
+    )
+    return summary
+end
+
+function apply_mrst_explicit_fault_saturation_data!(assembled, specific;
+        fault_pc_entry_treatment = "none",
+        fault_pc_entry_sg_max::Real = 1.0e-4
+    )
     fault = specific["fault"]
     for key in ("cells", "saturation_region", "fluid_tables")
         haskey(fault, key) || error("Explicit fault saturation data is missing fault[\"$key\"].")
@@ -219,7 +283,13 @@ function apply_mrst_explicit_fault_saturation_data!(assembled, specific)
 
     order = sortperm(custom_regions)
     custom_regions = custom_regions[order]
-    custom_tables = custom_tables[order]
+    custom_tables = [deepcopy(table) for table in custom_tables[order]]
+    pc_entry_summary = apply_mrst_fault_pc_entry_treatment!(
+        custom_tables,
+        custom_regions;
+        treatment = fault_pc_entry_treatment,
+        sg_max = fault_pc_entry_sg_max
+    )
     base_regions = minimum(custom_regions) - 1
     maximum_region = maximum(custom_regions)
     custom_regions == collect((base_regions + 1):maximum_region) || error(
@@ -268,7 +338,8 @@ function apply_mrst_explicit_fault_saturation_data!(assembled, specific)
         "fault_regions" => length(custom_regions),
         "drainage_regions" => maximum_region,
         "sgof_tables" => length(new_tables),
-        "hysteresis" => "disabled"
+        "hysteresis" => "disabled",
+        "pc_entry_treatment" => isnothing(pc_entry_summary) ? Dict{String, Any}("treatment" => "none") : pc_entry_summary
     )
     jutul_message(
         "MRST split input",
@@ -475,7 +546,12 @@ function validate_mrst_split_case(assembled, specific)
     return true
 end
 
-function assemble_mrst_split_case(common, specific; validate::Bool = true, fault_saturation_domain_mode = "input")
+function assemble_mrst_split_case(common, specific;
+        validate::Bool = true,
+        fault_saturation_domain_mode = "input",
+        fault_pc_entry_treatment = "none",
+        fault_pc_entry_sg_max::Real = 1.0e-4
+    )
     haskey(specific, "fault") || error("Specific MRST split file must contain a top-level fault block.")
     assembled = deepcopy(common)
     fault = specific["fault"]
@@ -507,7 +583,10 @@ function assemble_mrst_split_case(common, specific; validate::Bool = true, fault
         if !(normalized_mode in ("", "input", "default", "none", "off", "false", "0"))
             error("Explicit reservoir-ready fault saturation data must use fault_saturation_domain_mode=\"input\".")
         end
-        apply_mrst_explicit_fault_saturation_data!(assembled, specific)
+        apply_mrst_explicit_fault_saturation_data!(assembled, specific;
+            fault_pc_entry_treatment = fault_pc_entry_treatment,
+            fault_pc_entry_sg_max = fault_pc_entry_sg_max
+        )
     else
         restore_mrst_split_fault_tables!(assembled, fault)
         apply_mrst_fault_saturation_domain_mode!(assembled, specific, fault_saturation_domain_mode)
@@ -519,7 +598,12 @@ function assemble_mrst_split_case(common, specific; validate::Bool = true, fault
     return assembled
 end
 
-function read_mrst_split_case(common_path::AbstractString, specific_path::AbstractString; validate::Bool = true, fault_saturation_domain_mode = "input")
+function read_mrst_split_case(common_path::AbstractString, specific_path::AbstractString;
+        validate::Bool = true,
+        fault_saturation_domain_mode = "input",
+        fault_pc_entry_treatment = "none",
+        fault_pc_entry_sg_max::Real = 1.0e-4
+    )
     common_fn = get_mrst_input_path(String(common_path))
     specific_fn = get_mrst_input_path(String(specific_path))
     @debug "Reading MRST split common MAT file $common_fn..."
@@ -528,7 +612,9 @@ function read_mrst_split_case(common_path::AbstractString, specific_path::Abstra
     specific = MAT.matread(specific_fn)
     assembled = assemble_mrst_split_case(common, specific;
         validate = validate,
-        fault_saturation_domain_mode = fault_saturation_domain_mode
+        fault_saturation_domain_mode = fault_saturation_domain_mode,
+        fault_pc_entry_treatment = fault_pc_entry_treatment,
+        fault_pc_entry_sg_max = fault_pc_entry_sg_max
     )
     assembled["split_input"] = Dict{String, Any}(
         "common_path" => common_fn,
@@ -1737,11 +1823,15 @@ function setup_case_from_mrst_split(common_path::AbstractString, specific_path::
         validate_split::Bool = true,
         use_mrst_transmissibility::Bool = true,
         fault_saturation_domain_mode = "input",
+        fault_pc_entry_treatment = "none",
+        fault_pc_entry_sg_max::Real = 1.0e-4,
         kwarg...
     )
     mrst_data = read_mrst_split_case(common_path, specific_path;
         validate = validate_split,
-        fault_saturation_domain_mode = fault_saturation_domain_mode
+        fault_saturation_domain_mode = fault_saturation_domain_mode,
+        fault_pc_entry_treatment = fault_pc_entry_treatment,
+        fault_pc_entry_sg_max = fault_pc_entry_sg_max
     )
     data_domain = reservoir_domain_from_mrst_data(mrst_data;
         extraout = false,
@@ -2256,6 +2346,8 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         hysteresis_s_min::Union{Nothing, Float64} = nothing,
         use_mrst_transmissibility::Bool = true,
         fault_saturation_domain_mode = "input",
+        fault_pc_entry_treatment = "none",
+        fault_pc_entry_sg_max::Real = 1.0e-4,
     )
     is_split_input = !isnothing(common_mrst_path) || !isnothing(specific_mrst_path)
     if is_split_input
@@ -2302,7 +2394,9 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
         use_mrst_transmissibility = use_mrst_transmissibility,
-        fault_saturation_domain_mode = fault_saturation_domain_mode
+        fault_saturation_domain_mode = fault_saturation_domain_mode,
+        fault_pc_entry_treatment = fault_pc_entry_treatment,
+        fault_pc_entry_sg_max = fault_pc_entry_sg_max
     )
     case, mrst_data = if is_split_input
         setup_case_from_mrst_split(common_mrst_path, specific_mrst_path;
@@ -2403,6 +2497,9 @@ Simulate a MRST case from `file_name` as exported by `writeJutulInput` in MRST.
 - `fault_saturation_domain_mode = "input"`: For split MRST GoM inputs, set to
   `"predict_sample"` to relabel each independent PREDICT fault sample into its
   own saturation domain while cloning the original Pc/Kr tables.
+- `fault_pc_entry_treatment = "none"`: For explicit split fault SGOF tables,
+  set to `"plateau"` to replace `Pc(Sg=0)=0` with the first positive entry
+  pressure when the second saturation point is below `fault_pc_entry_sg_max`.
 
 Additional input arguments are passed onto, [`setup_case_from_mrst`](@ref),
 [`setup_reservoir_simulator`](@ref) and [`simulator_config`](@ref) if
@@ -2453,6 +2550,8 @@ function simulate_mrst_case(fn;
         hysteresis_s_min::Union{Nothing, Float64} = nothing,
         use_mrst_transmissibility::Bool = true,
         fault_saturation_domain_mode = "input",
+        fault_pc_entry_treatment = "none",
+        fault_pc_entry_sg_max::Real = 1.0e-4,
         kwarg...
     )
     is_split_input = !isnothing(common_mrst_path) || !isnothing(specific_mrst_path)
@@ -2537,7 +2636,9 @@ function simulate_mrst_case(fn;
             disable_hysteresis = disable_hysteresis,
             hysteresis_s_min = hysteresis_s_min,
             use_mrst_transmissibility = use_mrst_transmissibility,
-            fault_saturation_domain_mode = fault_saturation_domain_mode
+            fault_saturation_domain_mode = fault_saturation_domain_mode,
+            fault_pc_entry_treatment = fault_pc_entry_treatment,
+            fault_pc_entry_sg_max = fault_pc_entry_sg_max
         )
         deck = mrst_data["deck"]
     else

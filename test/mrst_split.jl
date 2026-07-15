@@ -8,6 +8,14 @@ function split_test_sgof(scale)
     ]
 end
 
+function split_test_entry_sgof(scale)
+    return [
+        0.0 0.0 1.0 0.0
+        1.0e-5 0.2 0.3 1.0e5*scale
+        0.8 1.0 0.0 2.0e5*scale
+    ]
+end
+
 @testset "MRST reservoir-ready split input" begin
     base_table = split_test_sgof(1.0)
     common = Dict{String, Any}(
@@ -61,4 +69,22 @@ end
     @test assembled["deck"]["RUNSPEC"]["NOHYST"] === true
     @test assembled["deck"]["RUNSPEC"]["TABDIMS"][1] == 3.0
     @test assembled["fault_saturation_domain_mode"] == "reservoir_ready_explicit"
+
+    entry_tables = Any[split_test_entry_sgof(2.0), split_test_entry_sgof(3.0)]
+    entry_specific = deepcopy(specific)
+    entry_specific["fault"]["fluid_tables"]["SGOF"]["tables"] = reshape(entry_tables, :, 1)
+    entry_assembled = JutulDarcy.assemble_mrst_split_case(
+        common,
+        entry_specific;
+        fault_pc_entry_treatment = "plateau",
+        fault_pc_entry_sg_max = 1.0e-4
+    )
+    entry_sgof = vec(entry_assembled["deck"]["PROPS"]["SGOF"])
+    entry_summary = entry_assembled["fault_saturation_domain_summary"]["pc_entry_treatment"]
+
+    @test entry_sgof[2][1, 4] == entry_sgof[2][2, 4]
+    @test entry_sgof[3][1, 4] == entry_sgof[3][2, 4]
+    @test entry_summary["treatment"] == "plateau"
+    @test entry_summary["adjusted_tables"] == 2
+    @test entry_summary["skipped_tables"] == 0
 end
