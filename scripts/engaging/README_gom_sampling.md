@@ -328,12 +328,20 @@ sbatch --array=1 \
 ## Solver Full-Run Comparison
 
 `gom_solver_fullrun.sbatch` runs the `s05_c012_case01` split realization from
-time zero with the validated relaxation policy. Task 1 uses `TARGET_DS=0.05`
-and task 2 uses `TARGET_DS=0.02`; all physical-model and other solver controls
-are identical.
+time zero with the validated relaxation policy. Tasks 1-2 are no-hysteresis
+cases using `TARGET_DS=0.05/0.02`. Task 3 uses `TARGET_DS=0.05`, enables
+reservoir hysteresis with `HYSTERESIS_S_MIN=0.05`, and duplicates each explicit
+fault drainage table as its imbibition table so the fault remains
+drainage-equivalent.
 
 ```bash
 sbatch --array=1-2 scripts/engaging/gom_solver_fullrun.sbatch
+```
+
+Submit only the reservoir-hysteresis counterpart with:
+
+```bash
+sbatch --array=3 scripts/engaging/gom_solver_fullrun.sbatch
 ```
 
 The two cases use the advanced CPU account, 8 Julia/HYPRE threads, 64 GB per
