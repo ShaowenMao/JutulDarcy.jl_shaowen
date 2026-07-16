@@ -347,3 +347,17 @@ sbatch --array=3 scripts/engaging/gom_solver_fullrun.sbatch
 The two cases use the advanced CPU account, 8 Julia/HYPRE threads, 64 GB per
 task, and a four-day wall-time limit. Restart and case-local log files are
 written below `gom_sampling_runs`; VTU export remains disabled.
+
+## Initial And Final VTU Export
+
+After the no-hysteresis `TARGET_DS=0.05` run completes, generate only its
+initial-property VTU and final-state VTU with:
+
+```bash
+sbatch scripts/engaging/gom_ds0p05_initial_final_vtu.sbatch
+```
+
+The job detects the final restart index, constructs a symlink-only restart
+view, and therefore never loads or exports the intermediate states. The
+initial VTU includes permeability and porosity. Output and logs are written to
+a job-numbered `vtu_initial_final_job<JOBID>` folder inside the source case.
