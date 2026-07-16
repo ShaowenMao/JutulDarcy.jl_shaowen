@@ -58,6 +58,27 @@ function co2_get_env_optional_bool(name::String)
     error("Invalid boolean value for $name=$val. Valid values: true/false, yes/no, 1/0")
 end
 
+const CO2_CPR_UPDATE_INTERVALS = (:iteration, :ministep, :step, :once)
+
+function co2_parse_cpr_update_interval(value, name::AbstractString)
+    interval = Symbol(lowercase(strip(String(value))))
+    interval in CO2_CPR_UPDATE_INTERVALS || error(
+        "$name=$value is invalid. Valid values: $(join(CO2_CPR_UPDATE_INTERVALS, ", "))"
+    )
+    return interval
+end
+
+function co2_cpr_linear_solver_arg(opts)
+    arg = Dict{Symbol, Any}(
+        :update_interval => opts.cpr_update_interval,
+        :update_interval_partial => opts.cpr_update_interval_partial
+    )
+    if !isnothing(opts.cpr_partial_update)
+        arg[:partial_update] = opts.cpr_partial_update
+    end
+    return arg
+end
+
 function co2_get_transmissibility_policy(default::Bool)
     ignore_mrst_t = co2_get_env_optional_bool("IGNORE_MRST_T")
     if !isnothing(ignore_mrst_t)
@@ -82,6 +103,9 @@ function co2_case_defaults(case_name::AbstractString)
         target_ds = Inf,
         timestep_max_increase = 10.0,
         dr_max = Inf,
+        cpr_update_interval = :iteration,
+        cpr_update_interval_partial = :iteration,
+        cpr_partial_update = nothing,
         in_memory_reports = 10,
         disable_hysteresis = false,
         hysteresis_s_min = nothing,
@@ -160,6 +184,9 @@ function co2_case_options(;
         target_ds = nothing,
         timestep_max_increase = nothing,
         dr_max = nothing,
+        cpr_update_interval = nothing,
+        cpr_update_interval_partial = nothing,
+        cpr_partial_update = nothing,
         in_memory_reports = nothing,
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
@@ -194,6 +221,19 @@ function co2_case_options(;
     target_ds = something(target_ds, defaults.target_ds)
     timestep_max_increase = something(timestep_max_increase, defaults.timestep_max_increase)
     dr_max = something(dr_max, defaults.dr_max)
+    cpr_update_interval = co2_parse_cpr_update_interval(
+        something(cpr_update_interval, defaults.cpr_update_interval),
+        "CPR_UPDATE_INTERVAL"
+    )
+    cpr_update_interval_partial = co2_parse_cpr_update_interval(
+        something(cpr_update_interval_partial, defaults.cpr_update_interval_partial),
+        "CPR_UPDATE_INTERVAL_PARTIAL"
+    )
+    cpr_partial_update = isnothing(cpr_partial_update) ?
+        defaults.cpr_partial_update : cpr_partial_update
+    if !isnothing(cpr_partial_update) && !(cpr_partial_update isa Bool)
+        error("CPR_PARTIAL_UPDATE must be true, false, or omitted for automatic selection.")
+    end
     in_memory_reports = something(in_memory_reports, defaults.in_memory_reports)
     disable_hysteresis = something(disable_hysteresis, defaults.disable_hysteresis)
     hysteresis_s_min = isnothing(hysteresis_s_min) ? defaults.hysteresis_s_min : hysteresis_s_min
@@ -251,6 +291,9 @@ function co2_case_options(;
         target_ds = target_ds,
         timestep_max_increase = timestep_max_increase,
         dr_max = dr_max,
+        cpr_update_interval = cpr_update_interval,
+        cpr_update_interval_partial = cpr_update_interval_partial,
+        cpr_partial_update = cpr_partial_update,
         in_memory_reports = in_memory_reports,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
@@ -302,6 +345,12 @@ function co2_print_case_options(opts; stage::AbstractString)
         println("target_ds = ", opts.target_ds)
         println("timestep_max_increase = ", opts.timestep_max_increase)
         println("dr_max = ", opts.dr_max)
+        println("cpr_update_interval = ", opts.cpr_update_interval)
+        println("cpr_update_interval_partial = ", opts.cpr_update_interval_partial)
+        effective_partial_update = isnothing(opts.cpr_partial_update) ?
+            opts.cpr_update_interval == :once : opts.cpr_partial_update
+        automatic = isnothing(opts.cpr_partial_update) ? " (automatic)" : ""
+        println("cpr_partial_update = ", effective_partial_update, automatic)
         println("in_memory_reports = ", opts.in_memory_reports)
         println("report_gas_masses = ", opts.report_gas_masses)
         println("report_co2_concentration = ", opts.report_co2_concentration)
@@ -343,6 +392,9 @@ function run_co2_case(;
         target_ds = nothing,
         timestep_max_increase = nothing,
         dr_max = nothing,
+        cpr_update_interval = nothing,
+        cpr_update_interval_partial = nothing,
+        cpr_partial_update = nothing,
         in_memory_reports = nothing,
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
@@ -384,6 +436,9 @@ function run_co2_case(;
         target_ds = target_ds,
         timestep_max_increase = timestep_max_increase,
         dr_max = dr_max,
+        cpr_update_interval = cpr_update_interval,
+        cpr_update_interval_partial = cpr_update_interval_partial,
+        cpr_partial_update = cpr_partial_update,
         in_memory_reports = in_memory_reports,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
@@ -427,6 +482,7 @@ function run_co2_case(;
         target_ds = opts.target_ds,
         timestep_max_increase = opts.timestep_max_increase,
         dr_max = opts.dr_max,
+        linear_solver_arg = co2_cpr_linear_solver_arg(opts),
         in_memory_reports = opts.in_memory_reports,
         disable_hysteresis = opts.disable_hysteresis,
         hysteresis_s_min = opts.hysteresis_s_min,
@@ -468,6 +524,9 @@ function export_co2_case_vtu(;
         target_ds = nothing,
         timestep_max_increase = nothing,
         dr_max = nothing,
+        cpr_update_interval = nothing,
+        cpr_update_interval_partial = nothing,
+        cpr_partial_update = nothing,
         in_memory_reports = nothing,
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
@@ -509,6 +568,9 @@ function export_co2_case_vtu(;
         target_ds = target_ds,
         timestep_max_increase = timestep_max_increase,
         dr_max = dr_max,
+        cpr_update_interval = cpr_update_interval,
+        cpr_update_interval_partial = cpr_update_interval_partial,
+        cpr_partial_update = cpr_partial_update,
         in_memory_reports = in_memory_reports,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
@@ -607,6 +669,12 @@ function run_co2_case_from_env(; default_case_name::AbstractString, allowed_case
         target_ds = co2_get_env_float("TARGET_DS", defaults.target_ds),
         timestep_max_increase = co2_get_env_float("TIMESTEP_MAX_INCREASE", defaults.timestep_max_increase),
         dr_max = co2_get_env_float("DR_MAX", defaults.dr_max),
+        cpr_update_interval = co2_get_env_str("CPR_UPDATE_INTERVAL", String(defaults.cpr_update_interval)),
+        cpr_update_interval_partial = co2_get_env_str(
+            "CPR_UPDATE_INTERVAL_PARTIAL",
+            String(defaults.cpr_update_interval_partial)
+        ),
+        cpr_partial_update = co2_get_env_optional_bool("CPR_PARTIAL_UPDATE"),
         in_memory_reports = co2_get_env_int("IN_MEMORY_REPORTS", defaults.in_memory_reports),
         disable_hysteresis = co2_get_env_bool("DISABLE_HYSTERESIS", defaults.disable_hysteresis),
         hysteresis_s_min = co2_get_env_optional_float("HYSTERESIS_S_MIN"),

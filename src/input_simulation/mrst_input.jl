@@ -2521,6 +2521,56 @@ function export_mrst_case_vtu_from_output(fn, output_path;
     )
 end
 
+const MRST_STATEFUL_RESTART_VARIABLES = (:MaxSaturations, :MaxPressure, :MinPressure)
+
+function add_mrst_restart_history_outputs!(extra_outputs, rmodel)
+    active = Symbol[]
+    for variable in MRST_STATEFUL_RESTART_VARIABLES
+        if haskey(rmodel.parameters, variable)
+            variable in extra_outputs || push!(extra_outputs, variable)
+            push!(active, variable)
+        end
+    end
+    return active
+end
+
+function mrst_restart_previous_step(output_path, restart)
+    isnothing(output_path) && return nothing
+    if restart isa Bool
+        restart || return nothing
+        indices = Jutul.valid_restart_indices(output_path)
+        return isempty(indices) ? nothing : maximum(indices)
+    elseif restart isa Integer && restart > 1
+        return restart - 1
+    else
+        return nothing
+    end
+end
+
+function validate_mrst_restart_history(output_path, restart, required_variables)
+    isempty(required_variables) && return nothing
+    previous_step = mrst_restart_previous_step(output_path, restart)
+    isnothing(previous_step) && return nothing
+
+    state, _ = Jutul.read_restart(
+        output_path,
+        previous_step;
+        read_state = true,
+        read_report = false
+    )
+    reservoir_state = haskey(state, :Reservoir) ? state[:Reservoir] : state
+    missing_variables = filter(v -> !haskey(reservoir_state, v), required_variables)
+    if !isempty(missing_variables)
+        missing_text = join(string.(missing_variables), ", ")
+        error(
+            "Restart file jutul_$previous_step.jld2 is missing stateful history " *
+            "variable(s): $missing_text. Restarting would reset hysteresis history. " *
+            "Create a new checkpoint with this code before continuing."
+        )
+    end
+    return nothing
+end
+
 """
     ws, states = simulate_mrst_case(file_name)
     simulate_mrst_case(file_name; <keyword arguments>)
@@ -2546,6 +2596,9 @@ Simulate a MRST case from `file_name` as exported by `writeJutulInput` in MRST.
 - `nthreads=Threads.nthreads()`: number of threads to use
 - `linear_solver=:bicgstab`: name of Krylov.jl solver to use, or :direct (for
   small cases only)
+- `linear_solver_arg=Dict{Symbol, Any}()`: Additional arguments passed to
+  [`reservoir_linsolve`](@ref), including CPR hierarchy update controls such as
+  `update_interval` and `partial_update`.
 - `max_nonlinear_iterations = nothing`: Optional override for the simulator
   nonlinear iteration cap
 - `max_timestep_cuts = nothing`: Optional override for the simulator timestep
@@ -2617,6 +2670,7 @@ function simulate_mrst_case(fn;
         wells = :simple,
         plot = false,
         linear_solver = :bicgstab,
+        linear_solver_arg = Dict{Symbol, Any}(),
         max_nonlinear_iterations::Union{Nothing, Int} = nothing,
         max_timestep_cuts::Union{Nothing, Int} = nothing,
         info_level::Union{Nothing, Int} = nothing,
@@ -2778,6 +2832,7 @@ function simulate_mrst_case(fn;
     parameters = case.parameters
     models = model.models
     rmodel = models[:Reservoir]
+    restart_history_outputs = add_mrst_restart_history_outputs!(extra_outputs, rmodel)
     if rmodel isa StandardBlackOilModel
         sys = rmodel.system
         if has_disgas(sys)
@@ -2822,6 +2877,8 @@ function simulate_mrst_case(fn;
     else
         output_path = nothing
     end
+    validate_mrst_restart_history(output_path, restart, restart_history_outputs)
+
     if !write_output && !load_all_states_after_sim
         @warn "Forcing load_all_states_after_sim=true because write_output=false would otherwise discard all saved states."
         load_all_states_after_sim = true
@@ -2837,6 +2894,7 @@ function simulate_mrst_case(fn;
         case;
         mode = mode,
         linear_solver = linear_solver,
+        linear_solver_arg = linear_solver_arg,
         output_path = output_path,
         output_states = load_all_states_after_sim,
         output_reports = load_all_reports_after_sim,

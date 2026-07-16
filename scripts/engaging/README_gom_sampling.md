@@ -361,3 +361,56 @@ The job detects the final restart index, constructs a symlink-only restart
 view, and therefore never loads or exports the intermediate states. The
 initial VTU includes permeability and porosity. Output and logs are written to
 a job-numbered `vtu_initial_final_job<JOBID>` folder inside the source case.
+
+## Hysteresis Acceleration Workflow
+
+`gom_hysteresis_acceleration.sbatch` first creates a restart-safe hysteresis
+checkpoint at report step 120. The checkpoint includes `MaxSaturations`, which
+is required to continue Killough hysteresis without resetting its history.
+
+Submit the checkpoint builder as a single job:
+
+```bash
+mkdir -p /home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs/hysteresis_acceleration
+checkpoint_job=$(sbatch --parsable scripts/engaging/gom_hysteresis_acceleration.sbatch)
+echo "checkpoint_job=$checkpoint_job"
+```
+
+Its restart directory is:
+
+```text
+/home/<user>/orcd/scratch/jutuldarcy_case/gom_sampling_runs/hysteresis_acceleration/all87_split_hyst_checkpoint_step120_job<CHECKPOINT_JOB>/restart
+```
+
+After the checkpoint completes, submit only task 1 to validate an unchanged
+continuation from steps 121 through 145:
+
+```bash
+checkpoint_path="/home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs/hysteresis_acceleration/all87_split_hyst_checkpoint_step120_job$checkpoint_job/restart"
+sbatch --array=1 \
+  --export=ALL,HYST_ACCEL_STAGE=continuation,SOURCE_RESTART_PATH="$checkpoint_path" \
+  scripts/engaging/gom_hysteresis_acceleration.sbatch
+```
+
+Task 1 retains `TARGET_DS=0.05`, `TARGET_ITS=5`, and CPR reconstruction every
+Newton iteration. Compare it against the uninterrupted reference before
+submitting acceleration tasks:
+
+| Task | Timestep targets | CPR hierarchy rebuild |
+|---|---|---|
+| 1 | `DS=0.05`, `ITS=5` | every Newton iteration |
+| 2 | `DS=0.05`, `ITS=5` | once, with partial pressure updates |
+| 3 | `DS=0.10`, `ITS=7` | every Newton iteration |
+| 4 | `DS=0.10`, `ITS=7` | once, with partial pressure updates |
+
+Once task 1 passes restart-equivalence checks, submit tasks 2-4:
+
+```bash
+sbatch --array=2-4 \
+  --export=ALL,HYST_ACCEL_STAGE=continuation,SOURCE_RESTART_PATH="$checkpoint_path" \
+  scripts/engaging/gom_hysteresis_acceleration.sbatch
+```
+
+The driver rejects old hysteresis restart files that lack `MaxSaturations`.
+This is intentional: continuing those files would silently reset hysteresis
+history and would not be an apple-to-apple simulation.

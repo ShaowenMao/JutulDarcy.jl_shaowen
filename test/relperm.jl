@@ -173,6 +173,7 @@ function solve_1d_kr(phases;
     )
     replace_variables!(model, RelativePermeabilities = kr)
     JutulDarcy.add_relperm_parameters!(model)
+    JutulDarcy.add_mrst_restart_history_outputs!(model.output_variables, model)
     tot_time = sum(timesteps)
     deps = Jutul.get_dependencies(kr, model)
     has_scaling = JutulDarcy.endpoint_scaling_is_active(kr)
@@ -200,6 +201,7 @@ function solve_1d_kr(phases;
     if has_hyst
         @test :MaxSaturations in deps
     end
+    @test (:MaxSaturations in model.output_variables) == has_hyst
     has_connate = :ConnateWater in deps
     has_aqua = AqueousPhase() in JutulDarcy.get_phases(sys)
     if has_aqua
@@ -235,6 +237,9 @@ function solve_1d_kr(phases;
     states, report = simulate(state0, model, timesteps,
         forces = forces, parameters = parameters, info_level = -1)
     @test length(states) == length(timesteps)
+    if has_hyst
+        @test all(haskey(state, :MaxSaturations) for state in states)
+    end
 end
 ##
 @testset "ReservoirRelativePermeability" begin

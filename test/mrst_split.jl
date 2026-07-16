@@ -1,4 +1,4 @@
-using JutulDarcy, Test
+using JutulDarcy, Jutul, Test
 
 function split_test_sgof(scale)
     return [
@@ -121,4 +121,24 @@ end
     @test reservoir_hyst_assembled["deck"]["RUNSPEC"]["TABDIMS"][1] == 6.0
     @test reservoir_hyst_summary["hysteresis"] == "reservoir_only_fault_drainage_duplicate"
     @test reservoir_hyst_summary["pc_entry_treatment"]["adjusted_tables"] == 2
+end
+
+@testset "MRST hysteresis restart history" begin
+    mktempdir() do output_path
+        state = Dict{Symbol, Any}(
+            :Reservoir => Dict{Symbol, Any}(:Pressure => [1.0])
+        )
+        Jutul.write_result_jld2(output_path, state, Dict{Symbol, Any}(), 1)
+        @test_throws ErrorException JutulDarcy.validate_mrst_restart_history(
+            output_path,
+            2,
+            [:MaxSaturations]
+        )
+
+        state[:Reservoir][:MaxSaturations] = [0.25]
+        Jutul.write_result_jld2(output_path, state, Dict{Symbol, Any}(), 1)
+        @test isnothing(JutulDarcy.validate_mrst_restart_history(
+            output_path, 2, [:MaxSaturations]
+        ))
+    end
 end
