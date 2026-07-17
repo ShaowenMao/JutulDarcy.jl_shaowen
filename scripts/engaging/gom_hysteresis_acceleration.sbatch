@@ -261,7 +261,10 @@ if [ "$NODE_LOCAL_STAGE" = "true" ]; then
     fi
     NODE_LOCAL_PARENT=${NODE_LOCAL_PARENT%/}
     NODE_LOCAL_PREFIX="$NODE_LOCAL_PARENT/jutuldarcy-hyst-"
-    NODE_LOCAL_ROOT="${NODE_LOCAL_PREFIX}${SLURM_JOB_ID}"
+    # Array tasks can share both a node and SLURM_JOB_ID on Engaging.
+    NODE_LOCAL_JOB_LABEL=${SLURM_ARRAY_JOB_ID:-$SLURM_JOB_ID}
+    NODE_LOCAL_TASK_LABEL=${SLURM_ARRAY_TASK_ID:-0}
+    NODE_LOCAL_ROOT="${NODE_LOCAL_PREFIX}${NODE_LOCAL_JOB_LABEL}_${NODE_LOCAL_TASK_LABEL}"
 
     cleanup_node_local() {
         status=$?
