@@ -15,11 +15,12 @@ module purge
 module load community-modules
 module load julia/1.10.4
 
+JULIA_CMD=${JULIA_CMD:-julia}
 REPO_ROOT=${REPO_ROOT:-/home/$USER/projects/JutulDarcy.jl_shaowen}
 INPUT_ROOT=${INPUT_ROOT:-/home/$USER/orcd/pool/jutuldarcy_case/gom_sampling_inputs}
 RUN_ROOT=${RUN_ROOT:-/home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs}
 SOURCE_CASE_TAG=${SOURCE_CASE_TAG:-all87_split_s05_c012_case01_relaxation_ds0p05_cuts25_nohyst_pcplateau_job17992883}
-SOURCE_CASE_PATH="$RUN_ROOT/$SOURCE_CASE_TAG"
+SOURCE_CASE_PATH=${SOURCE_CASE_PATH:-$RUN_ROOT/$SOURCE_CASE_TAG}
 SOURCE_RESTART_PATH="$SOURCE_CASE_PATH/restart"
 
 if [ ! -d "$SOURCE_RESTART_PATH" ]; then
@@ -68,8 +69,8 @@ export CASE_JULIA_THREADS=${SLURM_CPUS_PER_TASK:-8}
 export HYPRE_THREADS=1
 export CASE_NAME=GOM_LARGE
 export RUN_MODE=vtu
-export COMMON_MATFILE_PATH="$INPUT_ROOT/all87/jutul_split/lluis_field_case_87_all87_common.mat"
-export SPECIFIC_MATFILE_PATH="$INPUT_ROOT/all87/jutul_split/lluis_field_case_87_slices_s05_c012_case01_specific.mat"
+export COMMON_MATFILE_PATH=${COMMON_MATFILE_PATH:-$INPUT_ROOT/all87/jutul_split/lluis_field_case_87_all87_common.mat}
+export SPECIFIC_MATFILE_PATH=${SPECIFIC_MATFILE_PATH:-$INPUT_ROOT/all87/jutul_split/lluis_field_case_87_slices_s05_c012_case01_specific.mat}
 export MATFILE_PATH="$SPECIFIC_MATFILE_PATH"
 export RESTART_OUTPUT_PATH="$FINAL_ONLY_RESTART_PATH"
 export VTU_PREFIX=${VTU_PREFIX:-GoM_ds0p05}
@@ -77,15 +78,15 @@ export WRITE_INCON_VTU=true
 export WRITE_STATE_VTU=true
 
 # Reconstruct the exact physical model used by the completed source run.
-export DISABLE_HYSTERESIS=true
-export HYSTERESIS_S_MIN=
-export USE_MRST_TRANSMISSIBILITY=true
-export IGNORE_MRST_T=false
-export FAULT_SATURATION_DOMAIN_MODE=input
-export FAULT_PC_ENTRY_TREATMENT=plateau
-export FAULT_PC_ENTRY_SG_MAX=1.0e-4
-export EXPLICIT_FAULT_HYSTERESIS_MODE=disable
-export ENABLE_DIFFUSION=false
+export DISABLE_HYSTERESIS=${DISABLE_HYSTERESIS:-true}
+export HYSTERESIS_S_MIN=${HYSTERESIS_S_MIN:-}
+export USE_MRST_TRANSMISSIBILITY=${USE_MRST_TRANSMISSIBILITY:-true}
+export IGNORE_MRST_T=${IGNORE_MRST_T:-false}
+export FAULT_SATURATION_DOMAIN_MODE=${FAULT_SATURATION_DOMAIN_MODE:-input}
+export FAULT_PC_ENTRY_TREATMENT=${FAULT_PC_ENTRY_TREATMENT:-plateau}
+export FAULT_PC_ENTRY_SG_MAX=${FAULT_PC_ENTRY_SG_MAX:-1.0e-4}
+export EXPLICIT_FAULT_HYSTERESIS_MODE=${EXPLICIT_FAULT_HYSTERESIS_MODE:-disable}
+export ENABLE_DIFFUSION=${ENABLE_DIFFUSION:-false}
 
 cd "$REPO_ROOT"
 
@@ -97,12 +98,16 @@ echo "FINAL_STEP=$FINAL_STEP"
 echo "FINAL_RESTART_FILE=$FINAL_RESTART_FILE"
 echo "FINAL_ONLY_RESTART_PATH=$FINAL_ONLY_RESTART_PATH"
 echo "VTU_PATH=$VTU_PATH"
+echo "JULIA_CMD=$JULIA_CMD"
 echo "JULIA_NUM_THREADS=$JULIA_NUM_THREADS"
 echo "WRITE_INCON_VTU=$WRITE_INCON_VTU"
 echo "WRITE_STATE_VTU=$WRITE_STATE_VTU"
+echo "DISABLE_HYSTERESIS=$DISABLE_HYSTERESIS"
+echo "HYSTERESIS_S_MIN=$HYSTERESIS_S_MIN"
+echo "EXPLICIT_FAULT_HYSTERESIS_MODE=$EXPLICIT_FAULT_HYSTERESIS_MODE"
 echo "===================================="
 
-julia --startup-file=no --project=. src/input_simulation/co2_blackoil_gom.jl
+"$JULIA_CMD" --startup-file=no --project=. src/input_simulation/co2_blackoil_gom.jl
 
 echo "===== GENERATED VTU FILES ====="
 find "$VTU_PATH" -maxdepth 1 -type f \( -name '*.vtu' -o -name '*.pvd' \) -printf '%f %s bytes\n' | sort
