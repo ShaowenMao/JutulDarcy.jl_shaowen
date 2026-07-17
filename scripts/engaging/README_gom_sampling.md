@@ -382,34 +382,50 @@ Its restart directory is:
 /home/<user>/orcd/scratch/jutuldarcy_case/gom_sampling_runs/hysteresis_acceleration/all87_split_hyst_checkpoint_step120_job<CHECKPOINT_JOB>/restart
 ```
 
-After the checkpoint completes, submit only task 1 to validate an unchanged
-continuation from steps 121 through 145:
+After the checkpoint completes, create one read-only Julia runtime/depot
+bundle. Do this only while no job is compiling into the shared depot. Bundle
+creation is a small Slurm job rather than a login-node operation:
 
 ```bash
-checkpoint_path="/home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs/hysteresis_acceleration/all87_split_hyst_checkpoint_step120_job$checkpoint_job/restart"
-sbatch --array=1 \
-  --export=ALL,HYST_ACCEL_STAGE=continuation,SOURCE_RESTART_PATH="$checkpoint_path" \
-  scripts/engaging/gom_hysteresis_acceleration.sbatch
+bundle_tag="hyst_gc_$(git rev-parse --short=12 HEAD)"
+bundle_job=$(sbatch --parsable --export=ALL,BUNDLE_TAG="$bundle_tag" \
+  scripts/engaging/prepare_julia_nodelocal_bundle.sh)
+bundle_root="/home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs/hysteresis_acceleration/immutable_bundles/$bundle_tag"
+runtime_archive="$bundle_root/julia-runtime.tar"
+depot_archive="$bundle_root/julia-depot.tar"
 ```
 
-Task 1 retains `TARGET_DS=0.05`, `TARGET_ITS=5`, and CPR reconstruction every
-Newton iteration. Compare it against the uninterrupted reference before
-submitting acceleration tasks:
+The bundle log prints `JULIA_RUNTIME_ARCHIVE` and `JULIA_DEPOT_ARCHIVE`. Every
+continuation task extracts those immutable archives, the exact submitted Git
+commit, and both MAT inputs into its own node-local directory. Restart outputs
+and all logs remain in scratch.
 
 | Task | Timestep targets | CPR hierarchy rebuild |
 |---|---|---|
-| 1 | `DS=0.05`, `ITS=5` | every Newton iteration |
-| 2 | `DS=0.05`, `ITS=5` | once, with partial pressure updates |
-| 3 | `DS=0.10`, `ITS=7` | every Newton iteration |
-| 4 | `DS=0.10`, `ITS=7` | once, with partial pressure updates |
+| 1 | `DS=0.05`, `ITS=5`, GC1 | every Newton iteration |
+| 2 | `DS=0.05`, `ITS=5`, GC1 | once, with partial pressure updates |
+| 3 | `DS=0.10`, `ITS=7`, GC1 | every Newton iteration |
+| 4 | `DS=0.10`, `ITS=7`, GC1 | once, with partial pressure updates |
+| 5 | `DS=0.05`, `ITS=5`, GC4 control | every Newton iteration |
 
-Once task 1 passes restart-equivalence checks, submit tasks 2-4:
+Submit a node-local import preflight, then make all five controlled
+continuations depend on its success:
 
 ```bash
-sbatch --array=2-4 \
-  --export=ALL,HYST_ACCEL_STAGE=continuation,SOURCE_RESTART_PATH="$checkpoint_path" \
+checkpoint_path="/home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs/hysteresis_acceleration/all87_split_hyst_checkpoint_step120_job$checkpoint_job/restart"
+source_commit=$(git rev-parse HEAD)
+preflight_job=$(sbatch --parsable --dependency="afterok:$bundle_job" --array=1 \
+  --export=ALL,HYST_ACCEL_STAGE=continuation,NODE_LOCAL_STAGE=true,STAGING_ONLY=true,SOURCE_RESTART_PATH="$checkpoint_path",SOURCE_COMMIT="$source_commit",JULIA_RUNTIME_ARCHIVE="$runtime_archive",JULIA_DEPOT_ARCHIVE="$depot_archive" \
+  scripts/engaging/gom_hysteresis_acceleration.sbatch)
+sbatch --dependency="afterok:$preflight_job" --array=1-5 \
+  --export=ALL,HYST_ACCEL_STAGE=continuation,NODE_LOCAL_STAGE=true,SOURCE_RESTART_PATH="$checkpoint_path",SOURCE_COMMIT="$source_commit",JULIA_RUNTIME_ARCHIVE="$runtime_archive",JULIA_DEPOT_ARCHIVE="$depot_archive" \
   scripts/engaging/gom_hysteresis_acceleration.sbatch
 ```
+
+Tasks 1 and 5 are identical except for `JULIA_NUM_GC_THREADS`, making task 5
+the control for the GC-thread hypothesis. Each case has a
+`logs/node-local-staging.log` containing the staged commit, archive hashes,
+input hashes, local Julia path, Julia thread count, and GC thread count.
 
 The driver rejects old hysteresis restart files that lack `MaxSaturations`.
 This is intentional: continuing those files would silently reset hysteresis

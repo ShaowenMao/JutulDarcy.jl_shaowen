@@ -15,6 +15,10 @@ module purge
 module load community-modules
 module load julia/1.10.4
 
+# An absolute command lets controlled jobs run a node-local Julia copy while
+# ordinary submissions continue to use the module-provided executable.
+JULIA_CMD=${JULIA_CMD:-julia}
+
 REPO_ROOT=${REPO_ROOT:-/home/$USER/projects/JutulDarcy.jl_shaowen}
 INPUT_ROOT=${INPUT_ROOT:-/home/$USER/orcd/pool/jutuldarcy_case/gom_sampling_inputs}
 RUN_ROOT=${RUN_ROOT:-/home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs}
@@ -277,8 +281,9 @@ echo "===== JOB ENV INFO ====="
 hostname
 date
 pwd
-which julia
-julia --version
+echo "JULIA_CMD=$JULIA_CMD"
+command -v "$JULIA_CMD"
+"$JULIA_CMD" --version
 module list
 echo "SLURM_JOB_ID=${SLURM_JOB_ID:-}"
 echo "SLURM_ARRAY_JOB_ID=${SLURM_ARRAY_JOB_ID:-}"
@@ -334,6 +339,8 @@ echo "SPECIFIC_MATFILE_PATH=${SPECIFIC_MATFILE_PATH:-}"
 echo "RESTART_OUTPUT_PATH=$RESTART_OUTPUT_PATH"
 echo "VTU_PATH=$VTU_PATH"
 echo "JULIA_NUM_THREADS=$JULIA_NUM_THREADS"
+echo "JULIA_NUM_GC_THREADS=${JULIA_NUM_GC_THREADS:-automatic}"
+echo "JULIA_DEPOT_PATH=${JULIA_DEPOT_PATH:-default}"
 echo "CASE_JULIA_THREADS=$CASE_JULIA_THREADS"
 echo "HYPRE_THREADS=$HYPRE_THREADS"
 echo "CPR_UPDATE_INTERVAL=${CPR_UPDATE_INTERVAL:-iteration}"
@@ -354,4 +361,4 @@ if [ -n "${SPECIFIC_MATFILE_PATH:-}" ] && [ ! -f "$SPECIFIC_MATFILE_PATH" ]; the
     exit 1
 fi
 
-julia --startup-file=no --project=. src/input_simulation/co2_blackoil_gom.jl
+"$JULIA_CMD" --startup-file=no --project=. src/input_simulation/co2_blackoil_gom.jl
