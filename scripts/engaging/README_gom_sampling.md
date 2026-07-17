@@ -395,10 +395,13 @@ runtime_archive="$bundle_root/julia-runtime.tar"
 depot_archive="$bundle_root/julia-depot.tar"
 ```
 
-The bundle log prints `JULIA_RUNTIME_ARCHIVE` and `JULIA_DEPOT_ARCHIVE`. Every
+The bundle log prints `JULIA_RUNTIME_ARCHIVE`, `JULIA_DEPOT_ARCHIVE`, and
+`BUNDLE_MANIFEST`. The manifest is bundled separately because it is present
+on Engaging but intentionally untracked and therefore absent from
+`git archive`. Every
 continuation task extracts those immutable archives, the exact submitted Git
-commit, and both MAT inputs into its own node-local directory. Restart outputs
-and all logs remain in scratch.
+commit, the exact manifest, and both MAT inputs into its own node-local
+directory. Restart outputs and all logs remain in scratch.
 
 | Task | Timestep targets | CPR hierarchy rebuild |
 |---|---|---|
@@ -418,7 +421,7 @@ preflight_job=$(sbatch --parsable --dependency="afterok:$bundle_job" --array=1 \
   --export=ALL,HYST_ACCEL_STAGE=continuation,NODE_LOCAL_STAGE=true,STAGING_ONLY=true,SOURCE_RESTART_PATH="$checkpoint_path",SOURCE_COMMIT="$source_commit",JULIA_RUNTIME_ARCHIVE="$runtime_archive",JULIA_DEPOT_ARCHIVE="$depot_archive" \
   scripts/engaging/gom_hysteresis_acceleration.sbatch)
 sbatch --dependency="afterok:$preflight_job" --array=1-5 \
-  --export=ALL,HYST_ACCEL_STAGE=continuation,NODE_LOCAL_STAGE=true,SOURCE_RESTART_PATH="$checkpoint_path",SOURCE_COMMIT="$source_commit",JULIA_RUNTIME_ARCHIVE="$runtime_archive",JULIA_DEPOT_ARCHIVE="$depot_archive" \
+  --export=ALL,HYST_ACCEL_STAGE=continuation,NODE_LOCAL_STAGE=true,STAGING_ONLY=false,SOURCE_RESTART_PATH="$checkpoint_path",SOURCE_COMMIT="$source_commit",JULIA_RUNTIME_ARCHIVE="$runtime_archive",JULIA_DEPOT_ARCHIVE="$depot_archive" \
   scripts/engaging/gom_hysteresis_acceleration.sbatch
 ```
 

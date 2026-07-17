@@ -155,6 +155,20 @@ if [ "$HYST_ACCEL_STAGE" = "continuation" ] && [ "$NODE_LOCAL_STAGE" = "true" ];
     SOURCE_COMMIT=${SOURCE_COMMIT:?Set SOURCE_COMMIT to the exact Git commit to stage.}
     JULIA_RUNTIME_ARCHIVE=${JULIA_RUNTIME_ARCHIVE:?Set JULIA_RUNTIME_ARCHIVE to an immutable Julia runtime tar file.}
     JULIA_DEPOT_ARCHIVE=${JULIA_DEPOT_ARCHIVE:?Set JULIA_DEPOT_ARCHIVE to an immutable Julia depot tar file.}
+    BUNDLE_MANIFEST=${BUNDLE_MANIFEST:-$(dirname "$JULIA_RUNTIME_ARCHIVE")/Manifest.toml}
+
+    CASE_LOG_DIR="$RUN_ROOT/$CASE_TAG/logs"
+    mkdir -p "$CASE_LOG_DIR"
+    WRAPPER_STDOUT_PATH="$CASE_LOG_DIR/slurm-wrapper-${SLURM_JOB_NAME:-gom_hyst_accel}-${JOB_LABEL}_${SLURM_ARRAY_TASK_ID:-0}.out"
+    WRAPPER_STDERR_PATH="$CASE_LOG_DIR/slurm-wrapper-${SLURM_JOB_NAME:-gom_hyst_accel}-${JOB_LABEL}_${SLURM_ARRAY_TASK_ID:-0}.err"
+    BOOTSTRAP_STDOUT_PATH="$RUN_ROOT/slurm-bootstrap-${SLURM_JOB_NAME:-gom_hyst_accel}-${JOB_LABEL}_${SLURM_ARRAY_TASK_ID:-4294967294}.out"
+    BOOTSTRAP_STDERR_PATH="$RUN_ROOT/slurm-bootstrap-${SLURM_JOB_NAME:-gom_hyst_accel}-${JOB_LABEL}_${SLURM_ARRAY_TASK_ID:-4294967294}.err"
+    exec > "$WRAPPER_STDOUT_PATH" 2> "$WRAPPER_STDERR_PATH"
+    for bootstrap_path in "$BOOTSTRAP_STDOUT_PATH" "$BOOTSTRAP_STDERR_PATH"; do
+        if [ -f "$bootstrap_path" ]; then
+            mv -f "$bootstrap_path" "$CASE_LOG_DIR/"
+        fi
+    done
 
     required_paths=(
         "$SHARED_REPO_ROOT/.git"
@@ -162,6 +176,8 @@ if [ "$HYST_ACCEL_STAGE" = "continuation" ] && [ "$NODE_LOCAL_STAGE" = "true" ];
         "$JULIA_RUNTIME_ARCHIVE.sha256"
         "$JULIA_DEPOT_ARCHIVE"
         "$JULIA_DEPOT_ARCHIVE.sha256"
+        "$BUNDLE_MANIFEST"
+        "$BUNDLE_MANIFEST.sha256"
         "$COMMON_MATFILE_PATH"
         "$SPECIFIC_MATFILE_PATH"
         "$SOURCE_RESTART_FILE"
@@ -173,8 +189,6 @@ if [ "$HYST_ACCEL_STAGE" = "continuation" ] && [ "$NODE_LOCAL_STAGE" = "true" ];
         fi
     done
 
-    CASE_LOG_DIR="$RUN_ROOT/$CASE_TAG/logs"
-    mkdir -p "$CASE_LOG_DIR"
     STAGING_LOG="$CASE_LOG_DIR/node-local-staging.log"
     : > "$STAGING_LOG"
 
@@ -217,6 +231,7 @@ if [ "$HYST_ACCEL_STAGE" = "continuation" ] && [ "$NODE_LOCAL_STAGE" = "true" ];
     RESOLVED_SOURCE_COMMIT=$(git -C "$SHARED_REPO_ROOT" rev-parse --verify "${SOURCE_COMMIT}^{commit}")
     RUNTIME_ARCHIVE_SHA=$(awk 'NF { print $1; exit }' "$JULIA_RUNTIME_ARCHIVE.sha256")
     DEPOT_ARCHIVE_SHA=$(awk 'NF { print $1; exit }' "$JULIA_DEPOT_ARCHIVE.sha256")
+    MANIFEST_SHA=$(awk 'NF { print $1; exit }' "$BUNDLE_MANIFEST.sha256")
     CHECKPOINT_SHA=$(sha256sum "$SOURCE_RESTART_FILE" | awk '{ print $1 }')
 
     stage_log "Host: $(hostname)"
@@ -226,6 +241,8 @@ if [ "$HYST_ACCEL_STAGE" = "continuation" ] && [ "$NODE_LOCAL_STAGE" = "true" ];
     stage_log "Julia runtime archive SHA256: $RUNTIME_ARCHIVE_SHA"
     stage_log "Julia depot archive: $JULIA_DEPOT_ARCHIVE"
     stage_log "Julia depot archive SHA256: $DEPOT_ARCHIVE_SHA"
+    stage_log "Project manifest: $BUNDLE_MANIFEST"
+    stage_log "Project manifest SHA256: $MANIFEST_SHA"
     stage_log "Checkpoint SHA256: $CHECKPOINT_SHA"
     df -h "$NODE_LOCAL_PARENT" | tee -a "$STAGING_LOG"
 
@@ -255,6 +272,7 @@ if [ "$HYST_ACCEL_STAGE" = "continuation" ] && [ "$NODE_LOCAL_STAGE" = "true" ];
 
     LOCAL_COMMON_MATFILE_PATH="$LOCAL_INPUT_ROOT/$(basename "$COMMON_MATFILE_PATH")"
     LOCAL_SPECIFIC_MATFILE_PATH="$LOCAL_INPUT_ROOT/$(basename "$SPECIFIC_MATFILE_PATH")"
+    copy_and_verify "$BUNDLE_MANIFEST" "$LOCAL_REPO_ROOT/Manifest.toml" "Project Manifest"
     copy_and_verify "$COMMON_MATFILE_PATH" "$LOCAL_COMMON_MATFILE_PATH" "Common MAT"
     copy_and_verify "$SPECIFIC_MATFILE_PATH" "$LOCAL_SPECIFIC_MATFILE_PATH" "Specific MAT"
 
