@@ -433,3 +433,27 @@ input hashes, local Julia path, Julia thread count, and GC thread count.
 The driver rejects old hysteresis restart files that lack `MaxSaturations`.
 This is intentional: continuing those files would silently reset hysteresis
 history and would not be an apple-to-apple simulation.
+
+### Final Validation Runs
+
+After the acceleration matrix reaches step 145, submit two continuations and
+one uninterrupted baseline with the same immutable bundle:
+
+```bash
+bundle_root=/home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs/hysteresis_acceleration/immutable_bundles/hyst_gc_7681165efea8
+baseline_restart=/home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs/hysteresis_acceleration/all87_split_hyst_step121to145_restart_validation_gc1_nodelocal_job18108915/restart
+dt_restart=/home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs/hysteresis_acceleration/all87_split_hyst_step121to145_dt_ds0p10_its7_gc1_nodelocal_job18108915/restart
+
+HYST_ACCEL_STAGE=final_validation \
+BASELINE_SOURCE_RESTART_PATH="$baseline_restart" \
+DT_SOURCE_RESTART_PATH="$dt_restart" \
+SOURCE_COMMIT=$(git rev-parse HEAD) \
+JULIA_RUNTIME_ARCHIVE="$bundle_root/julia-runtime.tar" \
+JULIA_DEPOT_ARCHIVE="$bundle_root/julia-depot.tar" \
+sbatch --array=1-3 --mem=48G scripts/engaging/gom_hysteresis_acceleration.sbatch
+```
+
+Task 1 continues the `DS=0.05`, `ITS=5` baseline from step 145 through 210.
+Task 2 continues the `DS=0.10`, `ITS=7` candidate from step 145 through 210.
+Task 3 runs the baseline settings uninterrupted from the initial state through
+step 210. All three use per-iteration CPR, GC1, and node-local staging.

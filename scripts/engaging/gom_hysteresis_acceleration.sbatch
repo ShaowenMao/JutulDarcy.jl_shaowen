@@ -53,21 +53,7 @@ unset CPR_PARTIAL_UPDATE
 JOB_LABEL=${SLURM_ARRAY_JOB_ID:-$SLURM_JOB_ID}
 
 case "$HYST_ACCEL_STAGE" in
-    checkpoint)
-        if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
-            echo "Submit the checkpoint stage as a single job, not an array."
-            exit 1
-        fi
-        export CASE_TAG="all87_split_hyst_checkpoint_step120_job${JOB_LABEL}"
-        export TARGET_ITS=5
-        export TARGET_DS=0.05
-        export CPR_UPDATE_INTERVAL=iteration
-        export STOP_AFTER_REPORT_STEP=120
-        unset RESTART_STEP
-        ;;
-    continuation)
-        ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID:?Submit continuation as a Slurm array.}
-        SOURCE_RESTART_PATH=${SOURCE_RESTART_PATH:?Set SOURCE_RESTART_PATH to the validated checkpoint restart directory.}
+    continuation|final_validation)
         NODE_LOCAL_STAGE=${NODE_LOCAL_STAGE:-true}
         case "${NODE_LOCAL_STAGE,,}" in
             1|true|yes|y)
@@ -83,6 +69,51 @@ case "$HYST_ACCEL_STAGE" in
                 exit 1
                 ;;
         esac
+        ;;
+    *)
+        NODE_LOCAL_STAGE=false
+        STAGE_TAG=sharedfs
+        ;;
+esac
+
+link_restart_source() {
+    local source_restart_path=$1
+    local source_step=$2
+    local target_restart_dir
+    local target_restart_file
+
+    SOURCE_RESTART_PATH=$source_restart_path
+    SOURCE_RESTART_FILE="$SOURCE_RESTART_PATH/jutul_${source_step}.jld2"
+    target_restart_dir="$RUN_ROOT/$CASE_TAG/restart"
+    target_restart_file="$target_restart_dir/jutul_${source_step}.jld2"
+    if [ ! -f "$SOURCE_RESTART_FILE" ]; then
+        echo "Checkpoint file does not exist: $SOURCE_RESTART_FILE"
+        exit 1
+    fi
+    mkdir -p "$target_restart_dir"
+    if [ -e "$target_restart_file" ] || [ -L "$target_restart_file" ]; then
+        echo "Refusing to replace existing restart file: $target_restart_file"
+        exit 1
+    fi
+    ln -s "$SOURCE_RESTART_FILE" "$target_restart_file"
+}
+
+case "$HYST_ACCEL_STAGE" in
+    checkpoint)
+        if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
+            echo "Submit the checkpoint stage as a single job, not an array."
+            exit 1
+        fi
+        export CASE_TAG="all87_split_hyst_checkpoint_step120_job${JOB_LABEL}"
+        export TARGET_ITS=5
+        export TARGET_DS=0.05
+        export CPR_UPDATE_INTERVAL=iteration
+        export STOP_AFTER_REPORT_STEP=120
+        unset RESTART_STEP
+        ;;
+    continuation)
+        ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID:?Submit continuation as a Slurm array.}
+        SOURCE_RESTART_PATH=${SOURCE_RESTART_PATH:?Set SOURCE_RESTART_PATH to the validated checkpoint restart directory.}
         case "$ARRAY_TASK_ID" in
             1)
                 SOLVER_VARIANT=restart_validation
@@ -128,30 +159,55 @@ case "$HYST_ACCEL_STAGE" in
         export CASE_TAG="all87_split_hyst_step121to145_${SOLVER_VARIANT}_gc${JULIA_NUM_GC_THREADS}_${STAGE_TAG}_job${JOB_LABEL}"
         export RESTART_STEP=121
         export STOP_AFTER_REPORT_STEP=145
+        link_restart_source "$SOURCE_RESTART_PATH" 120
+        ;;
+    final_validation)
+        ARRAY_TASK_ID=${SLURM_ARRAY_TASK_ID:?Submit final_validation as a Slurm array.}
+        export CPR_UPDATE_INTERVAL=iteration
+        export JULIA_NUM_GC_THREADS=1
+        export STOP_AFTER_REPORT_STEP=210
 
-        SOURCE_RESTART_FILE="$SOURCE_RESTART_PATH/jutul_120.jld2"
-        TARGET_RESTART_DIR="$RUN_ROOT/$CASE_TAG/restart"
-        TARGET_RESTART_FILE="$TARGET_RESTART_DIR/jutul_120.jld2"
-        if [ ! -f "$SOURCE_RESTART_FILE" ]; then
-            echo "Checkpoint file does not exist: $SOURCE_RESTART_FILE"
-            exit 1
-        fi
-        mkdir -p "$TARGET_RESTART_DIR"
-        if [ -e "$TARGET_RESTART_FILE" ] || [ -L "$TARGET_RESTART_FILE" ]; then
-            echo "Refusing to replace existing restart file: $TARGET_RESTART_FILE"
-            exit 1
-        fi
-        ln -s "$SOURCE_RESTART_FILE" "$TARGET_RESTART_FILE"
+        case "$ARRAY_TASK_ID" in
+            1)
+                SOLVER_VARIANT=baseline_ds0p05_its5
+                export TARGET_ITS=5
+                export TARGET_DS=0.05
+                export RESTART_STEP=146
+                export CASE_TAG="all87_split_hyst_step146to210_${SOLVER_VARIANT}_gc1_${STAGE_TAG}_job${JOB_LABEL}"
+                BASELINE_SOURCE_RESTART_PATH=${BASELINE_SOURCE_RESTART_PATH:?Set BASELINE_SOURCE_RESTART_PATH to the task-1 step-145 restart directory.}
+                link_restart_source "$BASELINE_SOURCE_RESTART_PATH" 145
+                ;;
+            2)
+                SOLVER_VARIANT=dt_ds0p10_its7
+                export TARGET_ITS=7
+                export TARGET_DS=0.10
+                export RESTART_STEP=146
+                export CASE_TAG="all87_split_hyst_step146to210_${SOLVER_VARIANT}_gc1_${STAGE_TAG}_job${JOB_LABEL}"
+                DT_SOURCE_RESTART_PATH=${DT_SOURCE_RESTART_PATH:?Set DT_SOURCE_RESTART_PATH to the task-3 step-145 restart directory.}
+                link_restart_source "$DT_SOURCE_RESTART_PATH" 145
+                ;;
+            3)
+                SOLVER_VARIANT=uninterrupted_baseline_ds0p05_its5
+                export TARGET_ITS=5
+                export TARGET_DS=0.05
+                unset RESTART_STEP SOURCE_RESTART_PATH SOURCE_RESTART_FILE
+                export CASE_TAG="all87_split_hyst_step001to210_${SOLVER_VARIANT}_gc1_${STAGE_TAG}_job${JOB_LABEL}"
+                ;;
+            *)
+                echo "Unknown final_validation task $ARRAY_TASK_ID. Valid tasks are 1-3."
+                exit 1
+                ;;
+        esac
         ;;
     *)
         echo "Unknown HYST_ACCEL_STAGE=$HYST_ACCEL_STAGE"
-        echo "Valid values: checkpoint, continuation"
+        echo "Valid values: checkpoint, continuation, final_validation"
         exit 1
         ;;
 esac
 
 NODE_LOCAL_ROOT=
-if [ "$HYST_ACCEL_STAGE" = "continuation" ] && [ "$NODE_LOCAL_STAGE" = "true" ]; then
+if [ "$NODE_LOCAL_STAGE" = "true" ]; then
     SOURCE_COMMIT=${SOURCE_COMMIT:?Set SOURCE_COMMIT to the exact Git commit to stage.}
     JULIA_RUNTIME_ARCHIVE=${JULIA_RUNTIME_ARCHIVE:?Set JULIA_RUNTIME_ARCHIVE to an immutable Julia runtime tar file.}
     JULIA_DEPOT_ARCHIVE=${JULIA_DEPOT_ARCHIVE:?Set JULIA_DEPOT_ARCHIVE to an immutable Julia depot tar file.}
@@ -180,8 +236,10 @@ if [ "$HYST_ACCEL_STAGE" = "continuation" ] && [ "$NODE_LOCAL_STAGE" = "true" ];
         "$BUNDLE_MANIFEST.sha256"
         "$COMMON_MATFILE_PATH"
         "$SPECIFIC_MATFILE_PATH"
-        "$SOURCE_RESTART_FILE"
     )
+    if [ -n "${SOURCE_RESTART_FILE:-}" ]; then
+        required_paths+=("$SOURCE_RESTART_FILE")
+    fi
     for required_path in "${required_paths[@]}"; do
         if [ ! -e "$required_path" ]; then
             echo "Required staging input does not exist: $required_path"
@@ -232,7 +290,11 @@ if [ "$HYST_ACCEL_STAGE" = "continuation" ] && [ "$NODE_LOCAL_STAGE" = "true" ];
     RUNTIME_ARCHIVE_SHA=$(awk 'NF { print $1; exit }' "$JULIA_RUNTIME_ARCHIVE.sha256")
     DEPOT_ARCHIVE_SHA=$(awk 'NF { print $1; exit }' "$JULIA_DEPOT_ARCHIVE.sha256")
     MANIFEST_SHA=$(awk 'NF { print $1; exit }' "$BUNDLE_MANIFEST.sha256")
-    CHECKPOINT_SHA=$(sha256sum "$SOURCE_RESTART_FILE" | awk '{ print $1 }')
+    if [ -n "${SOURCE_RESTART_FILE:-}" ]; then
+        CHECKPOINT_SHA=$(sha256sum "$SOURCE_RESTART_FILE" | awk '{ print $1 }')
+    else
+        CHECKPOINT_SHA=none
+    fi
 
     stage_log "Host: $(hostname)"
     stage_log "Node-local root: $NODE_LOCAL_ROOT"
