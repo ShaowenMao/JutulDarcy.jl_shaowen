@@ -18,6 +18,8 @@ module load julia/1.10.4
 # An absolute command lets controlled jobs run a node-local Julia copy while
 # ordinary submissions continue to use the module-provided executable.
 JULIA_CMD=${JULIA_CMD:-julia}
+RESTART_CACHE_MODE=${RESTART_CACHE_MODE:-off}
+MEMORY_MONITOR_INTERVAL_SECONDS=${MEMORY_MONITOR_INTERVAL_SECONDS:-15}
 
 REPO_ROOT=${REPO_ROOT:-/home/$USER/projects/JutulDarcy.jl_shaowen}
 INPUT_ROOT=${INPUT_ROOT:-/home/$USER/orcd/pool/jutuldarcy_case/gom_sampling_inputs}
@@ -346,6 +348,8 @@ echo "HYPRE_THREADS=$HYPRE_THREADS"
 echo "CPR_UPDATE_INTERVAL=${CPR_UPDATE_INTERVAL:-iteration}"
 echo "CPR_UPDATE_INTERVAL_PARTIAL=${CPR_UPDATE_INTERVAL_PARTIAL:-iteration}"
 echo "CPR_PARTIAL_UPDATE=${CPR_PARTIAL_UPDATE:-automatic}"
+echo "RESTART_CACHE_MODE=$RESTART_CACHE_MODE"
+echo "MEMORY_MONITOR_INTERVAL_SECONDS=$MEMORY_MONITOR_INTERVAL_SECONDS"
 echo "====================="
 
 if [ ! -f "$MATFILE_PATH" ]; then
@@ -361,4 +365,52 @@ if [ -n "${SPECIFIC_MATFILE_PATH:-}" ] && [ ! -f "$SPECIFIC_MATFILE_PATH" ]; the
     exit 1
 fi
 
-"$JULIA_CMD" --startup-file=no --project=. src/input_simulation/co2_blackoil_gom.jl
+case "$RESTART_CACHE_MODE" in
+    off|monitor|evict)
+        ;;
+    *)
+        echo "Unknown RESTART_CACHE_MODE=$RESTART_CACHE_MODE"
+        echo "Valid values: off, monitor, evict"
+        exit 1
+        ;;
+esac
+
+JULIA_ARGS=(--startup-file=no --project=. src/input_simulation/co2_blackoil_gom.jl)
+if { [ "$RUN_MODE" = "simulate" ] || [ "$RUN_MODE" = "sim" ]; } && [ "$RESTART_CACHE_MODE" != "off" ]; then
+    CACHE_GUARD="$REPO_ROOT/scripts/engaging/restart_cache_guard.py"
+    MEMORY_CACHE_LOG="$CASE_LOG_DIR/memory-cache-${JOB_LABEL}_${TASK_LABEL}.csv"
+    if [ ! -f "$CACHE_GUARD" ]; then
+        echo "Restart cache guard does not exist: $CACHE_GUARD"
+        exit 1
+    fi
+    command -v python3
+
+    "$JULIA_CMD" "${JULIA_ARGS[@]}" &
+    JULIA_PID=$!
+    python3 "$CACHE_GUARD" \
+        --pid "$JULIA_PID" \
+        --restart-dir "$RESTART_OUTPUT_PATH" \
+        --log "$MEMORY_CACHE_LOG" \
+        --mode "$RESTART_CACHE_MODE" \
+        --interval "$MEMORY_MONITOR_INTERVAL_SECONDS" &
+    CACHE_GUARD_PID=$!
+
+    set +e
+    wait "$JULIA_PID"
+    JULIA_STATUS=$?
+    wait "$CACHE_GUARD_PID"
+    CACHE_GUARD_STATUS=$?
+    set -e
+
+    echo "JULIA_EXIT_STATUS=$JULIA_STATUS"
+    echo "CACHE_GUARD_EXIT_STATUS=$CACHE_GUARD_STATUS"
+    echo "MEMORY_CACHE_LOG=$MEMORY_CACHE_LOG"
+    if [ "$JULIA_STATUS" -ne 0 ]; then
+        exit "$JULIA_STATUS"
+    fi
+    if [ "$CACHE_GUARD_STATUS" -ne 0 ]; then
+        exit "$CACHE_GUARD_STATUS"
+    fi
+else
+    "$JULIA_CMD" "${JULIA_ARGS[@]}"
+fi

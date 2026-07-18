@@ -457,3 +457,37 @@ Task 1 continues the `DS=0.05`, `ITS=5` baseline from step 145 through 210.
 Task 2 continues the `DS=0.10`, `ITS=7` candidate from step 145 through 210.
 Task 3 runs the baseline settings uninterrupted from the initial state through
 step 210. All three use per-iteration CPR, GC1, and node-local staging.
+
+### Restart Cache Memory Validation
+
+The `memory_validation` stage compares the same case01 step-121-to-145
+continuation under three memory policies. It retains every restart file in all
+three jobs. The 48 GB control only monitors memory; the 32 GB and 24 GB jobs
+flush each completed restart and use `POSIX_FADV_DONTNEED` to release that
+closed file from the job's Linux page cache. The file is neither changed nor
+deleted.
+
+Submit the variants as separate jobs because Slurm memory is assigned per job,
+not per array task:
+
+```bash
+bundle_root=/home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs/hysteresis_acceleration/immutable_bundles/hyst_gc_7681165efea8
+checkpoint_path=/home/$USER/orcd/scratch/jutuldarcy_case/gom_sampling_runs/hysteresis_acceleration/all87_split_hyst_checkpoint_step120_job18055964/restart
+source_commit=$(git rev-parse HEAD)
+common_export="HYST_ACCEL_STAGE=memory_validation,NODE_LOCAL_STAGE=true,SOURCE_RESTART_PATH=$checkpoint_path,SOURCE_COMMIT=$source_commit,JULIA_RUNTIME_ARCHIVE=$bundle_root/julia-runtime.tar,JULIA_DEPOT_ARCHIVE=$bundle_root/julia-depot.tar"
+
+sbatch -J gom_mem_c01_48 --mem=48G --time=2-00:00:00 \
+  --export=ALL,MEMORY_VARIANT=control48,$common_export \
+  scripts/engaging/gom_hysteresis_acceleration.sbatch
+sbatch -J gom_mem_c01_32 --mem=32G --time=2-00:00:00 \
+  --export=ALL,MEMORY_VARIANT=evict32,$common_export \
+  scripts/engaging/gom_hysteresis_acceleration.sbatch
+sbatch -J gom_mem_c01_24 --mem=24G --time=2-00:00:00 \
+  --export=ALL,MEMORY_VARIANT=evict24,$common_export \
+  scripts/engaging/gom_hysteresis_acceleration.sbatch
+```
+
+Each case writes `logs/memory-cache-<JOBID>_0.csv` with Julia RSS/HWM, cgroup
+usage/peak, cgroup file cache, restart volume, and cache-release counters.
+The stage rejects a submission if `MEMORY_VARIANT` does not match the Slurm
+`--mem` allocation.

@@ -53,7 +53,7 @@ unset CPR_PARTIAL_UPDATE
 JOB_LABEL=${SLURM_ARRAY_JOB_ID:-$SLURM_JOB_ID}
 
 case "$HYST_ACCEL_STAGE" in
-    continuation|final_validation)
+    continuation|final_validation|memory_validation)
         NODE_LOCAL_STAGE=${NODE_LOCAL_STAGE:-true}
         case "${NODE_LOCAL_STAGE,,}" in
             1|true|yes|y)
@@ -199,9 +199,50 @@ case "$HYST_ACCEL_STAGE" in
                 ;;
         esac
         ;;
+    memory_validation)
+        if [ -n "${SLURM_ARRAY_TASK_ID:-}" ]; then
+            echo "Submit each memory_validation variant as a separate job, not an array."
+            exit 1
+        fi
+        MEMORY_VARIANT=${MEMORY_VARIANT:?Set MEMORY_VARIANT to control48, evict32, or evict24.}
+        case "$MEMORY_VARIANT" in
+            control48)
+                EXPECTED_MEMORY_MB=49152
+                export RESTART_CACHE_MODE=monitor
+                ;;
+            evict32)
+                EXPECTED_MEMORY_MB=32768
+                export RESTART_CACHE_MODE=evict
+                ;;
+            evict24)
+                EXPECTED_MEMORY_MB=24576
+                export RESTART_CACHE_MODE=evict
+                ;;
+            *)
+                echo "Unknown MEMORY_VARIANT=$MEMORY_VARIANT"
+                echo "Valid values: control48, evict32, evict24"
+                exit 1
+                ;;
+        esac
+        if [[ "${SLURM_MEM_PER_NODE:-}" =~ ^[0-9]+$ ]] && [ "$SLURM_MEM_PER_NODE" -ne "$EXPECTED_MEMORY_MB" ]; then
+            echo "MEMORY_VARIANT=$MEMORY_VARIANT requires --mem=${EXPECTED_MEMORY_MB}M, but Slurm granted ${SLURM_MEM_PER_NODE}M."
+            exit 1
+        fi
+
+        export TARGET_ITS=5
+        export TARGET_DS=0.05
+        export CPR_UPDATE_INTERVAL=iteration
+        export JULIA_NUM_GC_THREADS=1
+        export RESTART_STEP=121
+        export STOP_AFTER_REPORT_STEP=145
+        export MEMORY_MONITOR_INTERVAL_SECONDS=${MEMORY_MONITOR_INTERVAL_SECONDS:-15}
+        export CASE_TAG="case01_hyst_step121to145_${MEMORY_VARIANT}_${RESTART_CACHE_MODE}_fullrestart_gc1_${STAGE_TAG}_job${JOB_LABEL}"
+        SOURCE_RESTART_PATH=${SOURCE_RESTART_PATH:-$RUN_ROOT/all87_split_hyst_checkpoint_step120_job18055964/restart}
+        link_restart_source "$SOURCE_RESTART_PATH" 120
+        ;;
     *)
         echo "Unknown HYST_ACCEL_STAGE=$HYST_ACCEL_STAGE"
-        echo "Valid values: checkpoint, continuation, final_validation"
+        echo "Valid values: checkpoint, continuation, final_validation, memory_validation"
         exit 1
         ;;
 esac
@@ -385,6 +426,11 @@ echo "CPR_UPDATE_INTERVAL_PARTIAL=$CPR_UPDATE_INTERVAL_PARTIAL"
 echo "RESTART_STEP=${RESTART_STEP:-}"
 echo "STOP_AFTER_REPORT_STEP=$STOP_AFTER_REPORT_STEP"
 echo "SOURCE_RESTART_PATH=${SOURCE_RESTART_PATH:-}"
+echo "MEMORY_VARIANT=${MEMORY_VARIANT:-}"
+echo "EXPECTED_MEMORY_MB=${EXPECTED_MEMORY_MB:-}"
+echo "SLURM_MEM_PER_NODE=${SLURM_MEM_PER_NODE:-}"
+echo "RESTART_CACHE_MODE=${RESTART_CACHE_MODE:-off}"
+echo "MEMORY_MONITOR_INTERVAL_SECONDS=${MEMORY_MONITOR_INTERVAL_SECONDS:-15}"
 echo "NODE_LOCAL_STAGE=${NODE_LOCAL_STAGE:-false}"
 echo "NODE_LOCAL_ROOT=${NODE_LOCAL_ROOT:-}"
 echo "SOURCE_COMMIT=${RESOLVED_SOURCE_COMMIT:-}"
