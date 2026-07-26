@@ -6,7 +6,8 @@ using MAT
         outdir, prefix,
         vtu_vars = [:Pressure, :Saturations, :Porosity, :Permeability],
         split_matrices = true,
-        write_regions = true)
+        write_regions = true,
+        extra_cell_data = nothing)
 
 Export ONE VTU for the initial condition using:
 - grid from `mrst_data["G"]`
@@ -15,13 +16,18 @@ Export ONE VTU for the initial condition using:
 Permeability:
 - supports nc×1, nc×3, nc×6 in MAT export
 - stores as ncomp×nc for compatibility with the state exporter
+
+Extra cell data:
+- accepts a dictionary of named vectors with exactly one value per cell
+- appends only those explicitly supplied arrays to the initial-condition VTU
 """
 function export_initial_step0_vtu(fn::AbstractString, mrst_data::Dict{String,Any};
         outdir::AbstractString,
         prefix::AbstractString,
         vtu_vars = [:Pressure, :Saturations, :Porosity, :Permeability],
         split_matrices::Bool = true,
-        write_regions::Bool = true
+        write_regions::Bool = true,
+        extra_cell_data = nothing
     )
 
     mkpath(outdir)
@@ -81,6 +87,47 @@ function export_initial_step0_vtu(fn::AbstractString, mrst_data::Dict{String,Any
         end
     end
 
+    # ---- Explicit caller-supplied cell arrays ----
+    extra_names = Symbol[]
+    if !isnothing(extra_cell_data)
+        extra_cell_data isa AbstractDict ||
+            error("extra_cell_data must be a dictionary-like object.")
+        for (raw_name, raw_values) in pairs(extra_cell_data)
+            name = Symbol(raw_name)
+            name_text = String(name)
+            reserved_name =
+                name in (
+                    :Pressure,
+                    :Saturations,
+                    :Porosity,
+                    :Permeability,
+                    :sat_region,
+                    :rock_region,
+                    :imbi_region
+                ) ||
+                startswith(name_text, "Saturations_") ||
+                startswith(name_text, "Permeability_")
+            reserved_name && error(
+                "extra_cell_data[$raw_name] collides with a generated VTU array name."
+            )
+            haskey(res0, name) &&
+                error("extra_cell_data duplicates the built-in array $name.")
+            raw_values isa AbstractVector ||
+                error("extra_cell_data[$raw_name] must be a vector.")
+            values = vec(raw_values)
+            length(values) == nc || error(
+                "extra_cell_data[$raw_name] has $(length(values)) values, expected $nc."
+            )
+            res0[name] = copy(values)
+            push!(extra_names, name)
+        end
+    end
+    effective_vtu_vars = if vtu_vars === :all
+        :all
+    else
+        unique(vcat(Symbol.(collect(vtu_vars)), extra_names))
+    end
+
     # ---- Regions (cell data) ----
     reservoir_regions = nothing
     do_regions = false
@@ -92,7 +139,7 @@ function export_initial_step0_vtu(fn::AbstractString, mrst_data::Dict{String,Any
     report_times_vtu_export(mrst_data["G"], [st0];
         outdir = outdir,
         prefix = prefix,            # will produce prefix_0000.vtu
-        vars = vtu_vars,
+        vars = effective_vtu_vars,
         split_matrices = split_matrices,   # true -> Permeability_1..; false -> multi-comp array
         write_pvd = false,
         times = [0.0],

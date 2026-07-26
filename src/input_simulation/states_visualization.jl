@@ -17,6 +17,10 @@ vars:
 Region info:
 - If `write_regions=true`, writes `sat_region`, `rock_region`, `imbi_region` from
   `reservoir_regions = mrst_data["rock"]["regions"]` (Dict with keys "saturation","rocknum","imbibition").
+
+Extra cell data:
+- `extra_cell_data` accepts a dictionary of named vectors with one value per cell.
+- These static arrays are written to every selected report-time VTU.
 """
 
 function prepare_report_times_vtu_export(G_raw;
@@ -32,6 +36,7 @@ function prepare_report_times_vtu_export(G_raw;
     write_dp::Bool = false,
     state0_pressure = nothing,
     dp_name::AbstractString = "dP",
+    extra_cell_data = nothing,
 )
     nc = Int(round(G_raw["cells"]["num"]))
     wanted = (vars === :all) ? nothing : Set(string.(vars))
@@ -72,11 +77,37 @@ function prepare_report_times_vtu_export(G_raw;
         end
     end
 
+    extra_data = Dict{String,AbstractVector}()
+    if !isnothing(extra_cell_data)
+        extra_cell_data isa AbstractDict ||
+            error("extra_cell_data must be a dictionary-like object.")
+        for (raw_name, raw_values) in pairs(extra_cell_data)
+            name = string(raw_name)
+            isempty(name) && error("extra_cell_data contains an empty array name.")
+            haskey(region_data, name) && error(
+                "extra_cell_data[$raw_name] collides with a generated region array."
+            )
+            write_dp && name == String(dp_name) && error(
+                "extra_cell_data[$raw_name] collides with the generated dP array."
+            )
+            raw_values isa AbstractVector ||
+                error("extra_cell_data[$raw_name] must be a vector.")
+            values = vec(raw_values)
+            length(values) == nc || error(
+                "extra_cell_data[$raw_name] has $(length(values)) values, expected $nc."
+            )
+            haskey(extra_data, name) &&
+                error("extra_cell_data contains duplicate normalized name $name.")
+            extra_data[name] = copy(values)
+        end
+    end
+
     return (
         nc = nc,
         wanted = wanted,
         p0 = p0,
         region_data = region_data,
+        extra_cell_data = extra_data,
         verbose = verbose,
         dp_name = String(dp_name)
     )
@@ -99,8 +130,16 @@ function reservoir_state_cell_data_for_vtu(state, spec;
     cell_data = Dict{String,AbstractVector}()
     skipped = String[]
 
+    if !isempty(spec.extra_cell_data)
+        for (k, v) in spec.extra_cell_data
+            cell_data[k] = v
+        end
+    end
+
     if !isempty(spec.region_data)
         for (k, v) in spec.region_data
+            haskey(cell_data, k) &&
+                error("$step_label: duplicate static VTU array name $k.")
             cell_data[k] = v
         end
     end
@@ -111,6 +150,9 @@ function reservoir_state_cell_data_for_vtu(state, spec;
         else
             p = res[:Pressure]
             if length(p) == spec.nc
+                haskey(cell_data, spec.dp_name) && error(
+                    "$step_label: generated dP array collides with static array $(spec.dp_name)."
+                )
                 cell_data[spec.dp_name] = p .- spec.p0
             else
                 spec.verbose && @warn "$step_label: :Pressure length=$(length(p)) ≠ nc=$(spec.nc), cannot compute dP."
@@ -126,6 +168,8 @@ function reservoir_state_cell_data_for_vtu(state, spec;
 
         if v isa AbstractVector
             if length(v) == spec.nc
+                haskey(cell_data, name) &&
+                    error("$step_label: state array $name collides with a static VTU array.")
                 cell_data[name] = v
             else
                 push!(skipped, "$name (vector length=$(length(v)) ≠ nc=$(spec.nc))")
@@ -134,7 +178,11 @@ function reservoir_state_cell_data_for_vtu(state, spec;
             if size(v, 2) == spec.nc
                 if split_matrices
                     for r in 1:size(v, 1)
-                        cell_data["$(name)_$(r)"] = vec(v[r, :])
+                        component_name = "$(name)_$(r)"
+                        haskey(cell_data, component_name) && error(
+                            "$step_label: state array $component_name collides with a static VTU array."
+                        )
+                        cell_data[component_name] = vec(v[r, :])
                     end
                 else
                     push!(skipped, "$name (matrix $(size(v)) skipped; split_matrices=false)")

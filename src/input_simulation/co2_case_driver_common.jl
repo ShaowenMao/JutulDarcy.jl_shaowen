@@ -107,6 +107,7 @@ function co2_case_defaults(case_name::AbstractString)
         cpr_update_interval_partial = :iteration,
         cpr_partial_update = nothing,
         in_memory_reports = 10,
+        well_volume_fraction = 1.0e-3,
         disable_hysteresis = false,
         hysteresis_s_min = nothing,
         use_mrst_transmissibility = true,
@@ -188,6 +189,7 @@ function co2_case_options(;
         cpr_update_interval_partial = nothing,
         cpr_partial_update = nothing,
         in_memory_reports = nothing,
+        well_volume_fraction = nothing,
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
         use_mrst_transmissibility = nothing,
@@ -235,6 +237,7 @@ function co2_case_options(;
         error("CPR_PARTIAL_UPDATE must be true, false, or omitted for automatic selection.")
     end
     in_memory_reports = something(in_memory_reports, defaults.in_memory_reports)
+    well_volume_fraction = something(well_volume_fraction, defaults.well_volume_fraction)
     disable_hysteresis = something(disable_hysteresis, defaults.disable_hysteresis)
     hysteresis_s_min = isnothing(hysteresis_s_min) ? defaults.hysteresis_s_min : hysteresis_s_min
     use_mrst_transmissibility = something(use_mrst_transmissibility, defaults.use_mrst_transmissibility)
@@ -261,6 +264,8 @@ function co2_case_options(;
     timestep_max_increase >= 1 || error("TIMESTEP_MAX_INCREASE must be at least 1.")
     dr_max > 0 || error("DR_MAX must be positive or Inf.")
     in_memory_reports >= 1 || error("IN_MEMORY_REPORTS must be at least 1.")
+    isfinite(well_volume_fraction) && well_volume_fraction > 0 ||
+        error("WELL_VOLUME_FRACTION must be finite and positive.")
 
     return (
         case_name = case_name,
@@ -295,6 +300,7 @@ function co2_case_options(;
         cpr_update_interval_partial = cpr_update_interval_partial,
         cpr_partial_update = cpr_partial_update,
         in_memory_reports = in_memory_reports,
+        well_volume_fraction = well_volume_fraction,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
         use_mrst_transmissibility = use_mrst_transmissibility,
@@ -352,6 +358,7 @@ function co2_print_case_options(opts; stage::AbstractString)
         automatic = isnothing(opts.cpr_partial_update) ? " (automatic)" : ""
         println("cpr_partial_update = ", effective_partial_update, automatic)
         println("in_memory_reports = ", opts.in_memory_reports)
+        println("well_volume_fraction = ", opts.well_volume_fraction)
         println("report_gas_masses = ", opts.report_gas_masses)
         println("report_co2_concentration = ", opts.report_co2_concentration)
         println("load_all_states_after_sim = ", opts.load_all_states_after_sim)
@@ -396,6 +403,7 @@ function run_co2_case(;
         cpr_update_interval_partial = nothing,
         cpr_partial_update = nothing,
         in_memory_reports = nothing,
+        well_volume_fraction = nothing,
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
         use_mrst_transmissibility = nothing,
@@ -440,6 +448,7 @@ function run_co2_case(;
         cpr_update_interval_partial = cpr_update_interval_partial,
         cpr_partial_update = cpr_partial_update,
         in_memory_reports = in_memory_reports,
+        well_volume_fraction = well_volume_fraction,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
         use_mrst_transmissibility = use_mrst_transmissibility,
@@ -484,6 +493,7 @@ function run_co2_case(;
         dr_max = opts.dr_max,
         linear_solver_arg = co2_cpr_linear_solver_arg(opts),
         in_memory_reports = opts.in_memory_reports,
+        well_volume_fraction = opts.well_volume_fraction,
         disable_hysteresis = opts.disable_hysteresis,
         hysteresis_s_min = opts.hysteresis_s_min,
         use_mrst_transmissibility = opts.use_mrst_transmissibility,
@@ -528,6 +538,7 @@ function export_co2_case_vtu(;
         cpr_update_interval_partial = nothing,
         cpr_partial_update = nothing,
         in_memory_reports = nothing,
+        well_volume_fraction = nothing,
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
         use_mrst_transmissibility = nothing,
@@ -572,6 +583,7 @@ function export_co2_case_vtu(;
         cpr_update_interval_partial = cpr_update_interval_partial,
         cpr_partial_update = cpr_partial_update,
         in_memory_reports = in_memory_reports,
+        well_volume_fraction = well_volume_fraction,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
         use_mrst_transmissibility = use_mrst_transmissibility,
@@ -602,6 +614,7 @@ function export_co2_case_vtu(;
         vtu_prefix = opts.vtu_prefix,
         vtu_vars = opts.vtu_vars,
         report_co2_concentration = opts.report_co2_concentration,
+        well_volume_fraction = opts.well_volume_fraction,
         disable_hysteresis = opts.disable_hysteresis,
         hysteresis_s_min = opts.hysteresis_s_min,
         use_mrst_transmissibility = opts.use_mrst_transmissibility,
@@ -676,6 +689,10 @@ function run_co2_case_from_env(; default_case_name::AbstractString, allowed_case
         ),
         cpr_partial_update = co2_get_env_optional_bool("CPR_PARTIAL_UPDATE"),
         in_memory_reports = co2_get_env_int("IN_MEMORY_REPORTS", defaults.in_memory_reports),
+        well_volume_fraction = co2_get_env_float(
+            "WELL_VOLUME_FRACTION",
+            defaults.well_volume_fraction
+        ),
         disable_hysteresis = co2_get_env_bool("DISABLE_HYSTERESIS", defaults.disable_hysteresis),
         hysteresis_s_min = co2_get_env_optional_float("HYSTERESIS_S_MIN"),
         use_mrst_transmissibility = co2_get_transmissibility_policy(defaults.use_mrst_transmissibility),

@@ -163,6 +163,200 @@ function mrst_has_pressure_boundary_conditions(mrst_data)
     return false
 end
 
+function mrst_split_cells(block, label::AbstractString, nc::Int)
+    haskey(block, "cells") || error("$label is missing cells.")
+    raw = mrst_get_vec(block["cells"])
+    all(x -> x isa Real && isfinite(x) && isinteger(x), raw) ||
+        error("$label cells must be finite integer-valued indices.")
+    cells = Int.(raw)
+    length(cells) == length(unique(cells)) || error("$label cells must be unique.")
+    all(c -> 1 <= c <= nc, cells) ||
+        error("$label cells must be between 1 and $nc.")
+    return cells
+end
+
+function mrst_split_expected_cells(assembled, field::AbstractString)
+    if !haskey(assembled, "masks")
+        return nothing
+    end
+    masks = assembled["masks"]
+    if !(masks isa AbstractDict) || !haskey(masks, field)
+        return nothing
+    end
+    return Int.(mrst_get_vec(masks[field]))
+end
+
+function mrst_validate_split_cell_coverage(assembled, cells, mask_field, label)
+    expected = mrst_split_expected_cells(assembled, mask_field)
+    isnothing(expected) && return nothing
+    sort(cells) == sort(expected) || error(
+        "$label cells do not exactly match common.masks.$mask_field."
+    )
+    return nothing
+end
+
+function mrst_assign_split_vector!(target, cells, source, label;
+        positive::Bool = false,
+        fraction::Bool = false,
+        integer::Bool = false
+    )
+    values = mrst_get_vec(source)
+    length(values) == length(cells) || error(
+        "$label has $(length(values)) rows, expected $(length(cells))."
+    )
+    all(x -> x isa Real && isfinite(x), values) ||
+        error("$label must contain only finite numeric values.")
+    if positive
+        all(>(0), values) || error("$label must contain positive values.")
+    end
+    if fraction
+        all(x -> 0 < x < 1, values) ||
+            error("$label must contain values strictly between zero and one.")
+    end
+    if integer
+        all(x -> isinteger(x) && x >= 1, values) ||
+            error("$label must contain positive integer-valued regions.")
+    end
+    target[cells] .= values
+    return nothing
+end
+
+function mrst_assign_split_permeability!(target, cells, source, label)
+    values = source
+    if target isa AbstractVector
+        source_values = mrst_get_vec(values)
+        length(source_values) == length(cells) || error(
+            "$label has $(length(source_values)) values, expected $(length(cells))."
+        )
+        all(x -> x isa Real && isfinite(x), source_values) ||
+            error("$label must contain only finite numeric values.")
+        target[cells] .= source_values
+    else
+        values isa AbstractMatrix || error("$label must be a matrix.")
+        size(values, 1) == length(cells) || error(
+            "$label has $(size(values, 1)) rows, expected $(length(cells))."
+        )
+        size(values, 2) == size(target, 2) || error(
+            "$label has $(size(values, 2)) components, expected $(size(target, 2))."
+        )
+        all(x -> x isa Real && isfinite(x), values) ||
+            error("$label must contain only finite numeric values.")
+        target[cells, :] .= values
+    end
+    return nothing
+end
+
+function validate_mrst_combined_specific_identity(common, specific)
+    schema = haskey(specific, "schema") ? String(specific["schema"]) : ""
+    schema == "gom_jutul_split_specific_v3" || return nothing
+    for key in ("common_name", "geology_id", "geology_hash",
+            "geology_hash_algorithm", "pairing_key", "fault", "stratigraphy")
+        haskey(specific, key) ||
+            error("Combined geology-specific file is missing top-level $key.")
+    end
+    if haskey(common, "name")
+        String(specific["common_name"]) == String(common["name"]) || error(
+            "Combined specific common_name does not match common.name."
+        )
+    end
+    geology_id = String(specific["geology_id"])
+    geology_hash = lowercase(String(specific["geology_hash"]))
+    pairing_key = String(specific["pairing_key"])
+    pairing_key == "$geology_id:$geology_hash" || error(
+        "Combined specific pairing_key is inconsistent with geology_id and geology_hash."
+    )
+    length(geology_hash) == 64 &&
+        all(c -> isdigit(c) || c in 'a':'f', geology_hash) ||
+        error("Combined specific geology_hash is not a SHA-256 hexadecimal value.")
+    return nothing
+end
+
+function apply_mrst_stratigraphy_data!(assembled, specific)
+    haskey(specific, "stratigraphy") || return nothing
+    stratigraphy = specific["stratigraphy"]
+    stratigraphy isa AbstractDict ||
+        error("Split-specific stratigraphy must be a dictionary-like block.")
+    for key in ("cells", "poro", "perm", "saturation_region", "rock_region")
+        haskey(stratigraphy, key) ||
+            error("Split-specific stratigraphy block is missing $key.")
+    end
+
+    rock = assembled["rock"]
+    nc = length(vec(rock["poro"]))
+    cells = mrst_split_cells(stratigraphy, "Split-specific stratigraphy", nc)
+    mrst_validate_split_cell_coverage(
+        assembled,
+        cells,
+        "specificStratigraphyCells",
+        "Split-specific stratigraphy"
+    )
+
+    if haskey(specific, "fault")
+        fault_cells = mrst_split_cells(
+            specific["fault"],
+            "Split-specific fault",
+            nc
+        )
+        isempty(intersect(cells, fault_cells)) ||
+            error("Split-specific fault and stratigraphy cells must be disjoint.")
+    end
+
+    if haskey(stratigraphy, "perm_component_order") && !(rock["perm"] isa AbstractVector)
+        component_order = String.(mrst_get_vec(stratigraphy["perm_component_order"]))
+        expected = ["Kxx", "Kxy", "Kxz", "Kyy", "Kyz", "Kzz"]
+        size(rock["perm"], 2) == 6 && component_order == expected || error(
+            "Split-specific stratigraphy permeability must use Kxx,Kxy,Kxz,Kyy,Kyz,Kzz."
+        )
+    end
+
+    mrst_assign_split_vector!(
+        rock["poro"],
+        cells,
+        stratigraphy["poro"],
+        "Split-specific stratigraphy porosity";
+        fraction = true
+    )
+    mrst_assign_split_permeability!(
+        rock["perm"],
+        cells,
+        stratigraphy["perm"],
+        "Split-specific stratigraphy permeability"
+    )
+
+    haskey(rock, "regions") ||
+        error("Split-specific stratigraphy requires rock.regions.")
+    regions = rock["regions"]
+    for (source_key, target_key) in (
+            ("saturation_region", "saturation"),
+            ("rock_region", "rocknum")
+        )
+        haskey(regions, target_key) ||
+            error("Split-specific stratigraphy requires rock.regions.$target_key.")
+        mrst_assign_split_vector!(
+            regions[target_key],
+            cells,
+            stratigraphy[source_key],
+            "Split-specific stratigraphy $source_key";
+            integer = true
+        )
+    end
+    if haskey(stratigraphy, "imbibition_region") && haskey(regions, "imbibition")
+        mrst_assign_split_vector!(
+            regions["imbibition"],
+            cells,
+            stratigraphy["imbibition_region"],
+            "Split-specific stratigraphy imbibition_region";
+            integer = true
+        )
+    end
+
+    assembled["stratigraphy_specific_summary"] = Dict{String, Any}(
+        "cell_count" => length(cells),
+        "applied_before_fault_saturation_processing" => true
+    )
+    return cells
+end
+
 function restore_mrst_split_fault_tables!(assembled, fault)
     if !haskey(fault, "fluid_tables")
         return assembled
@@ -579,11 +773,34 @@ function validate_mrst_split_case(assembled, specific)
 
     if haskey(assembled, "rock")
         rock = assembled["rock"]
-        if haskey(rock, "poro") && any(isnan, rock["poro"])
-            push!(errors, "assembled rock.poro still contains NaN values")
+        if haskey(rock, "poro") && any(x -> !(x isa Real && isfinite(x)), rock["poro"])
+            push!(errors, "assembled rock.poro contains nonfinite or nonnumeric values")
         end
-        if haskey(rock, "perm") && any(isnan, rock["perm"])
-            push!(errors, "assembled rock.perm still contains NaN values")
+        if haskey(rock, "perm") && any(x -> !(x isa Real && isfinite(x)), rock["perm"])
+            push!(errors, "assembled rock.perm contains nonfinite or nonnumeric values")
+        end
+        if haskey(rock, "regions")
+            regions = rock["regions"]
+            for key in ("saturation", "rocknum", "imbibition")
+                if haskey(regions, key)
+                    values = mrst_get_vec(regions[key])
+                    if !all(x -> x isa Real && isfinite(x) && isinteger(x) && x >= 1, values)
+                        push!(errors, "assembled rock.regions.$key contains invalid region IDs")
+                    end
+                end
+            end
+            if haskey(regions, "saturation") &&
+                    haskey(assembled, "deck") &&
+                    haskey(assembled["deck"], "PROPS") &&
+                    haskey(assembled["deck"]["PROPS"], "SGOF")
+                table_count = length(mrst_get_vec(assembled["deck"]["PROPS"]["SGOF"]))
+                maximum(mrst_get_vec(regions["saturation"])) <= table_count ||
+                    push!(errors, "assembled SATNUM exceeds the available SGOF table count")
+                if haskey(regions, "imbibition")
+                    maximum(mrst_get_vec(regions["imbibition"])) <= table_count ||
+                        push!(errors, "assembled IMBNUM exceeds the available SGOF table count")
+                end
+            end
         end
     else
         push!(errors, "assembled case is missing rock data")
@@ -613,30 +830,35 @@ function assemble_mrst_split_case(common, specific;
         explicit_fault_hysteresis_mode = "disable"
     )
     haskey(specific, "fault") || error("Specific MRST split file must contain a top-level fault block.")
+    validate_mrst_combined_specific_identity(common, specific)
     assembled = deepcopy(common)
+    apply_mrst_stratigraphy_data!(assembled, specific)
     fault = specific["fault"]
-    cells = Int.(mrst_get_vec(fault["cells"]))
-    length(cells) == length(unique(cells)) || error("Split-specific fault cells must be unique.")
-
     rock = assembled["rock"]
     nc = length(vec(rock["poro"]))
-    all(c -> 1 <= c <= nc, cells) || error("Split-specific fault cells must be between 1 and $nc.")
+    cells = mrst_split_cells(fault, "Split-specific fault", nc)
+    mrst_validate_split_cell_coverage(
+        assembled,
+        cells,
+        "specificFaultCells",
+        "Split-specific fault"
+    )
 
-    poro = rock["poro"]
-    fault_poro = fault["poro"]
-    if poro isa AbstractVector
-        poro[cells] .= vec(fault_poro)
-    else
-        poro[cells, :] .= fault_poro
-    end
-
-    perm = rock["perm"]
-    fault_perm = fault["perm"]
-    if perm isa AbstractVector
-        perm[cells] .= vec(fault_perm)
-    else
-        perm[cells, :] .= fault_perm
-    end
+    haskey(fault, "poro") || error("Split-specific fault block is missing poro.")
+    haskey(fault, "perm") || error("Split-specific fault block is missing perm.")
+    mrst_assign_split_vector!(
+        rock["poro"],
+        cells,
+        fault["poro"],
+        "Split-specific fault porosity";
+        fraction = true
+    )
+    mrst_assign_split_permeability!(
+        rock["perm"],
+        cells,
+        fault["perm"],
+        "Split-specific fault permeability"
+    )
 
     if mrst_has_explicit_fault_saturation_data(specific)
         normalized_mode = normalize_mrst_fault_saturation_domain_mode(fault_saturation_domain_mode)
@@ -1913,6 +2135,7 @@ end
 
 function setup_case_from_mrst_data(data_domain, mrst_data;
         wells = :simple,
+        well_volume_fraction::Real = 1.0e-3,
         backend = :csr,
         block_backend = true,
         split_wells = false,
@@ -1935,6 +2158,10 @@ function setup_case_from_mrst_data(data_domain, mrst_data;
         hysteresis_s_min::Union{Nothing, Float64} = nothing,
         kwarg...
     )
+    isfinite(well_volume_fraction) && well_volume_fraction > 0 ||
+        throw(ArgumentError(
+            "well_volume_fraction must be finite and positive, got $well_volume_fraction."
+        ))
     normalize_mrst_schedule_control!(mrst_data)
     if disable_hysteresis
         if !isnothing(hysteresis_s_min)
@@ -2001,7 +2228,8 @@ function setup_case_from_mrst_data(data_domain, mrst_data;
     for i = 1:num_wells
         sym = well_symbols[i]
         wi, wdata, res_cells = get_well_from_mrst_data(mrst_data, sys, i, W_data = first_well_set,
-                extraout = true, well_type = wells, context = w_context, use_lengths = use_well_lengths)
+                extraout = true, well_type = wells, context = w_context,
+                use_lengths = use_well_lengths, volume = well_volume_fraction)
 
         param_w = setup_parameters(wi)
 
@@ -2409,6 +2637,7 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         steps = :full,
         general_ad = false,
         wells = :simple,
+        well_volume_fraction::Real = 1.0e-3,
         linear_solver = :bicgstab,
         diffusion = nothing,
         disable_hysteresis::Bool = false,
@@ -2454,6 +2683,7 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         general_ad = general_ad,
         minbatch = minbatch,
         wells = wells,
+        well_volume_fraction = well_volume_fraction,
         dp_max_abs = dp_max_abs,
         dp_max_rel = dp_max_rel,
         p_min = p_min,
@@ -2463,16 +2693,16 @@ function export_mrst_case_vtu_from_output(fn, output_path;
         diffusion = diffusion,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
-        use_mrst_transmissibility = use_mrst_transmissibility,
-        fault_saturation_domain_mode = fault_saturation_domain_mode,
-        fault_pc_entry_treatment = fault_pc_entry_treatment,
-        fault_pc_entry_sg_max = fault_pc_entry_sg_max,
-        explicit_fault_hysteresis_mode = explicit_fault_hysteresis_mode
+        use_mrst_transmissibility = use_mrst_transmissibility
     )
     case, mrst_data = if is_split_input
         setup_case_from_mrst_split(common_mrst_path, specific_mrst_path;
             validate_split = validate_split,
-            setup_kwargs...
+            setup_kwargs...,
+            fault_saturation_domain_mode = fault_saturation_domain_mode,
+            fault_pc_entry_treatment = fault_pc_entry_treatment,
+            fault_pc_entry_sg_max = fault_pc_entry_sg_max,
+            explicit_fault_hysteresis_mode = explicit_fault_hysteresis_mode
         )
     else
         setup_case_from_mrst(fn; setup_kwargs...)
@@ -2618,6 +2848,10 @@ Simulate a MRST case from `file_name` as exported by `writeJutulInput` in MRST.
   separate VTU postprocessing workflow. In this mode, the function returns a
   lightweight named tuple with the raw `SimResult`, reports, output path, and
   setup metadata instead of building a `ReservoirSimResult`.
+- `well_volume_fraction::Real = 1.0e-3`: Regularization volume for each
+  imported simple well as a fraction of the mean volume of its perforated
+  reservoir cells. Use a small positive value when matching an MRST well
+  model without wellbore storage.
 - `fault_saturation_domain_mode = "input"`: For split MRST GoM inputs, set to
   `"predict_sample"` to relabel each independent PREDICT fault sample into its
   own saturation domain while cloning the original Pc/Kr tables.
@@ -2668,6 +2902,7 @@ function simulate_mrst_case(fn;
         restart = false,
         stop_after_report_step::Union{Nothing, Int} = nothing,
         wells = :simple,
+        well_volume_fraction::Real = 1.0e-3,
         plot = false,
         linear_solver = :bicgstab,
         linear_solver_arg = Dict{Symbol, Any}(),
@@ -2764,6 +2999,7 @@ function simulate_mrst_case(fn;
             general_ad = general_ad,
             minbatch = minbatch,
             wells = wells,
+            well_volume_fraction = well_volume_fraction,
             dp_max_abs = dp_max_abs,
             dp_max_rel = dp_max_rel,
             p_min = p_min,
@@ -2792,6 +3028,7 @@ function simulate_mrst_case(fn;
             general_ad = general_ad,
             minbatch = minbatch,
             wells = wells,
+            well_volume_fraction = well_volume_fraction,
             dp_max_abs = dp_max_abs,
             dp_max_rel = dp_max_rel,
             p_min = p_min,

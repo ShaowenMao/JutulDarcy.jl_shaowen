@@ -121,6 +121,60 @@ end
     @test reservoir_hyst_assembled["deck"]["RUNSPEC"]["TABDIMS"][1] == 6.0
     @test reservoir_hyst_summary["hysteresis"] == "reservoir_only_fault_drainage_duplicate"
     @test reservoir_hyst_summary["pc_entry_treatment"]["adjusted_tables"] == 2
+
+    combined_common = deepcopy(common_hysteresis)
+    combined_common["name"] = "tiny_common"
+    combined_common["rock"]["poro"][2] = NaN
+    combined_common["rock"]["perm"][2] = NaN
+    combined_common["rock"]["regions"]["rocknum"] = [1.0, 1.0, 1.0, 1.0]
+    combined_common["masks"] = Dict{String, Any}(
+        "specificFaultCells" => [3.0, 4.0],
+        "specificStratigraphyCells" => [2.0]
+    )
+
+    combined_specific = deepcopy(specific)
+    combined_specific["schema"] = "gom_jutul_split_specific_v3"
+    combined_specific["common_name"] = "tiny_common"
+    combined_specific["geology_id"] = "s05_c012"
+    combined_specific["geology_hash_algorithm"] = "SHA-256"
+    combined_specific["geology_hash"] = repeat("a", 64)
+    combined_specific["pairing_key"] = "s05_c012:" * repeat("a", 64)
+    combined_specific["stratigraphy"] = Dict{String, Any}(
+        "cells" => [2.0],
+        "poro" => [0.31],
+        "perm" => reshape([4.0], :, 1),
+        "saturation_region" => [1.0],
+        "rock_region" => [2.0],
+        # Deliberately stale: explicit fault hysteresis processing must
+        # replace this with SATNUM + final drainage-region count.
+        "imbibition_region" => [99.0]
+    )
+    common_before = deepcopy(combined_common)
+    specific_before = deepcopy(combined_specific)
+    combined_assembled = JutulDarcy.assemble_mrst_split_case(
+        combined_common,
+        combined_specific;
+        explicit_fault_hysteresis_mode = "reservoir",
+        fault_pc_entry_treatment = "none"
+    )
+    combined_regions = combined_assembled["rock"]["regions"]
+
+    @test combined_assembled["rock"]["poro"] == [0.2, 0.31, 0.15, 0.25]
+    @test vec(combined_assembled["rock"]["perm"]) == [1.0, 4.0, 2.0, 3.0]
+    @test Int.(vec(combined_regions["saturation"])) == [1, 1, 2, 3]
+    @test Int.(vec(combined_regions["rocknum"])) == [1, 2, 1, 1]
+    @test Int.(vec(combined_regions["imbibition"])) == [4, 4, 5, 6]
+    @test combined_assembled["stratigraphy_specific_summary"]["cell_count"] == 1
+    @test isequal(combined_common, common_before)
+    @test isequal(combined_specific, specific_before)
+
+    overlapping = deepcopy(combined_specific)
+    overlapping["stratigraphy"]["cells"] = [3.0]
+    @test_throws ErrorException JutulDarcy.assemble_mrst_split_case(
+        combined_common,
+        overlapping;
+        explicit_fault_hysteresis_mode = "reservoir"
+    )
 end
 
 @testset "MRST hysteresis restart history" begin
