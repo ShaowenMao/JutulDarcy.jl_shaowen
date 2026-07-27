@@ -32,6 +32,10 @@ end
     include("mrst_split.jl")
 end
 
+@testitem "Production output" begin
+    include("production_output.jl")
+end
+
 @testitem "PArray solve" begin
     include("parray.jl")
 end

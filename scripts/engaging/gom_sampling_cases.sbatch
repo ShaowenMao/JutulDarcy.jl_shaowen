@@ -43,6 +43,10 @@ case "$CASE_ID" in
         INPUT_CASE_ID=all87_split
         CASE_TIMESTEP_CUTS=25
         ;;
+    external_split|external_split_cut25|external_split_cuts25)
+        INPUT_CASE_ID=external_split
+        CASE_TIMESTEP_CUTS=25
+        ;;
     3|old86_whole|old86_whole_cut25|old86_whole_cuts25)
         INPUT_CASE_ID=old86_whole
         CASE_TIMESTEP_CUTS=25
@@ -80,7 +84,7 @@ case "$CASE_ID" in
         echo "Valid numeric values: 1-4"
         echo "Default names use MAX_TIMESTEP_CUTS=25: all87_whole, all87_split, old86_whole, old86_split,"
         echo "             all87_whole_cuts25, all87_split_cuts25, old86_whole_cuts25, old86_split_cuts25,"
-        echo "             gom_large_hys_control, gom_large_hys_control_cuts25"
+        echo "             gom_large_hys_control, gom_large_hys_control_cuts25, external_split"
         echo "Legacy comparison names use MAX_TIMESTEP_CUTS=8: all87_whole_cuts8, all87_split_cuts8,"
         echo "             old86_whole_cuts8, old86_split_cuts8, gom_large_hys_control_cuts8"
         exit 1
@@ -100,6 +104,17 @@ case "$INPUT_CASE_ID" in
         CASE_KEY=all87_split
         export COMMON_MATFILE_PATH="$INPUT_ROOT/all87/jutul_split/lluis_field_case_87_all87_common.mat"
         export SPECIFIC_MATFILE_PATH="$INPUT_ROOT/all87/jutul_split/lluis_field_case_87_all87_realization_0001_specific.mat"
+        export MATFILE_PATH="$SPECIFIC_MATFILE_PATH"
+        ;;
+    external_split)
+        CASE_KEY=${EXTERNAL_CASE_KEY:-external_split}
+        if [ -z "$USER_COMMON_MATFILE_PATH" ] || \
+           [ -z "$USER_SPECIFIC_MATFILE_PATH" ]; then
+            echo "external_split requires exact COMMON_MATFILE_PATH and SPECIFIC_MATFILE_PATH."
+            exit 1
+        fi
+        export COMMON_MATFILE_PATH="$USER_COMMON_MATFILE_PATH"
+        export SPECIFIC_MATFILE_PATH="$USER_SPECIFIC_MATFILE_PATH"
         export MATFILE_PATH="$SPECIFIC_MATFILE_PATH"
         ;;
     old86_whole)
@@ -247,6 +262,29 @@ case "$EXPLICIT_FAULT_HYSTERESIS_MODE_LC" in
         ;;
 esac
 
+export PRODUCTION_OUTPUT_MODE=${PRODUCTION_OUTPUT_MODE:-false}
+PRODUCTION_OUTPUT_MODE_LC=$(echo "$PRODUCTION_OUTPUT_MODE" | tr '[:upper:]' '[:lower:]')
+case "$PRODUCTION_OUTPUT_MODE_LC" in
+    1|true|yes|y)
+        export PRODUCTION_OUTPUT_MODE=true
+        export IN_MEMORY_REPORTS=1
+        export LOAD_STATES_AFTER_SIM=false
+        export LOAD_REPORTS_AFTER_SIM=false
+        if [ "$RESTART_CACHE_MODE" != "off" ]; then
+            echo "PRODUCTION_OUTPUT_MODE requires RESTART_CACHE_MODE=off."
+            exit 1
+        fi
+        ;;
+    0|false|no|n)
+        export PRODUCTION_OUTPUT_MODE=false
+        ;;
+    *)
+        echo "Unknown PRODUCTION_OUTPUT_MODE=$PRODUCTION_OUTPUT_MODE"
+        echo "Valid values: true/false, yes/no, 1/0"
+        exit 1
+        ;;
+esac
+
 JOB_LABEL=${SLURM_ARRAY_JOB_ID:-${SLURM_JOB_ID:-manual}}
 TASK_LABEL=${SLURM_ARRAY_TASK_ID:-0}
 BOOTSTRAP_TASK_LABEL=${SLURM_ARRAY_TASK_ID:-4294967294}
@@ -349,6 +387,12 @@ echo "CPR_UPDATE_INTERVAL=${CPR_UPDATE_INTERVAL:-iteration}"
 echo "CPR_UPDATE_INTERVAL_PARTIAL=${CPR_UPDATE_INTERVAL_PARTIAL:-iteration}"
 echo "CPR_PARTIAL_UPDATE=${CPR_PARTIAL_UPDATE:-automatic}"
 echo "RESTART_CACHE_MODE=$RESTART_CACHE_MODE"
+echo "PRODUCTION_OUTPUT_MODE=$PRODUCTION_OUTPUT_MODE"
+echo "PRODUCTION_SUMMARY_DIR=${PRODUCTION_SUMMARY_DIR:-default}"
+echo "PRODUCTION_RETAIN_YEARS=${PRODUCTION_RETAIN_YEARS:-50,1000}"
+echo "PRODUCTION_ROLLING_CHECKPOINTS=${PRODUCTION_ROLLING_CHECKPOINTS:-2}"
+echo "PRODUCTION_CASE_KEY=${PRODUCTION_CASE_KEY:-}"
+echo "PRODUCTION_CAMPAIGN_MANIFEST_SHA256=${PRODUCTION_CAMPAIGN_MANIFEST_SHA256:-}"
 echo "MEMORY_MONITOR_INTERVAL_SECONDS=$MEMORY_MONITOR_INTERVAL_SECONDS"
 echo "====================="
 

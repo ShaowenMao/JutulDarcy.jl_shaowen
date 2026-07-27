@@ -2913,6 +2913,13 @@ function simulate_mrst_case(fn;
         load_all_states_after_sim::Bool = true,
         load_all_reports_after_sim::Bool = true,
         in_memory_reports::Int = 10,
+        production_output_mode::Bool = false,
+        production_summary_dir = nothing,
+        production_retain_years = [50.0, 1000.0],
+        production_rolling_checkpoints::Int = 2,
+        production_case_key::AbstractString = "",
+        production_campaign_manifest_sha256::AbstractString = "",
+        production_require_hysteresis_history = nothing,
         nonlinear_relaxation::Bool = false,
         target_its::Real = 8,
         target_ds::Real = Inf,
@@ -3045,7 +3052,8 @@ function simulate_mrst_case(fn;
     end
     model = case.model
     forces = case.forces
-    dt = case.dt
+    schedule_dt = case.dt
+    dt = schedule_dt
     if !isnothing(stop_after_report_step)
         nreport = length(dt)
         1 <= stop_after_report_step <= nreport || error(
@@ -3080,7 +3088,7 @@ function simulate_mrst_case(fn;
         end
         push!(extra_outputs, :Saturations)
         # Save more secondary variables into final output to calculate mass fraction of dissolved and free gas 
-        if report_gas_masses
+        if report_gas_masses || production_output_mode
             for v in (:FluidVolume, :PhaseMassDensities, :ShrinkageFactors)
                 v in extra_outputs || push!(extra_outputs, v)
             end
@@ -3120,10 +3128,36 @@ function simulate_mrst_case(fn;
         @warn "Forcing load_all_states_after_sim=true because write_output=false would otherwise discard all saved states."
         load_all_states_after_sim = true
     end
+    if production_output_mode
+        load_all_states_after_sim &&
+            error(
+                "Production-output mode requires " *
+                "load_all_states_after_sim=false."
+            )
+        load_all_reports_after_sim &&
+            error(
+                "Production-output mode requires " *
+                "load_all_reports_after_sim=false because rolling retention " *
+                "removes non-milestone report files."
+            )
+    end
     needs_state_history_in_memory = write_vtu || write_mrst || plot || legacy_output
     if needs_state_history_in_memory && !load_all_states_after_sim
         @warn "Forcing load_all_states_after_sim=true because the requested workflow needs in-memory states." write_vtu write_mrst plot legacy_output
         load_all_states_after_sim = true
+    end
+    if production_output_mode
+        load_all_states_after_sim &&
+            error(
+                "Production-output mode is incompatible with write_vtu, " *
+                "write_mrst, plot, legacy_output, or any other option that " *
+                "requires the complete state history in memory."
+            )
+        load_all_reports_after_sim &&
+            error(
+                "Production-output mode requires " *
+                "load_all_reports_after_sim=false."
+            )
     end
     # Let Jutul keep the full state history on disk only when we are in the
     # low-memory simulation workflow.
@@ -3195,6 +3229,29 @@ function simulate_mrst_case(fn;
         if !isnothing(report_level)
             cfg[:report_level] = report_level
         end
+        if production_output_mode
+            isnothing(output_path) &&
+                error("Production-output mode requires write_output=true.")
+            cfg[:report_level] >= 0 ||
+                error("Production-output mode requires REPORT_LEVEL >= 0.")
+            require_hysteresis_history =
+                isnothing(production_require_hysteresis_history) ?
+                !disable_hysteresis :
+                Bool(production_require_hysteresis_history)
+            cfg, restart = setup_production_output(
+                cfg,
+                output_path,
+                schedule_dt,
+                restart;
+                summary_dir = production_summary_dir,
+                retain_years = production_retain_years,
+                rolling_checkpoints = production_rolling_checkpoints,
+                case_key = production_case_key,
+                campaign_manifest_sha256 =
+                    production_campaign_manifest_sha256,
+                require_hysteresis_history = require_hysteresis_history
+            )
+        end
 
         #result = simulate(sim, dt, forces = forces, config = cfg, restart = restart, start_date = start);
         sim_result = simulate(sim, dt;
@@ -3206,6 +3263,14 @@ function simulate_mrst_case(fn;
         )
 
         states, reports = sim_result
+        if production_output_mode
+            production_consolidate_summary!(
+                cfg.policy;
+                require_complete =
+                    completed_report_steps(states, reports, output_path) ==
+                    length(schedule_dt)
+            )
+        end
 
         # Calculate mass fractions of dissolved and free gas 
         if report_gas_masses

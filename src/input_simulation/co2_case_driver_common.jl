@@ -45,6 +45,12 @@ function co2_get_env_optional_float(name::String)
     return isempty(val) ? nothing : parse(Float64, val)
 end
 
+function co2_get_env_float_list(name::String, default)
+    raw = strip(get(ENV, name, join(default, ",")))
+    isempty(raw) && return Float64[]
+    return parse.(Float64, strip.(split(raw, ",")))
+end
+
 function co2_get_env_bool(name::String, default::Bool)
     val = lowercase(get(ENV, name, string(default)))
     return val in ("1", "true", "yes", "y")
@@ -189,6 +195,13 @@ function co2_case_options(;
         cpr_update_interval_partial = nothing,
         cpr_partial_update = nothing,
         in_memory_reports = nothing,
+        production_output_mode::Bool = false,
+        production_summary_dir = nothing,
+        production_retain_years = [50.0, 1000.0],
+        production_rolling_checkpoints::Int = 2,
+        production_case_key::AbstractString = "",
+        production_campaign_manifest_sha256::AbstractString = "",
+        production_require_hysteresis_history = nothing,
         well_volume_fraction = nothing,
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
@@ -237,6 +250,9 @@ function co2_case_options(;
         error("CPR_PARTIAL_UPDATE must be true, false, or omitted for automatic selection.")
     end
     in_memory_reports = something(in_memory_reports, defaults.in_memory_reports)
+    production_retain_years = Float64.(production_retain_years)
+    production_campaign_manifest_sha256 =
+        lowercase(String(production_campaign_manifest_sha256))
     well_volume_fraction = something(well_volume_fraction, defaults.well_volume_fraction)
     disable_hysteresis = something(disable_hysteresis, defaults.disable_hysteresis)
     hysteresis_s_min = isnothing(hysteresis_s_min) ? defaults.hysteresis_s_min : hysteresis_s_min
@@ -264,6 +280,37 @@ function co2_case_options(;
     timestep_max_increase >= 1 || error("TIMESTEP_MAX_INCREASE must be at least 1.")
     dr_max > 0 || error("DR_MAX must be positive or Inf.")
     in_memory_reports >= 1 || error("IN_MEMORY_REPORTS must be at least 1.")
+    if production_output_mode
+        in_memory_reports == 1 ||
+            error("PRODUCTION_OUTPUT_MODE requires IN_MEMORY_REPORTS=1.")
+        load_all_states_after_sim &&
+            error(
+                "PRODUCTION_OUTPUT_MODE requires " *
+                "LOAD_STATES_AFTER_SIM=false."
+            )
+        load_all_reports_after_sim &&
+            error(
+                "PRODUCTION_OUTPUT_MODE requires " *
+                "LOAD_REPORTS_AFTER_SIM=false."
+            )
+        production_rolling_checkpoints >= 2 ||
+            error(
+                "PRODUCTION_ROLLING_CHECKPOINTS must be at least 2."
+            )
+        isempty(production_retain_years) &&
+            error("PRODUCTION_RETAIN_YEARS may not be empty.")
+        all(>=(0.0), production_retain_years) ||
+            error("PRODUCTION_RETAIN_YEARS must be non-negative.")
+        if !isempty(production_campaign_manifest_sha256)
+            occursin(
+                r"^[0-9a-f]{64}$",
+                production_campaign_manifest_sha256
+            ) || error(
+                "PRODUCTION_CAMPAIGN_MANIFEST_SHA256 must be 64 " *
+                "lowercase hexadecimal characters."
+            )
+        end
+    end
     isfinite(well_volume_fraction) && well_volume_fraction > 0 ||
         error("WELL_VOLUME_FRACTION must be finite and positive.")
 
@@ -300,6 +347,15 @@ function co2_case_options(;
         cpr_update_interval_partial = cpr_update_interval_partial,
         cpr_partial_update = cpr_partial_update,
         in_memory_reports = in_memory_reports,
+        production_output_mode = production_output_mode,
+        production_summary_dir = production_summary_dir,
+        production_retain_years = production_retain_years,
+        production_rolling_checkpoints = production_rolling_checkpoints,
+        production_case_key = String(production_case_key),
+        production_campaign_manifest_sha256 =
+            production_campaign_manifest_sha256,
+        production_require_hysteresis_history =
+            production_require_hysteresis_history,
         well_volume_fraction = well_volume_fraction,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
@@ -358,6 +414,26 @@ function co2_print_case_options(opts; stage::AbstractString)
         automatic = isnothing(opts.cpr_partial_update) ? " (automatic)" : ""
         println("cpr_partial_update = ", effective_partial_update, automatic)
         println("in_memory_reports = ", opts.in_memory_reports)
+        println("production_output_mode = ", opts.production_output_mode)
+        if opts.production_output_mode
+            println(
+                "production_summary_dir = ",
+                opts.production_summary_dir
+            )
+            println(
+                "production_retain_years = ",
+                join(opts.production_retain_years, ",")
+            )
+            println(
+                "production_rolling_checkpoints = ",
+                opts.production_rolling_checkpoints
+            )
+            println("production_case_key = ", opts.production_case_key)
+            println(
+                "production_campaign_manifest_sha256 = ",
+                opts.production_campaign_manifest_sha256
+            )
+        end
         println("well_volume_fraction = ", opts.well_volume_fraction)
         println("report_gas_masses = ", opts.report_gas_masses)
         println("report_co2_concentration = ", opts.report_co2_concentration)
@@ -403,6 +479,13 @@ function run_co2_case(;
         cpr_update_interval_partial = nothing,
         cpr_partial_update = nothing,
         in_memory_reports = nothing,
+        production_output_mode::Bool = false,
+        production_summary_dir = nothing,
+        production_retain_years = [50.0, 1000.0],
+        production_rolling_checkpoints::Int = 2,
+        production_case_key::AbstractString = "",
+        production_campaign_manifest_sha256::AbstractString = "",
+        production_require_hysteresis_history = nothing,
         well_volume_fraction = nothing,
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
@@ -448,6 +531,15 @@ function run_co2_case(;
         cpr_update_interval_partial = cpr_update_interval_partial,
         cpr_partial_update = cpr_partial_update,
         in_memory_reports = in_memory_reports,
+        production_output_mode = production_output_mode,
+        production_summary_dir = production_summary_dir,
+        production_retain_years = production_retain_years,
+        production_rolling_checkpoints = production_rolling_checkpoints,
+        production_case_key = production_case_key,
+        production_campaign_manifest_sha256 =
+            production_campaign_manifest_sha256,
+        production_require_hysteresis_history =
+            production_require_hysteresis_history,
         well_volume_fraction = well_volume_fraction,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
@@ -493,6 +585,16 @@ function run_co2_case(;
         dr_max = opts.dr_max,
         linear_solver_arg = co2_cpr_linear_solver_arg(opts),
         in_memory_reports = opts.in_memory_reports,
+        production_output_mode = opts.production_output_mode,
+        production_summary_dir = opts.production_summary_dir,
+        production_retain_years = opts.production_retain_years,
+        production_rolling_checkpoints =
+            opts.production_rolling_checkpoints,
+        production_case_key = opts.production_case_key,
+        production_campaign_manifest_sha256 =
+            opts.production_campaign_manifest_sha256,
+        production_require_hysteresis_history =
+            opts.production_require_hysteresis_history,
         well_volume_fraction = opts.well_volume_fraction,
         disable_hysteresis = opts.disable_hysteresis,
         hysteresis_s_min = opts.hysteresis_s_min,
@@ -705,16 +807,40 @@ function run_co2_case_from_env(; default_case_name::AbstractString, allowed_case
         gas_diffusion_coeff = co2_get_env_float("GAS_DIFFUSION_COEFF", defaults.gas_diffusion_coeff)
     )
 
+    production_kwarg = (
+        production_output_mode =
+            co2_get_env_bool("PRODUCTION_OUTPUT_MODE", false),
+        production_summary_dir =
+            co2_get_env_optional_str("PRODUCTION_SUMMARY_DIR"),
+        production_retain_years =
+            co2_get_env_float_list("PRODUCTION_RETAIN_YEARS", [50.0, 1000.0]),
+        production_rolling_checkpoints =
+            co2_get_env_int("PRODUCTION_ROLLING_CHECKPOINTS", 2),
+        production_case_key = co2_get_env_str(
+            "PRODUCTION_CASE_KEY",
+            co2_get_env_str("CASE_TAG", "")
+        ),
+        production_campaign_manifest_sha256 = co2_get_env_str(
+            "PRODUCTION_CAMPAIGN_MANIFEST_SHA256",
+            ""
+        ),
+        production_require_hysteresis_history =
+            co2_get_env_optional_bool(
+                "PRODUCTION_REQUIRE_HYSTERESIS_HISTORY"
+            )
+    )
+    simulate_kwarg = merge(common_kwarg, production_kwarg)
+
     if run_mode in ("simulate", "sim")
-        return run_co2_case(; common_kwarg...)
+        return run_co2_case(; simulate_kwarg...)
     elseif run_mode in ("vtu", "postprocess", "export")
         return export_co2_case_vtu(; common_kwarg...)
     elseif run_mode == "both"
-        simulate_kwarg = merge(common_kwarg, (
+        simulate_only_kwarg = merge(simulate_kwarg, (
             write_incon_vtu = false,
             write_state_vtu = false
         ))
-        run_co2_case(; simulate_kwarg...)
+        run_co2_case(; simulate_only_kwarg...)
         return export_co2_case_vtu(; common_kwarg...)
     else
         error("Unknown RUN_MODE = $run_mode. Valid options: simulate, vtu, both")
