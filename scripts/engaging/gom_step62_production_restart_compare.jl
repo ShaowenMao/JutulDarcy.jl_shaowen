@@ -1,11 +1,12 @@
 using JutulDarcy
 import Jutul
 
-length(ARGS) == 4 || error(
+function main(args)
+length(args) == 4 || error(
     "Usage: gom_step62_production_restart_compare.jl " *
     "RESUMED_RESTART CONTROL_RESTART STEP OUTPUT"
 )
-resumed_dir, control_dir, step_text, output_path = ARGS
+resumed_dir, control_dir, step_text, output_path = args
 step = parse(Int, step_text)
 
 resumed, _ = Jutul.read_restart(
@@ -72,3 +73,7 @@ open(output_path, "w") do io
     println(io, "maximum_relative_difference=$maximum_relative_difference")
 end
 println("PRODUCTION_RESTART_EQUIVALENCE_PASS output=$output_path")
+return nothing
+end
+
+main(ARGS)
