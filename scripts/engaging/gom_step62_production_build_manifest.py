@@ -75,6 +75,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--campaign-id", required=True)
     parser.add_argument("--archive-root", required=True)
     parser.add_argument("--jutuldarcy-commit", required=True)
+    parser.add_argument("--jutul-manifest-sha256", required=True)
     parser.add_argument("--mrst-prepare-commit", required=True)
     parser.add_argument("--source-input-manifest-sha256", required=True)
     parser.add_argument("--output", required=True)
@@ -101,6 +102,10 @@ def main() -> int:
     source_sha256 = require_digest(
         arguments.source_input_manifest_sha256,
         "source input manifest SHA-256",
+    )
+    jutul_manifest_sha256 = require_digest(
+        arguments.jutul_manifest_sha256,
+        "Jutul Manifest.toml SHA-256",
     )
 
     with derived_path.open(newline="", encoding="utf-8-sig") as handle:
@@ -161,6 +166,8 @@ def main() -> int:
         f"source_input_manifest_sha256 = {toml_string(source_sha256)}",
         f"mrst_prepare_commit = {toml_string(mrst_prepare_commit)}",
         f"jutuldarcy_commit = {toml_string(jutuldarcy_commit)}",
+        f"jutul_manifest_sha256 = "
+        f"{toml_string(jutul_manifest_sha256)}",
         "",
         "[common]",
         f"path = {toml_string(str(common_path))}",

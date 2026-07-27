@@ -25,6 +25,7 @@ gom_production_resolve_task() {
     export GOM_PRODUCTION_SOURCE_INPUT_MANIFEST_SHA256
     export GOM_PRODUCTION_MRST_PREPARE_COMMIT
     export GOM_PRODUCTION_JUTULDARCY_COMMIT
+    export GOM_PRODUCTION_JUTUL_MANIFEST_SHA256
     export GOM_PRODUCTION_CASE_COUNT
     export GOM_PRODUCTION_TASK
     export GOM_PRODUCTION_CASE_KEY
@@ -43,6 +44,21 @@ gom_production_resolve_task() {
     test "$observed_commit" = "$GOM_PRODUCTION_JUTULDARCY_COMMIT" || {
         echo "JutulDarcy commit mismatch: expected " \
             "$GOM_PRODUCTION_JUTULDARCY_COMMIT, observed $observed_commit" >&2
+        return 1
+    }
+    test -s "$JUTULDARCY_COMBINED_REPO/Manifest.toml" || {
+        echo "Pinned Jutul Manifest.toml is missing." >&2
+        return 1
+    }
+    observed_manifest_sha256="$(
+        sha256sum "$JUTULDARCY_COMBINED_REPO/Manifest.toml" |
+            awk '{print $1}'
+    )"
+    test "$observed_manifest_sha256" = \
+        "$GOM_PRODUCTION_JUTUL_MANIFEST_SHA256" || {
+        echo "Jutul Manifest.toml SHA-256 mismatch: expected " \
+            "$GOM_PRODUCTION_JUTUL_MANIFEST_SHA256, observed " \
+            "$observed_manifest_sha256" >&2
         return 1
     }
 }
@@ -116,6 +132,7 @@ gom_production_write_metadata() {
         "source_input_manifest_sha256=$GOM_PRODUCTION_SOURCE_INPUT_MANIFEST_SHA256" \
         "mrst_prepare_commit=$GOM_PRODUCTION_MRST_PREPARE_COMMIT" \
         "jutuldarcy_commit=$GOM_PRODUCTION_JUTULDARCY_COMMIT" \
+        "jutul_manifest_sha256=$GOM_PRODUCTION_JUTUL_MANIFEST_SHA256" \
         "case_key=$GOM_PRODUCTION_CASE_KEY" \
         "geology_id=$GOM_PRODUCTION_GEOLOGY_ID" \
         "geology_hash=$GOM_PRODUCTION_GEOLOGY_HASH" \

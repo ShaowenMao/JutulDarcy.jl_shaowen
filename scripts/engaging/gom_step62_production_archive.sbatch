@@ -175,6 +175,7 @@ printf '%s\n' \
     "source_input_manifest_sha256=$GOM_PRODUCTION_SOURCE_INPUT_MANIFEST_SHA256" \
     "mrst_prepare_commit=$GOM_PRODUCTION_MRST_PREPARE_COMMIT" \
     "jutuldarcy_commit=$GOM_PRODUCTION_JUTULDARCY_COMMIT" \
+    "jutul_manifest_sha256=$GOM_PRODUCTION_JUTUL_MANIFEST_SHA256" \
     "case_count=7" \
     "smoke_restart_binaries_archived=false" \
     "check_job_id=$GOM_PRODUCTION_CHECK_JOB_ID" \

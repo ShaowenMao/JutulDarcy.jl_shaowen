@@ -59,6 +59,7 @@ archive_root = "/orcd/data/juanes/001/shaowen/gom_grid"
 source_input_manifest_sha256 = "64-lowercase-hex-characters"
 mrst_prepare_commit = "40-lowercase-hex-characters"
 jutuldarcy_commit = "40-lowercase-hex-characters"
+jutul_manifest_sha256 = "64-lowercase-hex-characters"
 
 [common]
 path = "/absolute/immutable/path/gom_step62_87slice_7case_common.mat"
@@ -88,6 +89,7 @@ python3.12 scripts/engaging/gom_step62_production_build_manifest.py \
   --campaign-id step62_production_output_pilot_7case_v1 \
   --archive-root /orcd/data/juanes/001/shaowen/gom_grid \
   --jutuldarcy-commit "$jutuldarcy_commit" \
+  --jutul-manifest-sha256 "$jutul_manifest_sha256" \
   --mrst-prepare-commit "$mrst_prepare_commit" \
   --source-input-manifest-sha256 "$source_manifest_sha256" \
   --output /absolute/path/campaign.toml
@@ -102,6 +104,7 @@ The resolver rejects:
 - any MAT whose SHA-256 differs from the manifest; and
 - any MAT whose byte count differs from the manifest;
 - a JutulDarcy checkout whose commit differs from the manifest; and
+- a missing or altered Jutul `Manifest.toml`; and
 - an archive root outside
   `/orcd/data/juanes/001/shaowen/gom_grid`.
 

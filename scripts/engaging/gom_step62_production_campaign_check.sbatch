@@ -41,6 +41,12 @@ resolved_case="$(
 eval "$resolved_case"
 observed_commit="$(git -C "$JUTULDARCY_COMBINED_REPO" rev-parse HEAD)"
 test "$observed_commit" = "$GOM_PRODUCTION_JUTULDARCY_COMMIT"
+test -s "$JUTULDARCY_COMBINED_REPO/Manifest.toml"
+observed_manifest_sha256="$(
+    sha256sum "$JUTULDARCY_COMBINED_REPO/Manifest.toml" | awk '{print $1}'
+)"
+test "$observed_manifest_sha256" = \
+    "$GOM_PRODUCTION_JUTUL_MANIFEST_SHA256"
 
 cp -- "$GOM_PRODUCTION_MANIFEST" "$result_dir/campaign.toml"
 cp -- "$GOM_PRODUCTION_MANIFEST.sha256" \
@@ -65,5 +71,6 @@ printf '%s\n' \
     "source_input_manifest_sha256=$GOM_PRODUCTION_SOURCE_INPUT_MANIFEST_SHA256" \
     "mrst_prepare_commit=$GOM_PRODUCTION_MRST_PREPARE_COMMIT" \
     "jutuldarcy_commit=$GOM_PRODUCTION_JUTULDARCY_COMMIT" \
+    "jutul_manifest_sha256=$GOM_PRODUCTION_JUTUL_MANIFEST_SHA256" \
     > "$result_dir/campaign_check_summary.txt"
 printf 'PASS\n' > "$result_dir/PASS"

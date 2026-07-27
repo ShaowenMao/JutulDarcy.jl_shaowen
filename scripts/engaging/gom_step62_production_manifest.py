@@ -137,6 +137,7 @@ def load_and_validate(manifest_name: str, *, verify_files: bool = True) -> dict[
     )
     mrst_prepare_commit = require_git_commit(data, "mrst_prepare_commit")
     jutuldarcy_commit = require_git_commit(data, "jutuldarcy_commit")
+    jutul_manifest_sha256 = require_sha256(data, "jutul_manifest_sha256")
 
     archive_root = PurePosixPath(require_string(data, "archive_root"))
     if not archive_root.is_absolute():
@@ -288,6 +289,7 @@ def load_and_validate(manifest_name: str, *, verify_files: bool = True) -> dict[
         "source_input_manifest_sha256": source_input_manifest_sha256,
         "mrst_prepare_commit": mrst_prepare_commit,
         "jutuldarcy_commit": jutuldarcy_commit,
+        "jutul_manifest_sha256": jutul_manifest_sha256,
         "archive_root": str(archive_root),
         "common_path": str(common_path),
         "common_sha256": common_sha256,
@@ -313,6 +315,9 @@ def shell_assignments(manifest: dict[str, Any], task: int) -> str:
         ),
         "GOM_PRODUCTION_MRST_PREPARE_COMMIT": manifest["mrst_prepare_commit"],
         "GOM_PRODUCTION_JUTULDARCY_COMMIT": manifest["jutuldarcy_commit"],
+        "GOM_PRODUCTION_JUTUL_MANIFEST_SHA256": (
+            manifest["jutul_manifest_sha256"]
+        ),
         "GOM_PRODUCTION_CASE_COUNT": len(manifest["cases"]),
         "GOM_PRODUCTION_TASK": task,
         "GOM_PRODUCTION_CASE_KEY": case["case_key"],
