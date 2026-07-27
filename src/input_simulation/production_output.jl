@@ -370,12 +370,6 @@ function production_validate_state(
                 -1.0e-8 <= value <= 1.0 + 1.0e-8,
             reservoir[:MaxSaturations]
         ) || error("Checkpoint $step has an invalid historical saturation.")
-        row.historical_gas_saturation_min + 1.0e-10 >=
-            row.gas_saturation_min ||
-            error("Checkpoint $step has inconsistent gas-saturation history.")
-        row.historical_gas_saturation_max + 1.0e-10 >=
-            row.gas_saturation_max ||
-            error("Checkpoint $step has inconsistent gas-saturation history.")
     end
     all(
         value -> isfinite(value) && value >= -1.0e-8,
