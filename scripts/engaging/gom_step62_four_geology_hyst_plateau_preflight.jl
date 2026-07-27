@@ -20,6 +20,15 @@ const EXPECTED_DRAINAGE_REGIONS = 527
 const EXPECTED_TOTAL_SGOF_TABLES = 1_054
 const EXPECTED_HYSTERESIS_S_MIN = 0.05
 const EXPECTED_PC_ENTRY_SG_MAX = 1.0e-4
+const EXPECTED_NONPREDICT_PC_CONTACT_ANGLE_DEG = parse(
+    Float64,
+    get(ENV, "EXPECTED_NONPREDICT_PC_CONTACT_ANGLE_DEG", "NaN")
+)
+const EXPECTED_NONPREDICT_PC_ENTRY_PRESSURES_PA = [
+    19329.0593991,
+    2086.23681374,
+    642.426217335
+]
 
 scalar_value(x) = x isa AbstractArray ? only(vec(x)) : x
 
@@ -96,6 +105,28 @@ nc = Jutul.number_of_cells(reservoir_model.domain)
 @assert length(sgof) == EXPECTED_TOTAL_SGOF_TABLES
 @assert all(isfinite, transmissibility)
 @assert all(>(0.0), transmissibility)
+
+if isfinite(EXPECTED_NONPREDICT_PC_CONTACT_ANGLE_DEG)
+    @assert EXPECTED_NONPREDICT_PC_CONTACT_ANGLE_DEG == 30
+    for (offset, expected_pc) in enumerate(
+        EXPECTED_NONPREDICT_PC_ENTRY_PRESSURES_PA
+    )
+        region = 2 + offset
+        table = sgof[region]
+        entry_index = findfirst(
+            x -> isapprox(x, 0.001; rtol = 0, atol = 10*eps(0.001)),
+            table[:, 1]
+        )
+        isnothing(entry_index) &&
+            error("Base non-PREDICT SGOF region $region has no Sg=0.001 row.")
+        @assert isapprox(
+            table[entry_index, 4],
+            expected_pc;
+            rtol = 1.0e-10,
+            atol = 1.0e-6
+        )
+    end
+end
 
 @assert fault_summary["base_regions"] == EXPECTED_BASE_REGIONS
 @assert fault_summary["fault_regions"] == EXPECTED_FAULT_REGIONS
@@ -183,6 +214,18 @@ open(summary_path, "w") do io
     println(io, "pc_plateau_adjusted_tables=$(pc_summary["adjusted_tables"])")
     println(io, "pc_plateau_skipped_tables=$(pc_summary["skipped_tables"])")
     println(io, "pc_plateau_sg_max=$EXPECTED_PC_ENTRY_SG_MAX")
+    if isfinite(EXPECTED_NONPREDICT_PC_CONTACT_ANGLE_DEG)
+        println(
+            io,
+            "nonpredict_pc_reference_contact_angle_deg=" *
+            string(EXPECTED_NONPREDICT_PC_CONTACT_ANGLE_DEG)
+        )
+        println(
+            io,
+            "nonpredict_pc_entry_pressures_Pa=" *
+            join(EXPECTED_NONPREDICT_PC_ENTRY_PRESSURES_PA, ",")
+        )
+    end
     println(io, "mrst_transmissibility_present=false")
     println(io, "jutul_transmissibility=true")
     println(io, "transmissibility_min=$(minimum(transmissibility))")
