@@ -30,6 +30,21 @@ const EXPECTED_NONPREDICT_PC_ENTRY_PRESSURES_PA = [
     2086.23681374,
     642.426217335
 ]
+const EXPECTED_QOI_ATOMIC_REGIONS = 55
+const EXPECTED_QOI_REPORTING_REGIONS = 69
+const EXPECTED_QOI_PRIMARY_LABEL_SHA256 =
+    "af168e103f8bbd2579fc2b15adfb92a8f23a8415ecb8a9929a965d93427a882d"
+const REQUIRED_QOI_INTERFACES = Set([
+    "storage_to_fault",
+    "storage_to_al",
+    "storage_to_ar",
+    "fault_to_al",
+    "fault_to_ar",
+    "predict_to_nonpredict_fault",
+    "fault_to_nonfault",
+    "complete_seal_to_overburden",
+    "fault_to_overburden"
+])
 
 scalar_value(x) = x isa AbstractArray ? only(vec(x)) : x
 
@@ -141,6 +156,31 @@ all(isfinite, transmissibility) ||
     error("Jutul transmissibility contains non-finite values.")
 all(>(0.0), transmissibility) ||
     error("Jutul transmissibility is not strictly positive.")
+
+qoi = JutulDarcy.production_qoi_compile_regions(mrst)
+length(qoi.atomic_code) == EXPECTED_CELLS ||
+    error("QoI atomic cell labels have the wrong length.")
+length(qoi.atomic_regions) == EXPECTED_QOI_ATOMIC_REGIONS ||
+    error("Unexpected QoI atomic-region count.")
+length(qoi.regions) == EXPECTED_QOI_REPORTING_REGIONS ||
+    error("Unexpected QoI reporting-region count.")
+qoi.primary_label_sha256 == EXPECTED_QOI_PRIMARY_LABEL_SHA256 ||
+    error("QoI primary UCID label digest is not the validated Step62 digest.")
+qoi_neighbors = JutulDarcy.production_qoi_neighbors(
+    reservoir_model,
+    EXPECTED_CELLS
+)
+qoi_interfaces = JutulDarcy.production_qoi_build_interfaces(
+    qoi.atomic_code,
+    qoi.atomic_regions,
+    qoi_neighbors,
+    qoi.special_codes
+)
+qoi_interface_ids = Set(interface.id for interface in qoi_interfaces)
+issubset(REQUIRED_QOI_INTERFACES, qoi_interface_ids) ||
+    error("One or more required QoI containment interfaces is missing.")
+all(!isempty(interface.faces) for interface in qoi_interfaces) ||
+    error("A compiled QoI interface contains no simulator faces.")
 
 for (offset, expected_pc) in enumerate(
         EXPECTED_NONPREDICT_PC_ENTRY_PRESSURES_PA
@@ -288,6 +328,11 @@ open(summary_path, "w") do io
     println(io, "mrst_transmissibility_present=false")
     println(io, "jutul_transmissibility=true")
     println(io, "transmissibility_min=$(minimum(transmissibility))")
+    println(io, "qoi_schema=gom_qoi_semantics_v1")
+    println(io, "qoi_primary_label_sha256=$(qoi.primary_label_sha256)")
+    println(io, "qoi_atomic_regions=$(length(qoi.atomic_regions))")
+    println(io, "qoi_reporting_regions=$(length(qoi.regions))")
+    println(io, "qoi_interfaces=$(length(qoi_interfaces))")
     println(io, "porosity_min=$(minimum(poro))")
     println(io, "porosity_max=$(maximum(poro))")
     println(

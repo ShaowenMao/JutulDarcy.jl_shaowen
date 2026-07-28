@@ -72,4 +72,10 @@ grep -Fxq 'pc_plateau_skipped_tables=0' "$summary"
 grep -Fxq 'nonpredict_pc_reference_contact_angle_deg=30.0' "$summary"
 grep -Fxq 'mrst_transmissibility_present=false' "$summary"
 grep -Fxq 'jutul_transmissibility=true' "$summary"
+grep -Fxq 'qoi_schema=gom_qoi_semantics_v1' "$summary"
+grep -Fxq \
+    'qoi_primary_label_sha256=af168e103f8bbd2579fc2b15adfb92a8f23a8415ecb8a9929a965d93427a882d' \
+    "$summary"
+grep -Fxq 'qoi_atomic_regions=55' "$summary"
+grep -Fxq 'qoi_reporting_regions=69' "$summary"
 printf 'PASS\n' > "$result_dir/PASS"

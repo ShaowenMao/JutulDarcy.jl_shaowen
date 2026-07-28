@@ -113,7 +113,7 @@ length(consolidated_lines) == EXPECTED_STEPS + 1 ||
     error("Consolidated report_steps.tsv must have 211 lines.")
 
 rows = Vector{Dict{SubString{String}, SubString{String}}}()
-previous_time = -Inf
+global previous_time = -Inf
 for step in 1:EXPECTED_STEPS
     row, lines = read_named_row(row_paths[step])
     parse(Int, row["schema_version"]) == 1 ||
@@ -128,7 +128,7 @@ for step in 1:EXPECTED_STEPS
     time_seconds = parse(Float64, row["time_seconds"])
     isfinite(time_seconds) && time_seconds > previous_time ||
         error("Summary time is invalid or non-increasing at step $step.")
-    previous_time = time_seconds
+    global previous_time = time_seconds
     for name in (
             "pressure_min_pa",
             "pressure_max_pa",
