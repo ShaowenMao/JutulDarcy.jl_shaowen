@@ -155,6 +155,23 @@ During a full run, scratch holds the requested milestone checkpoint plus the
 two newest restart-safe checkpoints. Every closed report step writes one
 small, atomic TSV summary row before obsolete checkpoints are removed.
 
+## Recovering an interrupted immutable campaign
+
+Use `gom_step62_production_recovery_submit.sh` only when an existing campaign
+has complete or restart-safe full-run outputs but its downstream validation,
+VTU, or archive stages did not finish. The recovery workflow preserves the
+manifest-pinned simulation runtime, resumes only incomplete cases in place,
+uses a separately checksum-pinned corrected validator, and writes recovery
+metadata without replacing the original Slurm logs or exit status.
+Submission is campaign-locked against duplicate active DAGs, and its receipt
+is copied to durable campaign storage before the submission is considered
+complete.
+
+For the r4 seven-case pilot, six cases are validation-only. Task 5 resumes
+from its latest explicitly selected valid checkpoint. VTU and archive stages
+remain dependency-gated until all seven case directories contain verified
+restart hashes, production summaries, and PASS markers.
+
 After successful report step 210, each case contains:
 
 - exactly 210 per-step summary rows;
