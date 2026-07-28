@@ -40,6 +40,10 @@ end
     include("production_qoi.jl")
 end
 
+@testitem "CO2 case driver options" begin
+    include("co2_case_driver.jl")
+end
+
 @testitem "PArray solve" begin
     include("parray.jl")
 end

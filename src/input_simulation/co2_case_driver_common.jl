@@ -255,7 +255,7 @@ function co2_case_options(;
     production_campaign_manifest_sha256 =
         lowercase(String(production_campaign_manifest_sha256))
     production_qoi_mode =
-        production_qoi_normalize_mode(production_qoi_mode)
+        JutulDarcy.production_qoi_normalize_mode(production_qoi_mode)
     well_volume_fraction = something(well_volume_fraction, defaults.well_volume_fraction)
     disable_hysteresis = something(disable_hysteresis, defaults.disable_hysteresis)
     hysteresis_s_min = isnothing(hysteresis_s_min) ? defaults.hysteresis_s_min : hysteresis_s_min
