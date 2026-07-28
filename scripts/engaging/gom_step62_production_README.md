@@ -142,6 +142,12 @@ campaign check
 Each array is capped at two concurrent tasks. A submission receipt containing
 all job IDs is written below `gom_grid/submissions`.
 
+For a deliberately selected subset, override each array at submission with
+the same explicit task list and export that list to the archive job, for
+example `--array=5,6,7%2` and `GOM_PRODUCTION_TASKS=5:6:7`. The archive then
+validates and promotes only those cases while preserving their canonical
+manifest task identities.
+
 ## Production-output contract
 
 During a full run, scratch holds the requested milestone checkpoint plus the

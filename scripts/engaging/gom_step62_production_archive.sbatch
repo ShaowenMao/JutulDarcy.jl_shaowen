@@ -44,6 +44,19 @@ record_exit_status() {
 trap record_exit_status EXIT
 
 command -v "$production_python" >/dev/null
+task_list="${GOM_PRODUCTION_TASKS:-1:2:3:4:5:6:7}"
+IFS=':' read -r -a archive_tasks <<< "$task_list"
+test "${#archive_tasks[@]}" -gt 0
+declare -A observed_tasks=()
+for task in "${archive_tasks[@]}"; do
+    [[ "$task" =~ ^[1-7]$ ]] ||
+        { echo "GOM_PRODUCTION_TASKS contains invalid task '$task'." >&2; exit 1; }
+    test -z "${observed_tasks[$task]:-}" ||
+        { echo "GOM_PRODUCTION_TASKS contains duplicate task '$task'." >&2; exit 1; }
+    observed_tasks[$task]=1
+done
+case_count="${#archive_tasks[@]}"
+
 resolved_case="$(
     "$production_python" "$resolver" --manifest "$GOM_PRODUCTION_MANIFEST" \
         resolve --task 1 --format shell
@@ -87,7 +100,7 @@ copy_log_if_present \
 copy_log_if_present \
     "$gom_root/logs/gom_s62_prod_check-${GOM_PRODUCTION_CHECK_JOB_ID}.err"
 
-for task in $(seq 1 7); do
+for task in "${archive_tasks[@]}"; do
     resolved_case="$(
         "$production_python" "$resolver" --manifest "$GOM_PRODUCTION_MANIFEST" \
             resolve --task "$task" --format shell
@@ -176,7 +189,8 @@ printf '%s\n' \
     "mrst_prepare_commit=$GOM_PRODUCTION_MRST_PREPARE_COMMIT" \
     "jutuldarcy_commit=$GOM_PRODUCTION_JUTULDARCY_COMMIT" \
     "jutul_manifest_sha256=$GOM_PRODUCTION_JUTUL_MANIFEST_SHA256" \
-    "case_count=7" \
+    "case_count=$case_count" \
+    "case_tasks=$task_list" \
     "smoke_restart_binaries_archived=false" \
     "check_job_id=$GOM_PRODUCTION_CHECK_JOB_ID" \
     "preflight_job_id=$GOM_PRODUCTION_PREFLIGHT_JOB_ID" \
@@ -201,7 +215,8 @@ printf '%s\n' \
     "status=pass" \
     "campaign_id=$campaign_id" \
     "campaign_manifest_sha256=$manifest_sha256" \
-    "case_count=7" \
+    "case_count=$case_count" \
+    "case_tasks=$task_list" \
     "archive_path=$final" \
     "atomic_staging_parent=$incoming_parent" \
     "all_staged_archive_sha256_verified_before_atomic_promote=true" \

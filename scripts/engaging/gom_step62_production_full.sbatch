@@ -89,6 +89,17 @@ julia --startup-file=no --project=. "$final_check" \
     sha256sum restart/production_output/report_steps.tsv \
         restart/production_output/PRODUCTION_OUTPUT_COMPLETE.tsv \
         > PRODUCTION_SUMMARY_SHA256.txt
+    if test "${PRODUCTION_QOI_MODE:-off}" != "off"; then
+        sha256sum \
+            restart/production_output/qoi_region_manifest.tsv \
+            restart/production_output/qoi_interface_manifest.tsv \
+            restart/production_output/leakage_global_steps.tsv \
+            restart/production_output/regional_co2_inventory_steps.tsv \
+            restart/production_output/interface_flux_steps.tsv \
+            restart/production_output/leakage_case_summary.tsv \
+            restart/production_output/QOI_OUTPUT_COMPLETE.tsv \
+            >> PRODUCTION_SUMMARY_SHA256.txt
+    fi
     sha256sum --check RETAINED_RESTART_SHA256.txt
     sha256sum --check PRODUCTION_SUMMARY_SHA256.txt
 )
@@ -118,6 +129,7 @@ printf '%s\n' \
     "nonpredict_pc_reference_contact_angle_deg=30" \
     "transmissibility_source=JutulDarcy_grid_and_rock" \
     "production_output_mode=true" \
+    "production_qoi_mode=${PRODUCTION_QOI_MODE:-off}" \
     "result_dir=$case_dir" \
     > "$case_dir/production_summary.txt"
 printf 'PASS\n' > "$case_dir/PASS"
