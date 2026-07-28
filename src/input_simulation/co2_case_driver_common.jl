@@ -202,6 +202,7 @@ function co2_case_options(;
         production_case_key::AbstractString = "",
         production_campaign_manifest_sha256::AbstractString = "",
         production_require_hysteresis_history = nothing,
+        production_qoi_mode = "off",
         well_volume_fraction = nothing,
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
@@ -253,6 +254,8 @@ function co2_case_options(;
     production_retain_years = Float64.(production_retain_years)
     production_campaign_manifest_sha256 =
         lowercase(String(production_campaign_manifest_sha256))
+    production_qoi_mode =
+        production_qoi_normalize_mode(production_qoi_mode)
     well_volume_fraction = something(well_volume_fraction, defaults.well_volume_fraction)
     disable_hysteresis = something(disable_hysteresis, defaults.disable_hysteresis)
     hysteresis_s_min = isnothing(hysteresis_s_min) ? defaults.hysteresis_s_min : hysteresis_s_min
@@ -310,6 +313,11 @@ function co2_case_options(;
                 "lowercase hexadecimal characters."
             )
         end
+    elseif production_qoi_mode != "off"
+        error(
+            "PRODUCTION_QOI_MODE=$production_qoi_mode requires " *
+            "PRODUCTION_OUTPUT_MODE=true."
+        )
     end
     isfinite(well_volume_fraction) && well_volume_fraction > 0 ||
         error("WELL_VOLUME_FRACTION must be finite and positive.")
@@ -356,6 +364,7 @@ function co2_case_options(;
             production_campaign_manifest_sha256,
         production_require_hysteresis_history =
             production_require_hysteresis_history,
+        production_qoi_mode = production_qoi_mode,
         well_volume_fraction = well_volume_fraction,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
@@ -415,6 +424,7 @@ function co2_print_case_options(opts; stage::AbstractString)
         println("cpr_partial_update = ", effective_partial_update, automatic)
         println("in_memory_reports = ", opts.in_memory_reports)
         println("production_output_mode = ", opts.production_output_mode)
+        println("production_qoi_mode = ", opts.production_qoi_mode)
         if opts.production_output_mode
             println(
                 "production_summary_dir = ",
@@ -486,6 +496,7 @@ function run_co2_case(;
         production_case_key::AbstractString = "",
         production_campaign_manifest_sha256::AbstractString = "",
         production_require_hysteresis_history = nothing,
+        production_qoi_mode = "off",
         well_volume_fraction = nothing,
         disable_hysteresis = nothing,
         hysteresis_s_min = nothing,
@@ -540,6 +551,7 @@ function run_co2_case(;
             production_campaign_manifest_sha256,
         production_require_hysteresis_history =
             production_require_hysteresis_history,
+        production_qoi_mode = production_qoi_mode,
         well_volume_fraction = well_volume_fraction,
         disable_hysteresis = disable_hysteresis,
         hysteresis_s_min = hysteresis_s_min,
@@ -595,6 +607,7 @@ function run_co2_case(;
             opts.production_campaign_manifest_sha256,
         production_require_hysteresis_history =
             opts.production_require_hysteresis_history,
+        production_qoi_mode = opts.production_qoi_mode,
         well_volume_fraction = opts.well_volume_fraction,
         disable_hysteresis = opts.disable_hysteresis,
         hysteresis_s_min = opts.hysteresis_s_min,
@@ -827,7 +840,9 @@ function run_co2_case_from_env(; default_case_name::AbstractString, allowed_case
         production_require_hysteresis_history =
             co2_get_env_optional_bool(
                 "PRODUCTION_REQUIRE_HYSTERESIS_HISTORY"
-            )
+            ),
+        production_qoi_mode =
+            co2_get_env_str("PRODUCTION_QOI_MODE", "off")
     )
     simulate_kwarg = merge(common_kwarg, production_kwarg)
 

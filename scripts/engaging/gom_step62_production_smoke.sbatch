@@ -57,6 +57,14 @@ test -s "$restart_dir/jutul_1.jld2"
 test -s "$restart_dir/jutul_2.jld2"
 test "$(find "$summary_dir/rows" -maxdepth 1 -type f \
     -name 'step_*.tsv' | wc -l)" -eq 2
+if test "${PRODUCTION_QOI_MODE:-off}" != "off"; then
+    test -s "$summary_dir/qoi_region_manifest.tsv"
+    test -s "$summary_dir/qoi_interface_manifest.tsv"
+    test "$(find "$summary_dir/qoi/rows" -maxdepth 1 -type f \
+        -name 'step_*.tsv' | wc -l)" -eq 2
+    test -s "$summary_dir/qoi/rows/step_000001.tsv"
+    test -s "$summary_dir/qoi/rows/step_000002.tsv"
+fi
 
 export RESTART_RUN=true
 export STOP_AFTER_REPORT_STEP=3
@@ -80,6 +88,18 @@ test -s "$summary_dir/rows/step_000003.tsv"
 test ! -e "$summary_dir/PRODUCTION_OUTPUT_COMPLETE.tsv"
 test -s "$summary_dir/report_steps.tsv"
 test "$(wc -l < "$summary_dir/report_steps.tsv")" -eq 4
+qoi_validation=disabled
+if test "${PRODUCTION_QOI_MODE:-off}" != "off"; then
+    test "$(find "$summary_dir/qoi/rows" -maxdepth 1 -type f \
+        -name 'step_*.tsv' | wc -l)" -eq 3
+    test -s "$summary_dir/qoi/rows/step_000003.tsv"
+    test -s "$summary_dir/leakage_global_steps.tsv"
+    test -s "$summary_dir/regional_co2_inventory_steps.tsv"
+    test -s "$summary_dir/interface_flux_steps.tsv"
+    test -s "$summary_dir/leakage_case_summary.tsv"
+    test ! -e "$summary_dir/QOI_OUTPUT_COMPLETE.tsv"
+    qoi_validation=pass
+fi
 
 # One established case and one newly added case also receive an independent,
 # uninterrupted three-step control. Array tasks 1 and 5 therefore prove that
@@ -120,5 +140,7 @@ printf '%s\n' \
     "rolling_checkpoints=2,3" \
     "restart_equivalence=$restart_equivalence" \
     "production_output_mode=true" \
+    "production_qoi_mode=${PRODUCTION_QOI_MODE:-off}" \
+    "qoi_validation=$qoi_validation" \
     > "$case_dir/smoke_summary.txt"
 printf 'PASS\n' > "$case_dir/PASS"

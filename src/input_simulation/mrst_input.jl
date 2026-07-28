@@ -350,11 +350,72 @@ function apply_mrst_stratigraphy_data!(assembled, specific)
         )
     end
 
+    # Preserve only the compact, authoritative semantic fields needed by
+    # production QoI accounting.  The full geology-specific block can be
+    # very large and is intentionally not retained in the assembled input.
+    qoi_stratigraphy = Dict{String, Any}("cells" => Int32.(cells))
+    for key in (
+            "side_id",
+            "stratigraphic_unit_id",
+            "grid_unit_id",
+            "facies_id",
+            "source_window_index",
+            "source_layer_index",
+            "is_invariant_layer"
+        )
+        if haskey(stratigraphy, key)
+            values = mrst_get_vec(stratigraphy[key])
+            length(values) == length(cells) || error(
+                "Split-specific stratigraphy $key has $(length(values)) " *
+                "values for $(length(cells)) cells."
+            )
+            all(value -> value isa Real && isfinite(value) &&
+                isinteger(value), values) || error(
+                "Split-specific stratigraphy $key must contain finite integers."
+            )
+            qoi_stratigraphy[key] = Int16.(values)
+        end
+    end
+    for key in ("side_labels", "facies_labels")
+        haskey(stratigraphy, key) &&
+            (qoi_stratigraphy[key] = deepcopy(stratigraphy[key]))
+    end
+    assembled["qoi_stratigraphy"] = qoi_stratigraphy
+
     assembled["stratigraphy_specific_summary"] = Dict{String, Any}(
         "cell_count" => length(cells),
         "applied_before_fault_saturation_processing" => true
     )
     return cells
+end
+
+function preserve_mrst_fault_qoi_metadata!(assembled, fault, cells)
+    qoi_fault = Dict{String, Any}("cells" => Int32.(cells))
+    for key in (
+            "window_index",
+            "slice_index",
+            "slice_position",
+            "saturation_region",
+            "local_saturation_region"
+        )
+        if haskey(fault, key)
+            values = mrst_get_vec(fault[key])
+            length(values) == length(cells) || error(
+                "Split-specific fault $key has $(length(values)) values " *
+                "for $(length(cells)) cells."
+            )
+            all(value -> value isa Real && isfinite(value) &&
+                isinteger(value), values) || error(
+                "Split-specific fault $key must contain finite integers."
+            )
+            qoi_fault[key] = Int32.(values)
+        end
+    end
+    for key in ("window_unit_ids", "window_names")
+        haskey(fault, key) && (qoi_fault[key] = deepcopy(fault[key]))
+    end
+    assembled["qoi_fault"] = qoi_fault
+    return qoi_fault
 end
 
 function restore_mrst_split_fault_tables!(assembled, fault)
@@ -843,6 +904,7 @@ function assemble_mrst_split_case(common, specific;
         "specificFaultCells",
         "Split-specific fault"
     )
+    preserve_mrst_fault_qoi_metadata!(assembled, fault, cells)
 
     haskey(fault, "poro") || error("Split-specific fault block is missing poro.")
     haskey(fault, "perm") || error("Split-specific fault block is missing perm.")
@@ -2920,6 +2982,7 @@ function simulate_mrst_case(fn;
         production_case_key::AbstractString = "",
         production_campaign_manifest_sha256::AbstractString = "",
         production_require_hysteresis_history = nothing,
+        production_qoi_mode = "off",
         nonlinear_relaxation::Bool = false,
         target_its::Real = 8,
         target_ds::Real = Inf,
@@ -2933,6 +2996,11 @@ function simulate_mrst_case(fn;
         fault_pc_entry_sg_max::Real = 1.0e-4,
         explicit_fault_hysteresis_mode = "disable",
         kwarg...
+    )
+    normalized_qoi_mode = production_qoi_normalize_mode(production_qoi_mode)
+    normalized_qoi_mode != "off" && !production_output_mode && error(
+        "PRODUCTION_QOI_MODE=$production_qoi_mode requires " *
+        "production_output_mode=true."
     )
     is_split_input = !isnothing(common_mrst_path) || !isnothing(specific_mrst_path)
     if is_split_input
@@ -3249,7 +3317,10 @@ function simulate_mrst_case(fn;
                 case_key = production_case_key,
                 campaign_manifest_sha256 =
                     production_campaign_manifest_sha256,
-                require_hysteresis_history = require_hysteresis_history
+                require_hysteresis_history = require_hysteresis_history,
+                qoi_mode = production_qoi_mode,
+                mrst_data = mrst_data,
+                sim = sim
             )
         end
 
@@ -3270,6 +3341,18 @@ function simulate_mrst_case(fn;
                     completed_report_steps(states, reports, output_path) ==
                     length(schedule_dt)
             )
+            if production_qoi_active(cfg.policy.qoi)
+                production_consolidate_qoi!(
+                    cfg.policy.qoi;
+                    require_complete =
+                        completed_report_steps(
+                            states,
+                            reports,
+                            output_path
+                        ) == length(schedule_dt),
+                    final_schedule_step = length(schedule_dt)
+                )
+            end
         end
 
         # Calculate mass fractions of dissolved and free gas 

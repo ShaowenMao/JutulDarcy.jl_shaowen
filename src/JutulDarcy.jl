@@ -135,6 +135,7 @@ module JutulDarcy
     using TimerOutputs
     using PrecompileTools
     using Dates
+    import SHA
     using GeoEnergyIO
     # Artifacts
     using Artifacts

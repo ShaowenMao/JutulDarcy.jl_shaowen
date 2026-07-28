@@ -23,6 +23,7 @@ non-PREDICT Pc reference contact angle=30 degrees
 transmissibility=calculated by JutulDarcy
 well_volume_fraction=1e-3
 production_output_mode=true
+production_qoi_mode=off for legacy inputs; required for regenerated QoI inputs
 ```
 
 The full array requests 8 CPUs, 18 GiB per task, the
@@ -159,6 +160,55 @@ The final checker reads both retained states, verifies pressure, saturation,
 `Rs`, and `MaxSaturations`, checks all 210 summary rows against the
 consolidated table, and requires a nonempty final hysteresis scanning state.
 It does not require the deleted intermediate restart files.
+
+### Leakage-risk QoI time series
+
+New split inputs generated with the exact `gom_qoi_semantics_v1` UCID block
+should run with:
+
+```bash
+export PRODUCTION_QOI_MODE=required
+```
+
+`required` fails before simulation if the common input lacks the exact
+primary-UCID partition or the paired specific input lacks Al/Ar
+side/unit/facies labels. `auto` enables the logger only when both blocks are
+present; `off` retains the legacy production-output behavior. The seven
+already-frozen pilot inputs must remain `off` until they are regenerated.
+
+The QoI logger writes one restart-safe bundle per report step and consolidates
+it into:
+
+- `leakage_global_steps.tsv`;
+- `regional_co2_inventory_steps.tsv`;
+- `interface_flux_steps.tsv`;
+- `leakage_case_summary.tsv`;
+- `qoi_region_manifest.tsv`; and
+- `qoi_interface_manifest.tsv`.
+
+The regional partition is UCID-based, exhaustive, and disjoint. It includes
+storage LM2; each of Al1–Al21 and Ar1–Ar21; MM–UM; Younger; all nine fault
+bands (including W1–W6); and the remaining AmphB complete seal. Aggregate
+regions are exact unions of these atoms.
+
+At each report boundary, free-phase CO2 is divided using the active gas
+relative-permeability table's critical gas saturation: gas below that
+threshold is reported as `immobile_free`, and gas above it as `mobile_free`.
+This is an operational mobility classification; it is not labeled
+residually trapped during drainage. Dissolved CO2 uses the black-oil `Rs`,
+shrinkage factors, fluid volume, and gas reference mass density. Regional
+inventories are checked against the gas-component `TotalMasses` field.
+Pressure changes use the exact initial pressure cell by cell. Plume bounds
+use `Sg >= 1e-4`; counts are also written for `1e-3` and `1e-2`.
+`net_domain_co2_change_kg` is the current domain inventory minus the initial
+inventory. In this no-flow, injection-only setup it is also the actual net
+injected mass inferred from conservation.
+
+Interface rates use the simulator connection list and black-oil CO2 component
+mass flux, including dissolved gas transported in the liquid phase. They are
+instantaneous report-endpoint rates. They are not multiplied by a report
+duration or presented as cumulative transfer because adaptive ministeps can
+make that integration inaccurate.
 
 Each smoke job stops first at report step 2 and resumes to report step 3. It
 requires three atomic summary rows and exactly rolling restart checkpoints 2

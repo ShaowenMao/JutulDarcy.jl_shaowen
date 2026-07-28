@@ -165,6 +165,8 @@ end
     @test Int.(vec(combined_regions["rocknum"])) == [1, 2, 1, 1]
     @test Int.(vec(combined_regions["imbibition"])) == [4, 4, 5, 6]
     @test combined_assembled["stratigraphy_specific_summary"]["cell_count"] == 1
+    @test combined_assembled["qoi_stratigraphy"]["cells"] == Int32[2]
+    @test combined_assembled["qoi_fault"]["cells"] == Int32[3, 4]
     @test isequal(combined_common, common_before)
     @test isequal(combined_specific, specific_before)
 

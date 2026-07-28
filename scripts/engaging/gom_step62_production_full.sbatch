@@ -62,6 +62,15 @@ test "$(find "$summary_dir/rows" -maxdepth 1 -type f \
     -name 'step_*.tsv' | wc -l)" -eq 210
 test -s "$summary_dir/report_steps.tsv"
 test -s "$summary_dir/PRODUCTION_OUTPUT_COMPLETE.tsv"
+if test "${PRODUCTION_QOI_MODE:-off}" != "off"; then
+    test -s "$summary_dir/qoi_region_manifest.tsv"
+    test -s "$summary_dir/qoi_interface_manifest.tsv"
+    test -s "$summary_dir/leakage_global_steps.tsv"
+    test -s "$summary_dir/regional_co2_inventory_steps.tsv"
+    test -s "$summary_dir/interface_flux_steps.tsv"
+    test -s "$summary_dir/leakage_case_summary.tsv"
+    test -s "$summary_dir/QOI_OUTPUT_COMPLETE.tsv"
+fi
 
 module purge
 module load community-modules

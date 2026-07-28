@@ -36,6 +36,10 @@ end
     include("production_output.jl")
 end
 
+@testitem "Production QoI output" begin
+    include("production_qoi.jl")
+end
+
 @testitem "PArray solve" begin
     include("parray.jl")
 end

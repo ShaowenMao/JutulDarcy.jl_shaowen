@@ -43,6 +43,7 @@ mutable struct ProductionOutputPolicy
     pending_row
     original_output_function
     uses_output_function::Bool
+    qoi
 end
 
 production_row_path(policy::ProductionOutputPolicy, step::Integer) =
@@ -451,7 +452,7 @@ function production_quarantine!(
 end
 
 function production_config_values(policy::ProductionOutputPolicy)
-    return (
+    base = (
         schema_version = PRODUCTION_OUTPUT_SCHEMA_VERSION,
         case_key = policy.case_key,
         campaign_manifest_sha256 = policy.campaign_manifest_sha256,
@@ -461,6 +462,22 @@ function production_config_values(policy::ProductionOutputPolicy)
         rolling_checkpoints = policy.rolling_checkpoints,
         year_seconds = MRST_YEAR_SECONDS
     )
+    if production_qoi_active(policy.qoi)
+        qoi = policy.qoi
+        return merge(
+            base,
+            (
+                qoi_schema_version = PRODUCTION_QOI_SCHEMA_VERSION,
+                qoi_mode = qoi.mode,
+                qoi_primary_label_sha256 = qoi.primary_label_sha256,
+                qoi_region_manifest_sha256 =
+                    qoi.region_manifest_sha256,
+                qoi_interface_manifest_sha256 =
+                    qoi.interface_manifest_sha256
+            )
+        )
+    end
+    return base
 end
 
 function production_check_or_write_config!(policy::ProductionOutputPolicy)
@@ -468,6 +485,13 @@ function production_check_or_write_config!(policy::ProductionOutputPolicy)
     expected = production_config_values(policy)
     if isfile(path)
         observed = production_read_named_row(path)
+        expected_keys = Set(string.(keys(expected)))
+        observed_keys = Set(keys(observed))
+        observed_keys == expected_keys || error(
+            "Production-output configuration keys changed on restart: " *
+            "found $(join(sort!(collect(observed_keys)), ",")); expected " *
+            "$(join(sort!(collect(expected_keys)), ","))."
+        )
         for (key, value) in pairs(expected)
             observed[string(key)] == production_format_value(value) ||
                 error(
@@ -744,12 +768,20 @@ function production_report_step!(
     end
     row = merge(row, (restart_bytes = filesize(path),))
     production_write_named_row(production_row_path(policy, step), row)
+    production_qoi_active(policy.qoi) &&
+        production_commit_qoi_bundle!(policy.qoi, step)
     kept, deleted = production_delete_obsolete_restarts!(policy, step)
     production_write_retention_row!(policy, step, kept, deleted)
     policy.pending_row = nothing
 
     if step == policy.final_schedule_step
         production_consolidate_summary!(policy; require_complete = true)
+        production_qoi_active(policy.qoi) &&
+            production_consolidate_qoi!(
+                policy.qoi;
+                require_complete = true,
+                final_schedule_step = policy.final_schedule_step
+            )
     end
     return row
 end
@@ -781,6 +813,13 @@ function Jutul.store_output!(
             fallback_report
         )
     end
+    production_qoi_active(policy.qoi) &&
+        production_stage_qoi_bundle!(
+            policy.qoi,
+            step,
+            policy.cumulative_seconds[step],
+            sim
+        )
 
     # Delegate the scientific state/report write unchanged to Jutul. This
     # call returns only after the restart file has been closed.
@@ -812,7 +851,10 @@ function setup_production_output(
         rolling_checkpoints::Integer = 2,
         case_key::AbstractString = "",
         campaign_manifest_sha256::AbstractString = "",
-        require_hysteresis_history::Bool = true
+        require_hysteresis_history::Bool = true,
+        qoi_mode = "off",
+        mrst_data = nothing,
+        sim = nothing
     )
     config[:in_memory_reports] == 1 ||
         error("Production-output mode requires IN_MEMORY_REPORTS=1.")
@@ -853,6 +895,14 @@ function setup_production_output(
     retention_dir = joinpath(summary_dir, "retention")
     mkpath(row_dir)
     mkpath(retention_dir)
+    qoi = setup_production_qoi(
+        qoi_mode,
+        summary_dir,
+        mrst_data,
+        sim;
+        case_key = case_key,
+        campaign_manifest_sha256 = campaign_manifest_sha256
+    )
 
     has_output_function = haskey(config, :output_function)
     original_output_function =
@@ -873,10 +923,15 @@ function setup_production_output(
         0,
         nothing,
         original_output_function,
-        has_output_function
+        has_output_function,
+        qoi
     )
     production_check_or_write_config!(policy)
     restart = production_reconcile_restart!(policy, restart)
+    if production_qoi_active(qoi)
+        previous_step = restart === false ? 0 : Int(restart) - 1
+        production_reconcile_qoi!(qoi, policy, previous_step)
+    end
 
     if has_output_function
         config[:output_function] =

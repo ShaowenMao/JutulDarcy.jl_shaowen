@@ -29,6 +29,40 @@ function run_production_spe1(
     )
 end
 
+@testset "Production configuration rejects extra restart keys" begin
+    mktempdir() do root
+        summary_dir = joinpath(root, "summary")
+        policy = JutulDarcy.ProductionOutputPolicy(
+            root,
+            summary_dir,
+            joinpath(summary_dir, "rows"),
+            joinpath(summary_dir, "retention"),
+            [1.0],
+            1,
+            Set{Int}(),
+            Float64[],
+            2,
+            "config_key_test",
+            repeat("b", 64),
+            false,
+            0,
+            nothing,
+            nothing,
+            false,
+            nothing
+        )
+        path = JutulDarcy.production_check_or_write_config!(policy)
+        lines = readlines(path)
+        open(path, "w") do io
+            println(io, lines[1], '\t', "qoi_mode")
+            println(io, lines[2], '\t', "required")
+        end
+        @test_throws ErrorException JutulDarcy.production_check_or_write_config!(
+            policy
+        )
+    end
+end
+
 function restart_indices(path)
     return Jutul.valid_restart_indices(path)
 end
