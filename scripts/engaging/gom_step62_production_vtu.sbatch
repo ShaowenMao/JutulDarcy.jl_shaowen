@@ -3,7 +3,7 @@
 #SBATCH --partition=mit_normal
 #SBATCH --account=mit_amf_advanced_cpu
 #SBATCH --qos=mit_amf_advanced_cpu
-#SBATCH --array=1-7%2
+#SBATCH --array=1-7
 #SBATCH --time=03:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=24G

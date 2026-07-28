@@ -26,8 +26,9 @@ production_output_mode=true
 production_qoi_mode=off for legacy inputs; required for regenerated QoI inputs
 ```
 
-The full array requests 8 CPUs, 18 GiB per task, the
-`mit_amf_advanced_cpu` account/QoS, and runs at most two cases concurrently.
+The full array requests 8 CPUs and 18 GiB per task through the
+`mit_amf_advanced_cpu` account/QoS. Slurm may run all eligible cases
+concurrently.
 
 ## Canonical task identity
 
@@ -139,12 +140,12 @@ campaign check
   -> atomic archive job
 ```
 
-Each array is capped at two concurrent tasks. A submission receipt containing
-all job IDs is written below `gom_grid/submissions`.
+No array throttle is applied by default. A submission receipt containing all
+job IDs is written below `gom_grid/submissions`.
 
 For a deliberately selected subset, override each array at submission with
 the same explicit task list and export that list to the archive job, for
-example `--array=5,6,7%2` and `GOM_PRODUCTION_TASKS=5:6:7`. The archive then
+example `--array=5,6,7` and `GOM_PRODUCTION_TASKS=5:6:7`. The archive then
 validates and promotes only those cases while preserving their canonical
 manifest task identities.
 
