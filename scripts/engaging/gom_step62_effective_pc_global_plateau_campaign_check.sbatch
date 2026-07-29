@@ -36,12 +36,15 @@ command -v "$production_python" >/dev/null
 "$production_python" "$resolver" --manifest "$GOM_PRODUCTION_MANIFEST" validate \
     > "$result_dir/validation.txt"
 declare -A expected_case_keys=(
+    [1]=s05_c012_case01
     [5]=s03_c001_case04
     [6]=s03_c012_case08
     [7]=s04_c024_case03
 )
+task_set="$(gom_effective_pc_task_set)"
+selected_case_count="$(gom_effective_pc_selected_case_count)"
 durable_input_root=""
-for task in 5 6 7; do
+while IFS= read -r task; do
     resolved_case="$(
         "$production_python" "$resolver" --manifest "$GOM_PRODUCTION_MANIFEST" \
             resolve --task "$task" --format shell
@@ -71,7 +74,7 @@ for task in 5 6 7; do
         test "$(dirname "$GOM_PRODUCTION_COMMON_MAT")" = \
             "$durable_input_root"
     fi
-done
+done < <(gom_effective_pc_selected_tasks)
 observed_commit="$(git -C "$JUTULDARCY_COMBINED_REPO" rev-parse HEAD)"
 test "$observed_commit" = "$GOM_PRODUCTION_JUTULDARCY_COMMIT"
 observed_manifest_sha256="$(
@@ -94,8 +97,8 @@ printf '%s\n' \
     "campaign_id=$GOM_PRODUCTION_CAMPAIGN_ID" \
     "campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256" \
     "manifest_case_count=7" \
-    "selected_case_count=3" \
-    "case_tasks=5:6:7" \
+    "selected_case_count=$selected_case_count" \
+    "case_tasks=$task_set" \
     "durable_input_root=$durable_input_root" \
     "durable_input_paths_verified=true" \
     "pc_mapping_schema=gom_effective_saturation_pc_v1" \

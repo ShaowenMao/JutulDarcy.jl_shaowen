@@ -48,10 +48,12 @@ trap record_exit_status EXIT
 
 resolved_case="$(
     "$production_python" "$resolver" --manifest "$GOM_PRODUCTION_MANIFEST" \
-        resolve --task 5 --format shell
+        resolve --task "$(gom_effective_pc_first_task)" --format shell
 )"
 eval "$resolved_case"
 gom_effective_pc_validate_campaign
+task_set="$(gom_effective_pc_task_set)"
+selected_case_count="$(gom_effective_pc_selected_case_count)"
 archive_root="$GOM_PRODUCTION_ARCHIVE_ROOT"
 campaign_id="$GOM_PRODUCTION_CAMPAIGN_ID"
 manifest_sha256="$GOM_PRODUCTION_MANIFEST_SHA256"
@@ -75,7 +77,7 @@ vtu_root="$gom_root/results/gom_step62_effective_pc_global_plateau_vtu_job${GOM_
 
 test -f "$check_root/PASS"
 grep -Fxq 'status=pass' "$check_root/campaign_check_summary.txt"
-grep -Fxq 'case_tasks=5:6:7' "$check_root/campaign_check_summary.txt"
+grep -Fxq "case_tasks=$task_set" "$check_root/campaign_check_summary.txt"
 cp -a -- "$check_root" "$incoming/payload/stages/campaign_check"
 
 copy_log_if_present() {
@@ -83,7 +85,7 @@ copy_log_if_present() {
     [ ! -f "$path" ] || cp -- "$path" "$incoming/payload/slurm_logs/"
 }
 
-for task in 5 6 7; do
+while IFS= read -r task; do
     resolved_case="$(
         "$production_python" "$resolver" --manifest "$GOM_PRODUCTION_MANIFEST" \
             resolve --task "$task" --format shell
@@ -184,7 +186,7 @@ for task in 5 6 7; do
         "$gom_root/logs/gom_s62_epc_vtu-${GOM_PRODUCTION_VTU_JOB_ID}_${task}.out"
     copy_log_if_present \
         "$gom_root/logs/gom_s62_epc_vtu-${GOM_PRODUCTION_VTU_JOB_ID}_${task}.err"
-done
+done < <(gom_effective_pc_selected_tasks)
 
 copy_log_if_present \
     "$gom_root/logs/gom_s62_epc_check-${GOM_PRODUCTION_CHECK_JOB_ID}.out"
@@ -203,8 +205,8 @@ printf '%s\n' \
     "physics_profile=$GOM_EFFECTIVE_PC_PHYSICS_PROFILE" \
     "campaign_id=$campaign_id" \
     "campaign_manifest_sha256=$manifest_sha256" \
-    "case_count=3" \
-    "case_tasks=5:6:7" \
+    "case_count=$selected_case_count" \
+    "case_tasks=$task_set" \
     "pc_entry_treatment=plateau_all_active" \
     "pc_entry_scope=all_active_drainage" \
     "production_qoi_mode=required" \
@@ -231,8 +233,8 @@ printf '%s\n' \
     "physics_profile=$GOM_EFFECTIVE_PC_PHYSICS_PROFILE" \
     "campaign_id=$campaign_id" \
     "campaign_manifest_sha256=$manifest_sha256" \
-    "case_count=3" \
-    "case_tasks=5:6:7" \
+    "case_count=$selected_case_count" \
+    "case_tasks=$task_set" \
     "pc_entry_treatment=plateau_all_active" \
     "pc_entry_scope=all_active_drainage" \
     "archive_path=$final" \

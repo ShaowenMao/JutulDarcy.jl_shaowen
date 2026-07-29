@@ -1,5 +1,5 @@
 #!/bin/bash
-# Submit only canonical manifest tasks 5:7 for sandpc_effective_globalplateau_v1.
+# Submit a validated canonical task set for sandpc_effective_globalplateau_v1.
 
 set -euo pipefail
 umask 027
@@ -13,6 +13,11 @@ command -v "$production_python" >/dev/null
 gom_root="${GOM_GRID_ROOT:-$HOME/orcd/scratch/gom_grid}"
 scripts="$JUTULDARCY_COMBINED_REPO/scripts/engaging"
 resolver="$scripts/gom_step62_production_manifest.py"
+source "$scripts/gom_step62_effective_pc_global_plateau_common.sh"
+task_set="$(gom_effective_pc_task_set)"
+array_spec="$(gom_effective_pc_slurm_array_spec)"
+first_task="$(gom_effective_pc_first_task)"
+selected_case_count="$(gom_effective_pc_selected_case_count)"
 full_walltime="${GOM_EFFECTIVE_PC_FULL_WALLTIME:-1-00:00:00}"
 if [[ "$full_walltime" =~ ^([0-9]+-)?([0-9]{1,2}):([0-9]{2}):([0-9]{2})$ ]]; then
     full_days="${BASH_REMATCH[1]%-}"
@@ -40,7 +45,7 @@ mkdir -p "$gom_root/logs" "$gom_root/submissions"
 "$production_python" "$resolver" --manifest "$GOM_PRODUCTION_MANIFEST" validate
 resolved_case="$(
     "$production_python" "$resolver" --manifest "$GOM_PRODUCTION_MANIFEST" \
-        resolve --task 5 --format shell
+        resolve --task "$first_task" --format shell
 )"
 eval "$resolved_case"
 case "$GOM_PRODUCTION_CAMPAIGN_ID" in
@@ -73,26 +78,26 @@ submit_job() {
     submitted_job_id="$job_id"
 }
 
-common_exports="ALL,PRODUCTION_QOI_MODE=required"
+common_exports="ALL,PRODUCTION_QOI_MODE=required,GOM_EFFECTIVE_PC_TASK_SET=$task_set"
 submit_job --kill-on-invalid-dep=yes --export="$common_exports" \
     "$scripts/gom_step62_effective_pc_global_plateau_campaign_check.sbatch"
 check_job="$submitted_job_id"
 submit_job --kill-on-invalid-dep=yes --dependency="afterok:$check_job" \
-    --array=5-7 --export="$common_exports" \
+    --array="$array_spec" --export="$common_exports" \
     "$scripts/gom_step62_effective_pc_global_plateau_preflight.sbatch"
 preflight_job="$submitted_job_id"
 submit_job --kill-on-invalid-dep=yes --dependency="afterok:$preflight_job" \
-    --array=5-7 \
+    --array="$array_spec" \
     --export="$common_exports,GOM_PRODUCTION_PREFLIGHT_JOB_ID=$preflight_job" \
     "$scripts/gom_step62_effective_pc_global_plateau_smoke.sbatch"
 smoke_job="$submitted_job_id"
 submit_job --kill-on-invalid-dep=yes --dependency="afterok:$smoke_job" \
-    --array=5-7 --time="$full_walltime" \
+    --array="$array_spec" --time="$full_walltime" \
     --export="$common_exports,GOM_PRODUCTION_PREFLIGHT_JOB_ID=$preflight_job" \
     "$scripts/gom_step62_effective_pc_global_plateau_full.sbatch"
 full_job="$submitted_job_id"
 submit_job --kill-on-invalid-dep=yes --dependency="afterok:$full_job" \
-    --array=5-7 \
+    --array="$array_spec" \
     --export="$common_exports,GOM_PRODUCTION_FULL_JOB_ID=$full_job" \
     "$scripts/gom_step62_effective_pc_global_plateau_vtu.sbatch"
 vtu_job="$submitted_job_id"
@@ -113,7 +118,9 @@ printf '%s\n' \
     "campaign_id=$GOM_PRODUCTION_CAMPAIGN_ID" \
     "jutuldarcy_repo=$JUTULDARCY_COMBINED_REPO" \
     "gom_grid_root=$gom_root" \
-    "case_tasks=5:6:7" \
+    "selected_case_count=$selected_case_count" \
+    "case_tasks=$task_set" \
+    "slurm_array_spec=$array_spec" \
     "array_limit=none" \
     "old_restart_reuse=false" \
     "fault_pc_entry_treatment=plateau_all_active" \

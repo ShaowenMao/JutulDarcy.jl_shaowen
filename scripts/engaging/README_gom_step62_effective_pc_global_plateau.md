@@ -1,8 +1,9 @@
 # Step62 effective-Pc/global-plateau comparison workflow
 
-This is a new, opt-in workflow for canonical manifest tasks 5–7. It does not
-modify or reuse the accepted `gom_step62_sandpc_ycap50_*` workflow, input
-directories, result directories, or restart files.
+This is a new, opt-in workflow for canonical manifest tasks 5–7 and the
+independent task-1 add-on. It does not modify or reuse the accepted
+`gom_step62_sandpc_ycap50_*` workflow, input directories, result directories,
+or restart files.
 
 The canonical MRST physics profile is:
 
@@ -58,7 +59,8 @@ tails, and base imbibition.
 ## Input preparation
 
 Preparation must still produce the full canonical seven-row derived manifest.
-Only simulation submission is restricted to tasks 5–7.
+Simulation submission is restricted to canonical tasks 1, 5, 6, and 7, with
+an explicit task-set selector.
 
 ```bash
 export MRST_ROOT=/path/to/mrst
@@ -111,12 +113,18 @@ The submitted dependency graph is:
 
 ```text
 campaign check
-  -> preflight [5-7]
-  -> three-step smoke/restart check [5-7]
-  -> full 1000-year run [5-7]
-  -> compact VTU export [5-7]
+  -> preflight [selected tasks]
+  -> three-step smoke/restart check [selected tasks]
+  -> full 1000-year run [selected tasks]
+  -> compact VTU export [selected tasks]
   -> atomic archive
 ```
+
+The default remains canonical tasks `5:6:7`. Set
+`GOM_EFFECTIVE_PC_TASK_SET=1` for the independently archived task-1 add-on,
+or `GOM_EFFECTIVE_PC_TASK_SET=1:5:6:7` for a fresh combined four-case
+campaign. No other task sets are accepted. Canonical task 1 is
+`s05_c012_case01`.
 
 There is no array concurrency limit. Full runs request 8 CPUs and 18 GiB.
 The default walltime is 24 hours. `GOM_EFFECTIVE_PC_FULL_WALLTIME` may

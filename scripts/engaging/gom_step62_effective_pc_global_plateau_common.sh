@@ -11,6 +11,68 @@ source \
 readonly GOM_EFFECTIVE_PC_PHYSICS_PROFILE=sandpc_effective_globalplateau_v1
 readonly GOM_EFFECTIVE_PC_RESULT_PREFIX=gom_step62_effective_pc_global_plateau
 
+gom_effective_pc_task_set() {
+    local task_set="${GOM_EFFECTIVE_PC_TASK_SET:-5:6:7}"
+    case "$task_set" in
+        1|5:6:7|1:5:6:7)
+            printf '%s\n' "$task_set"
+            ;;
+        *)
+            echo "GOM_EFFECTIVE_PC_TASK_SET must be 1, 5:6:7, or" \
+                "1:5:6:7; got '$task_set'." >&2
+            return 1
+            ;;
+    esac
+}
+
+gom_effective_pc_selected_tasks() {
+    case "$(gom_effective_pc_task_set)" in
+        1) printf '%s\n' 1 ;;
+        5:6:7) printf '%s\n' 5 6 7 ;;
+        1:5:6:7) printf '%s\n' 1 5 6 7 ;;
+    esac
+}
+
+gom_effective_pc_slurm_array_spec() {
+    case "$(gom_effective_pc_task_set)" in
+        1) printf '%s\n' 1 ;;
+        5:6:7) printf '%s\n' 5-7 ;;
+        1:5:6:7) printf '%s\n' 1,5-7 ;;
+    esac
+}
+
+gom_effective_pc_selected_case_count() {
+    case "$(gom_effective_pc_task_set)" in
+        1) printf '%s\n' 1 ;;
+        5:6:7) printf '%s\n' 3 ;;
+        1:5:6:7) printf '%s\n' 4 ;;
+    esac
+}
+
+gom_effective_pc_first_task() {
+    case "$(gom_effective_pc_task_set)" in
+        1|1:5:6:7) printf '%s\n' 1 ;;
+        5:6:7) printf '%s\n' 5 ;;
+    esac
+}
+
+gom_effective_pc_task_is_selected() {
+    local requested="$1"
+    local task_set
+    task_set="$(gom_effective_pc_task_set)"
+    case "$task_set:$requested" in
+        1:1|5:6:7:5|5:6:7:6|5:6:7:7|\
+        1:5:6:7:1|1:5:6:7:5|1:5:6:7:6|1:5:6:7:7)
+            return 0
+            ;;
+        *)
+            echo "Task $requested is not selected by" \
+                "GOM_EFFECTIVE_PC_TASK_SET='$task_set'." >&2
+            return 1
+            ;;
+    esac
+}
+
 gom_effective_pc_validate_campaign() {
     case "$GOM_PRODUCTION_CAMPAIGN_ID" in
         *sandpc*ycap50*effective*globalplateau*) ;;
@@ -27,12 +89,14 @@ gom_effective_pc_resolve_task() {
     gom_production_resolve_task
     gom_effective_pc_validate_campaign
     case "$GOM_PRODUCTION_TASK" in
-        5|6|7) ;;
+        1|5|6|7) ;;
         *)
-            echo "This campaign intentionally permits only tasks 5, 6, and 7." >&2
+            echo "This workflow intentionally permits only canonical tasks" \
+                "1, 5, 6, and 7." >&2
             return 1
             ;;
     esac
+    gom_effective_pc_task_is_selected "$GOM_PRODUCTION_TASK"
 }
 
 gom_effective_pc_export_locked_physics() {
