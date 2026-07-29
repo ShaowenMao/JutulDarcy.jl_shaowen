@@ -16,7 +16,25 @@ function split_test_entry_sgof(scale)
     ]
 end
 
+function split_test_zero_pc_sgof()
+    return [
+        0.0 0.0 1.0 0.0
+        0.2 0.2 0.3 0.0
+        0.8 1.0 0.0 0.0
+    ]
+end
+
 @testset "MRST reservoir-ready split input" begin
+    for alias in (
+            "plateau_all_active",
+            "all_active_plateau",
+            "domain_plateau",
+            "plateau_all_active_drainage"
+        )
+        @test JutulDarcy.normalize_mrst_fault_pc_entry_treatment(alias) ==
+            "plateau_all_active"
+    end
+
     base_table = split_test_sgof(1.0)
     common = Dict{String, Any}(
         "rock" => Dict{String, Any}(
@@ -121,6 +139,124 @@ end
     @test reservoir_hyst_assembled["deck"]["RUNSPEC"]["TABDIMS"][1] == 6.0
     @test reservoir_hyst_summary["hysteresis"] == "reservoir_only_fault_drainage_duplicate"
     @test reservoir_hyst_summary["pc_entry_treatment"]["adjusted_tables"] == 2
+
+    domain_specific = deepcopy(entry_specific)
+    domain_custom_tables =
+        Any[split_test_entry_sgof(2.0), split_test_zero_pc_sgof()]
+    domain_specific["fault"]["fluid_tables"]["SGOF"]["tables"] =
+        reshape(domain_custom_tables, :, 1)
+    domain_common_before = deepcopy(common_hysteresis)
+    domain_specific_before = deepcopy(domain_specific)
+    domain_assembled = JutulDarcy.assemble_mrst_split_case(
+        common_hysteresis,
+        domain_specific;
+        fault_pc_entry_treatment = "plateau_all_active",
+        explicit_fault_hysteresis_mode = "reservoir"
+    )
+    domain_sgof = vec(domain_assembled["deck"]["PROPS"]["SGOF"])
+    domain_summary =
+        domain_assembled["fault_saturation_domain_summary"]["pc_entry_treatment"]
+
+    @test domain_sgof[1][1, 4] == domain_sgof[1][2, 4]
+    @test domain_sgof[2][1, 4] == domain_sgof[2][2, 4]
+    @test all(iszero, domain_sgof[3][:, 4])
+    @test domain_sgof[1][2:end, 4] == base_table[2:end, 4]
+    @test domain_sgof[2][2:end, 4] ==
+        domain_custom_tables[1][2:end, 4]
+    @test domain_sgof[3][:, 4] == domain_custom_tables[2][:, 4]
+    @test domain_sgof[1][:, 1:3] == base_table[:, 1:3]
+    @test domain_sgof[2][:, 1:3] == domain_custom_tables[1][:, 1:3]
+    @test domain_sgof[3][:, 1:3] == domain_custom_tables[2][:, 1:3]
+    @test domain_sgof[4] == base_imbibition_table
+    @test domain_sgof[5] == domain_sgof[2]
+    @test domain_sgof[6] == domain_sgof[3]
+    @test domain_summary["treatment"] == "plateau_all_active"
+    @test domain_summary["scope"] == "all_active_drainage"
+    @test domain_summary["entry_rule"] ==
+        "first_strictly_positive_pc_node"
+    @test domain_summary["active_tables"] == 3
+    @test domain_summary["nonzero_entry_tables"] == 2
+    @test domain_summary["adjusted_tables"] == 2
+    @test domain_summary["already_plateaued_tables"] == 0
+    @test domain_summary["true_zero_pc_tables"] == 1
+    @test domain_summary["skipped_tables"] == 1
+    @test domain_summary["adjusted_regions"] == [1, 2]
+    @test isempty(domain_summary["already_plateaued_regions"])
+    @test domain_summary["true_zero_pc_regions"] == [3]
+    @test domain_summary["mirrored_explicit_hysteresis_tables"] == 2
+    @test domain_summary["base_imbibition_unchanged"] === true
+    @test domain_summary["base_imbibition_sha256_before"] ==
+        domain_summary["base_imbibition_sha256_after"]
+    @test domain_summary["kr_unchanged"] === true
+    @test domain_summary["pc_at_and_above_entry_unchanged"] === true
+    @test domain_summary["kr_sha256_before"] ==
+        domain_summary["kr_sha256_after"]
+    @test domain_summary["pc_tail_sha256_before"] ==
+        domain_summary["pc_tail_sha256_after"]
+    @test domain_summary["input_drainage_sha256"] !=
+        domain_summary["output_drainage_sha256"]
+    for key in (
+            "input_drainage_sha256",
+            "output_drainage_sha256",
+            "kr_sha256_before",
+            "pc_tail_sha256_before"
+        )
+        digest = domain_summary[key]
+        @test length(digest) == 64
+        @test all(c -> isdigit(c) || c in 'a':'f', digest)
+    end
+    @test isequal(common_hysteresis, domain_common_before)
+    @test isequal(domain_specific, domain_specific_before)
+
+    # A whole-input control can use the same deterministic transformation as
+    # split assembly. All post-plateau SGOF tables must then be identical.
+    domain_whole = JutulDarcy.assemble_mrst_split_case(
+        common_hysteresis,
+        domain_specific;
+        fault_pc_entry_treatment = "none",
+        explicit_fault_hysteresis_mode = "reservoir"
+    )
+    get!(domain_whole, "metadata", Dict{String, Any}())[
+        "shared_drainage_saturation_region_count"
+    ] = 1
+    whole_base_imbibition_before =
+        copy(vec(domain_whole["deck"]["PROPS"]["SGOF"])[4])
+    whole_summary =
+        JutulDarcy.apply_mrst_whole_pc_entry_treatment!(
+            domain_whole;
+            fault_pc_entry_treatment = "plateau_all_active",
+            explicit_fault_hysteresis_mode = "reservoir"
+        )
+    @test all(
+        isequal.(vec(domain_whole["deck"]["PROPS"]["SGOF"]), domain_sgof)
+    )
+    @test vec(domain_whole["deck"]["PROPS"]["SGOF"])[4] ==
+        whole_base_imbibition_before
+    for key in (
+            "input_drainage_sha256",
+            "output_drainage_sha256",
+            "kr_sha256_before",
+            "kr_sha256_after",
+            "pc_tail_sha256_before",
+            "pc_tail_sha256_after",
+            "base_imbibition_sha256_before",
+            "base_imbibition_sha256_after"
+        )
+        @test whole_summary[key] == domain_summary[key]
+    end
+    @test whole_summary["mirrored_explicit_hysteresis_tables"] == 2
+    @test whole_summary["drainage_region_count"] == 3
+    @test domain_whole["fault_saturation_domain_summary"]["input_mode"] ==
+        "whole"
+    @test domain_whole["fault_saturation_domain_summary"][
+        "pc_entry_treatment"
+    ] === whole_summary
+    @test_throws ErrorException begin
+        JutulDarcy.apply_mrst_whole_pc_entry_treatment!(
+            deepcopy(domain_whole);
+            fault_pc_entry_treatment = "plateau"
+        )
+    end
 
     combined_common = deepcopy(common_hysteresis)
     combined_common["name"] = "tiny_common"

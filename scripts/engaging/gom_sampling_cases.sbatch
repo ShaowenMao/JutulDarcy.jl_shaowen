@@ -230,19 +230,25 @@ FAULT_PC_ENTRY_TREATMENT_LC=$(echo "$FAULT_PC_ENTRY_TREATMENT" | tr '[:upper:]' 
 case "$FAULT_PC_ENTRY_TREATMENT_LC" in
     ""|none|off|false|0)
         export FAULT_PC_ENTRY_TREATMENT=none
+        export FAULT_PC_ENTRY_SG_MAX=${FAULT_PC_ENTRY_SG_MAX:-1.0e-4}
         PC_ENTRY_TAG=""
         ;;
     plateau|entry_plateau|pc_plateau)
         export FAULT_PC_ENTRY_TREATMENT=plateau
+        export FAULT_PC_ENTRY_SG_MAX=${FAULT_PC_ENTRY_SG_MAX:-1.0e-4}
         PC_ENTRY_TAG="_pcplateau"
+        ;;
+    plateau_all_active|all_active_plateau|domain_plateau|plateau_all_active_drainage)
+        export FAULT_PC_ENTRY_TREATMENT=plateau_all_active
+        unset FAULT_PC_ENTRY_SG_MAX
+        PC_ENTRY_TAG="_pcplateauallactive"
         ;;
     *)
         echo "Unknown FAULT_PC_ENTRY_TREATMENT=$FAULT_PC_ENTRY_TREATMENT"
-        echo "Valid values: none, plateau"
+        echo "Valid values: none, plateau, plateau_all_active"
         exit 1
         ;;
 esac
-export FAULT_PC_ENTRY_SG_MAX=${FAULT_PC_ENTRY_SG_MAX:-1.0e-4}
 
 export EXPLICIT_FAULT_HYSTERESIS_MODE=${EXPLICIT_FAULT_HYSTERESIS_MODE:-disable}
 EXPLICIT_FAULT_HYSTERESIS_MODE_LC=$(echo "$EXPLICIT_FAULT_HYSTERESIS_MODE" | tr '[:upper:]' '[:lower:]')
@@ -371,7 +377,7 @@ echo "USE_MRST_TRANSMISSIBILITY=$USE_MRST_TRANSMISSIBILITY"
 echo "IGNORE_MRST_T=$IGNORE_MRST_T"
 echo "FAULT_SATURATION_DOMAIN_MODE=$FAULT_SATURATION_DOMAIN_MODE"
 echo "FAULT_PC_ENTRY_TREATMENT=$FAULT_PC_ENTRY_TREATMENT"
-echo "FAULT_PC_ENTRY_SG_MAX=$FAULT_PC_ENTRY_SG_MAX"
+echo "FAULT_PC_ENTRY_SG_MAX=${FAULT_PC_ENTRY_SG_MAX:-not_applicable}"
 echo "EXPLICIT_FAULT_HYSTERESIS_MODE=$EXPLICIT_FAULT_HYSTERESIS_MODE"
 echo "MATFILE_PATH=$MATFILE_PATH"
 echo "COMMON_MATFILE_PATH=${COMMON_MATFILE_PATH:-}"
