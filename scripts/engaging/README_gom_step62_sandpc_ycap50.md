@@ -122,3 +122,19 @@ The final validator requires:
 
 The temporal schema and spatial mask definitions are unchanged. Values are
 expected to change because the Pc and Younger permeability physics changed.
+
+## Validator compatibility and recovery
+
+The campaign check executes `test/engaging_script_compat.jl` with the same
+Julia 1.10.4 module used by production. This rejects unsupported Julia APIs
+before any expensive full simulation is submitted.
+
+If an older immutable run completed all raw simulation/QoI outputs but failed
+only in its post-run validator,
+`gom_step62_sandpc_ycap50_recovery_preflight.sbatch` verifies the exact
+failure signature, original metadata, both retained checkpoints, all 210
+production rows, all 210 QoI bundles, and both completion markers.
+`gom_step62_sandpc_ycap50_recovery_finalize.sbatch` then runs only the fixed
+validator and creates the normal hashes, summaries, and PASS markers. It
+never invokes the simulator or rewrites restart/QoI data, and records both
+the original simulation commit and the recovery commit.

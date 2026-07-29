@@ -45,7 +45,8 @@ function parse_tsv(path; expected_columns = nothing)
             error("$path has an unexpected column contract.")
     end
     rows = Dict{String, String}[]
-    for (line_number, line) in enumerate(lines[2:end], start = 2)
+    for (offset, line) in enumerate(lines[2:end])
+        line_number = offset + 1
         values = String.(split(line, '\t'; keepempty = true))
         length(values) == length(header) ||
             error("$path line $line_number has the wrong field count.")
