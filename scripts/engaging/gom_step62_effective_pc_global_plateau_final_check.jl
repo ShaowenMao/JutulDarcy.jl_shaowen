@@ -215,10 +215,9 @@ length(regional_rows) ==
     "regional_co2_inventory_steps.tsv has the wrong row count."
 )
 for step in 1:SANDPC_EXPECTED_STEPS
-    rows = @view regional_rows[
-        ((step - 1)*SANDPC_EXPECTED_REGIONS + 1):
-        (step*SANDPC_EXPECTED_REGIONS)
-    ]
+    first_row = (step - 1)*SANDPC_EXPECTED_REGIONS + 1
+    last_row = step*SANDPC_EXPECTED_REGIONS
+    rows = @view regional_rows[first_row:last_row]
     Set(row["region_id"] for row in rows) == region_ids ||
         error("Regional QoI step $step has missing or duplicate region IDs.")
     for row in rows
@@ -241,10 +240,9 @@ length(interface_rows) ==
     SANDPC_EXPECTED_STEPS*SANDPC_EXPECTED_INTERFACES ||
     error("interface_flux_steps.tsv has the wrong row count.")
 for step in 1:SANDPC_EXPECTED_STEPS
-    rows = @view interface_rows[
-        ((step - 1)*SANDPC_EXPECTED_INTERFACES + 1):
-        (step*SANDPC_EXPECTED_INTERFACES)
-    ]
+    first_row = (step - 1)*SANDPC_EXPECTED_INTERFACES + 1
+    last_row = step*SANDPC_EXPECTED_INTERFACES
+    rows = @view interface_rows[first_row:last_row]
     Set(row["interface_id"] for row in rows) == interface_ids ||
         error("Interface QoI step $step has missing or duplicate IDs.")
     for row in rows

@@ -8,6 +8,26 @@ using Test
     ))
     @test !isempty(julia_scripts)
 
+    # Parse every cluster entry point with the Julia runtime executing this
+    # test. Meta.parseall records syntax failures as :error/:incomplete nodes
+    # instead of always throwing, so inspect the complete expression tree.
+    function collect_parse_issues!(issues, node)
+        node isa Expr || return issues
+        if node.head === :error || node.head === :incomplete
+            push!(issues, node)
+        end
+        for argument in node.args
+            collect_parse_issues!(issues, argument)
+        end
+        return issues
+    end
+    for path in julia_scripts
+        parsed = Meta.parseall(read(path, String); filename = path)
+        parse_issues = Expr[]
+        collect_parse_issues!(parse_issues, parsed)
+        @test isempty(parse_issues)
+    end
+
     # Julia 1.10 supports enumerate(iter), but unlike Python it does not
     # accept a start keyword. This pattern previously allowed a complete
     # simulation to fail during its final TSV validation.
