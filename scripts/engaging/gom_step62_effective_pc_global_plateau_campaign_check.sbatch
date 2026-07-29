@@ -83,6 +83,17 @@ observed_manifest_sha256="$(
 test "$observed_manifest_sha256" = \
     "$GOM_PRODUCTION_JUTUL_MANIFEST_SHA256"
 
+# Parse every Engaging Julia entry point with the exact production runtime
+# before an expensive simulation is eligible to start.
+module purge
+module load community-modules
+module load julia/1.10.4
+julia --version > "$result_dir/julia_version.txt"
+grep -Fxq 'julia version 1.10.4' "$result_dir/julia_version.txt"
+cd "$JUTULDARCY_COMBINED_REPO"
+julia --startup-file=no --project=. test/engaging_script_compat.jl \
+    > "$result_dir/engaging_script_compatibility_test.txt"
+
 cp -- "$GOM_PRODUCTION_MANIFEST" "$result_dir/campaign.toml"
 cp -- "$GOM_PRODUCTION_MANIFEST.sha256" \
     "$result_dir/campaign.toml.sha256.original"
@@ -108,6 +119,8 @@ printf '%s\n' \
     "exact_paths=true" \
     "wildcards=false" \
     "all_input_sha256_verified=true" \
+    "cluster_julia_version=1.10.4" \
+    "engaging_script_compatibility_test=pass" \
     "old_restart_reuse=false" \
     "source_input_manifest_sha256=$GOM_PRODUCTION_SOURCE_INPUT_MANIFEST_SHA256" \
     "mrst_prepare_commit=$GOM_PRODUCTION_MRST_PREPARE_COMMIT" \

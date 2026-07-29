@@ -156,3 +156,75 @@ Only restart steps 78 and 210 are retained. Compact VTUs contain the same
 established arrays as the accepted workflow; no extra simulation fields are
 added. Archive promotion is staged, checksum-verified, and atomic. Scratch
 results are not deleted automatically.
+
+## Validation-only recovery
+
+The versioned recovery entry points are:
+
+```text
+gom_step62_effective_pc_global_plateau_recovery_preflight.sbatch
+gom_step62_effective_pc_global_plateau_recovery_finalize.sbatch
+```
+
+They recover only a fully completed simulation that exited after the known
+Julia multiline-range parse error in the final validator. They require all
+210 production/QoI bundles, both completion markers, restart steps 78 and
+210, the effective-Pc preflight contract, the exact original error signature,
+and the original failed exit status. Any numerical failure or incomplete
+output therefore fails closed. Neither script invokes the simulator.
+New campaigns are protected earlier: the campaign check parses every
+Engaging Julia entry point with the pinned Julia 1.10.4 runtime before any
+smoke or full simulation becomes eligible.
+
+Keep the original simulation repository separate from a clean immutable
+recovery repository:
+
+```bash
+export GOM_EFFECTIVE_PC_SIMULATION_REPO=/path/to/original/manifest-pinned/repo
+export GOM_EFFECTIVE_PC_RECOVERY_REPO=/path/to/fixed/immutable/repo
+export GOM_EFFECTIVE_PC_RECOVERY_COMMIT=$(git \
+  -C "$GOM_EFFECTIVE_PC_RECOVERY_REPO" rev-parse HEAD)
+export GOM_PRODUCTION_MANIFEST=/path/to/original/campaign.toml
+export GOM_PRODUCTION_FULL_JOB_ID=123456
+export GOM_EFFECTIVE_PC_TASK_SET=5:6:7
+
+preflight_job=$(sbatch --parsable \
+  --array=5-7 \
+  --dependency="afterany:$GOM_PRODUCTION_FULL_JOB_ID" \
+  "$GOM_EFFECTIVE_PC_RECOVERY_REPO/scripts/engaging/gom_step62_effective_pc_global_plateau_recovery_preflight.sbatch")
+preflight_job=${preflight_job%%;*}
+
+finalize_job=$(sbatch --parsable \
+  --array=5-7 \
+  --dependency="afterok:$preflight_job" \
+  --export="ALL,GOM_EFFECTIVE_PC_RECOVERY_PREFLIGHT_JOB_ID=$preflight_job" \
+  "$GOM_EFFECTIVE_PC_RECOVERY_REPO/scripts/engaging/gom_step62_effective_pc_global_plateau_recovery_finalize.sbatch")
+finalize_job=${finalize_job%%;*}
+```
+
+For the independent task-1 campaign, set
+`GOM_EFFECTIVE_PC_TASK_SET=1` and override both arrays with `--array=1`.
+The original repository remains the Julia project and manifest authority.
+The recovery repository supplies only the corrected validator and recovery
+workflow; both commits and all relevant script/source hashes are recorded.
+
+The preflight hashes the complete restart/QoI tree and
+`PREFLIGHT_PC_TABLE_CONTRACT.txt`. The finalizer rechecks those hashes under
+the case lock, runs the corrected validator and the original runtime
+diagnostics, reconstructs the exact effective-Pc summary/hash contract, and
+atomically promotes `RECOVERY_PASS` and `PASS` last. It is idempotent after a
+fully verified promotion.
+
+Pending VTU elements may be redirected to depend on the successful recovery
+finalizer, preserving their original VTU result root and archive dependency:
+
+```bash
+scontrol update JobId=VTU_ARRAY_ID_5 Dependency=afterok:$finalize_job
+scontrol update JobId=VTU_ARRAY_ID_6 Dependency=afterok:$finalize_job
+scontrol update JobId=VTU_ARRAY_ID_7 Dependency=afterok:$finalize_job
+```
+
+Use only `_1` for a task-1 VTU array. Verify every updated dependency with
+`scontrol show job`. If per-element dependency updates are unavailable,
+cancel only the blocked VTU/archive stages and submit replacements after the
+recovery finalizer; do not resubmit the simulation.
