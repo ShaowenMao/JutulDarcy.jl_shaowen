@@ -5,6 +5,8 @@ import SHA
 
 include(joinpath(@__DIR__, "gom_step62_sandpc_ycap50_contract.jl"))
 using .GoMStep62SandPcYCap50Contract
+include(joinpath(@__DIR__, "gom_step62_vtu_geology_indicators.jl"))
+using .GoMStep62VtuGeologyIndicators
 
 length(ARGS) == 7 || error(
     "Usage: gom_step62_sandpc_ycap50_vtu.jl COMMON_MAT SPECIFIC_MAT " *
@@ -49,51 +51,35 @@ regions = mrst["rock"]["regions"]
 state0 = mrst["state0"]
 nc = Int(round(grid["cells"]["num"]))
 specific = MAT.matread(specific_path)
-masks = mrst["masks"]
+indicators =
+    build_gom_step62_vtu_geology_indicators(mrst, specific)
+fault_region_flag = indicators.fault_region_flag
+stratigraphy_region_flag = indicators.stratigraphy_region_flag
+stratigraphic_unit_id = indicators.stratigraphic_unit_id
+fault_cells = indicators.fault_cells
+specific_fault_cells = indicators.predict_fault_cells
+nonpredict_fault_cells = indicators.nonpredict_fault_cells
+stratigraphy_cells = indicators.stratigraphy_cells
+stratigraphy_sand_cells = indicators.stratigraphy_sand_cells
+stratigraphy_clay_cells = indicators.stratigraphy_clay_cells
 
-fault_region_flag = Int32.(vec(masks["isFaultCell"]) .!= 0)
-stratigraphy_region_flag =
-    Int32.(vec(masks["isSpecificStratigraphyCell"]) .!= 0)
-length(fault_region_flag) == nc ||
-    error("Fault-region mask has the wrong length.")
-length(stratigraphy_region_flag) == nc ||
-    error("Stratigraphy-region mask has the wrong length.")
-sum(fault_region_flag) ==
+length(fault_cells) ==
     GoMStep62SandPcYCap50Contract.EXPECTED_COMPLETE_FAULT_CELLS ||
     error("Unexpected complete fault-domain cell count.")
-sum(stratigraphy_region_flag) ==
-    GoMStep62SandPcYCap50Contract.EXPECTED_STRATIGRAPHY_CELLS ||
-    error("Unexpected stratigraphy-domain cell count.")
-all((fault_region_flag .+ stratigraphy_region_flag) .<= 1) ||
-    error("Fault and stratigraphy region flags overlap.")
-
-fault_cells = sort(Int.(round.(vec(masks["fault_all_cells"]))))
-findall(==(Int32(1)), fault_region_flag) == fault_cells ||
-    error("Fault-region flag does not match masks.fault_all_cells.")
-specific_fault_cells =
-    sort(Int.(round.(vec(specific["fault"]["cells"]))))
 length(specific_fault_cells) ==
     GoMStep62SandPcYCap50Contract.EXPECTED_FAULT_CELLS ||
-    error("Unexpected geology-specific fault cell count.")
-all(fault_region_flag[specific_fault_cells] .== 1) ||
-    error("Specific fault cells are not contained in the full fault flag.")
-
-stratigraphy = specific["stratigraphy"]
-stratigraphy_cells = Int.(round.(vec(stratigraphy["cells"])))
-stratigraphy_ids =
-    Int32.(round.(vec(stratigraphy["stratigraphic_unit_id"])))
+    error("Unexpected geology-specific PREDICT fault cell count.")
 length(stratigraphy_cells) ==
     GoMStep62SandPcYCap50Contract.EXPECTED_STRATIGRAPHY_CELLS ||
-    error("Unexpected stratigraphy-specific cell count.")
+    error("Unexpected stratigraphy-domain cell count.")
+
+stratigraphy = specific["stratigraphy"]
+stratigraphy_ids =
+    Int32.(round.(vec(stratigraphy["stratigraphic_unit_id"])))
 length(stratigraphy_ids) == length(stratigraphy_cells) ||
     error("Stratigraphic IDs do not align with stratigraphy cells.")
 sort(unique(stratigraphy_ids)) == collect(Int32(1):Int32(21)) ||
     error("Expected stratigraphic unit IDs 1:21.")
-findall(==(Int32(1)), stratigraphy_region_flag) ==
-    sort(stratigraphy_cells) ||
-    error("Stratigraphy flag does not match the specific cell list.")
-stratigraphic_unit_id = zeros(Int32, nc)
-stratigraphic_unit_id[stratigraphy_cells] .= stratigraphy_ids
 
 extra_cell_data = Dict{String, AbstractVector}(
     "fault_region_flag" => fault_region_flag,
@@ -247,9 +233,30 @@ open(summary_path, "w") do io
     println(io, "explicit_predict_regions=522")
     println(io, "drainage_saturation_regions=530")
     println(io, "total_sgof_tables=1060")
-    println(io, "fault_region_cells=$(sum(fault_region_flag))")
+    println(io, "geology_indicator_schema=gom_vtu_geology_indicators_v2")
+    println(
+        io,
+        "fault_region_flag_values=" *
+        "0:outside_fault,1:predict_fault,2:nonpredict_fault"
+    )
+    println(
+        io,
+        "stratigraphy_region_flag_values=" *
+        "0:outside_stratigraphy,1:sand,2:clay"
+    )
+    println(io, "fault_region_cells=$(length(fault_cells))")
     println(io, "specific_fault_cells=$(length(specific_fault_cells))")
-    println(io, "stratigraphy_region_cells=$(sum(stratigraphy_region_flag))")
+    println(io, "predict_fault_cells=$(length(specific_fault_cells))")
+    println(io, "nonpredict_fault_cells=$(length(nonpredict_fault_cells))")
+    println(io, "stratigraphy_region_cells=$(length(stratigraphy_cells))")
+    println(
+        io,
+        "stratigraphy_sand_cells=$(length(stratigraphy_sand_cells))"
+    )
+    println(
+        io,
+        "stratigraphy_clay_cells=$(length(stratigraphy_clay_cells))"
+    )
     println(io, "stratigraphic_unit_ids=1:21")
     println(io, "fault_region_flag_sha256=$(int32_sha256(fault_region_flag))")
     println(

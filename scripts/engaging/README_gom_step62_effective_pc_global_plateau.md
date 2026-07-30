@@ -153,9 +153,25 @@ In addition to the existing QoI files, this workflow records:
   accepted ministep sizes or cellwise cap-onset interval counts.
 
 Only restart steps 78 and 210 are retained. Compact VTUs contain the same
-established arrays as the accepted workflow; no extra simulation fields are
-added. Archive promotion is staged, checksum-verified, and atomic. Scratch
-results are not deleted automatically.
+established simulation arrays as the accepted workflow. Their two categorical
+geology indicators use schema `gom_vtu_geology_indicators_v2`:
+
+- `stratigraphy_region_flag`: `0` outside Al/Ar, `1` sand, `2` clay;
+- `fault_region_flag`: `0` outside the fault, `1` PREDICT, `2` non-PREDICT.
+
+The facies and fault classifications come from exact split-input metadata and
+are cross-checked against primary UCIDs and assembled masks. They are not
+inferred from permeability, saturation-region numbers, or coordinates.
+Archive promotion is staged, checksum-verified, and atomic. Scratch results
+are not deleted automatically.
+
+For a completed campaign whose immutable simulation commit predates indicator
+schema v2, use
+`gom_step62_effective_pc_global_plateau_vtu_reexport.sbatch`. It keeps the
+original repository as the manifest and Julia-project authority, requires a
+separate clean and commit-pinned export repository, verifies that both
+repositories have identical simulation source trees and manifests, and writes
+to a new result directory. It never modifies or reruns the simulation.
 
 ## Validation-only recovery
 

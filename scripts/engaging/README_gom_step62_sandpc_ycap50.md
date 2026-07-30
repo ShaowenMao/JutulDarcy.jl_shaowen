@@ -100,7 +100,9 @@ The DAG is:
 2. setup-only preflight for tasks 5–7;
 3. three-step restart/QoI smoke test;
 4. complete 1,000-year run;
-5. compact initial/50-year/1,000-year VTUs;
+5. compact initial/50-year/1,000-year VTUs, with categorical geology
+   indicators (`stratigraphy_region_flag`: 0 outside, 1 sand, 2 clay;
+   `fault_region_flag`: 0 outside, 1 PREDICT, 2 non-PREDICT);
 6. checksum-verified atomic archive promotion.
 
 The full stage explicitly starts with `RESTART_RUN=false` in a new result

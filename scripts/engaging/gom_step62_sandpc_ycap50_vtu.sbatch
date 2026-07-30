@@ -100,6 +100,35 @@ grep -Fxq 'base_saturation_regions=8' "$case_dir/export_summary.txt"
 grep -Fxq 'explicit_predict_regions=522' "$case_dir/export_summary.txt"
 grep -Fxq 'drainage_saturation_regions=530' "$case_dir/export_summary.txt"
 grep -Fxq 'total_sgof_tables=1060' "$case_dir/export_summary.txt"
+grep -Fxq 'geology_indicator_schema=gom_vtu_geology_indicators_v2' \
+    "$case_dir/export_summary.txt"
+grep -Fxq \
+    'fault_region_flag_values=0:outside_fault,1:predict_fault,2:nonpredict_fault' \
+    "$case_dir/export_summary.txt"
+grep -Fxq \
+    'stratigraphy_region_flag_values=0:outside_stratigraphy,1:sand,2:clay' \
+    "$case_dir/export_summary.txt"
+grep -Fxq 'fault_region_cells=150597' "$case_dir/export_summary.txt"
+grep -Fxq 'specific_fault_cells=32190' "$case_dir/export_summary.txt"
+grep -Fxq 'predict_fault_cells=32190' "$case_dir/export_summary.txt"
+grep -Fxq 'nonpredict_fault_cells=118407' "$case_dir/export_summary.txt"
+grep -Fxq 'stratigraphy_region_cells=828240' \
+    "$case_dir/export_summary.txt"
+stratigraphy_sand_cells="$(
+    awk -F= '/^stratigraphy_sand_cells=/{print $2}' \
+        "$case_dir/export_summary.txt"
+)"
+stratigraphy_clay_cells="$(
+    awk -F= '/^stratigraphy_clay_cells=/{print $2}' \
+        "$case_dir/export_summary.txt"
+)"
+[[ "$stratigraphy_sand_cells" =~ ^[1-9][0-9]*$ ]]
+[[ "$stratigraphy_clay_cells" =~ ^[1-9][0-9]*$ ]]
+test "$((stratigraphy_sand_cells + stratigraphy_clay_cells))" -eq 828240
+grep -Eq '^fault_region_flag_sha256=[0-9a-f]{64}$' \
+    "$case_dir/export_summary.txt"
+grep -Eq '^stratigraphy_region_flag_sha256=[0-9a-f]{64}$' \
+    "$case_dir/export_summary.txt"
 grep -Fxq 'fault_pc_adjusted_tables=522' \
     "$case_dir/export_summary.txt"
 test -s "$vtu_dir/${prefix}_incon_0001.vtu"
