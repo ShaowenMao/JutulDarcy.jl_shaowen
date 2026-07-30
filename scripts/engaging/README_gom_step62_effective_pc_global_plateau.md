@@ -244,3 +244,41 @@ Use only `_1` for a task-1 VTU array. Verify every updated dependency with
 `scontrol show job`. If per-element dependency updates are unavailable,
 cancel only the blocked VTU/archive stages and submit replacements after the
 recovery finalizer; do not resubmit the simulation.
+
+## Checkpoint continuation for an incomplete task 5
+
+`gom_step62_effective_pc_global_plateau_continuation.sbatch` is the
+simulation-resume path for a full task 5 that stopped at its walltime before
+report step 210. It is separate from the validation-only recovery above.
+
+The continuation fails closed unless scalar and QOI row bundles are
+contiguous and have equal counts. It selects the newest checkpoint no later
+than that common row count, resumes at the following report step, preserves
+`PRODUCTION_QOI_MODE=required`, and writes into the original case directory
+under its production-output lock. The original campaign repository remains
+the simulation and Julia-project authority. The continuation repository
+provides only the commit-pinned wrapper and corrected final validator.
+
+After reaching step 210, the same job checks both output-completion markers,
+validates the final state and runtime diagnostics, rebuilds retained-restart
+and summary checksums, and promotes `CONTINUATION_PASS` and `PASS` last. A
+retry after a verified `PASS` is an idempotent no-op.
+
+Set `GOM_EFFECTIVE_PC_CONTINUATION_PREFLIGHT_ONLY=true` for a read-only
+checkpoint/QOI audit. It validates and hashes the selected checkpoint but
+does not invoke the simulator or modify the source case.
+
+Example:
+
+```bash
+export GOM_PRODUCTION_MANIFEST=/path/to/original/campaign.toml
+export GOM_EFFECTIVE_PC_FULL_JOB_ID=123456
+export GOM_EFFECTIVE_PC_TASK_SET=5:6:7
+export GOM_EFFECTIVE_PC_SIMULATION_REPO=/path/to/original/immutable/repo
+export GOM_EFFECTIVE_PC_CONTINUATION_REPO=/path/to/continuation/repo
+export GOM_EFFECTIVE_PC_CONTINUATION_COMMIT=$(git \
+  -C "$GOM_EFFECTIVE_PC_CONTINUATION_REPO" rev-parse HEAD)
+
+sbatch --array=5 \
+  "$GOM_EFFECTIVE_PC_CONTINUATION_REPO/scripts/engaging/gom_step62_effective_pc_global_plateau_continuation.sbatch"
+```
