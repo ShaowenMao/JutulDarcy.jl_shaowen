@@ -81,12 +81,31 @@ The renderer obtains each frame time from the PVD mapping, which keeps the
 annotation synchronized with physical simulation time rather than report-step
 number.
 
+Visible time annotations use one shared adaptive formatter for both `Rs` and
+gas-saturation figures:
+
+- the initial state is `t = 0`;
+- times shorter than one day use hours, for example `t = 1 h`;
+- times from one day through 300 days in the current schedule use days;
+- the 365-day state and later states use years; and
+- displayed numbers use at most two decimal places with trailing zeros
+  removed, for example `t = 1.25 yr`, `t = 2.5 yr`, and `t = 1000 yr`.
+
+This produces 210 distinct, synchronized labels for the current 210 report
+times. The exact PVD value is not changed: it remains in `TIME_YEARS` and is
+also written to the output metadata. Test the schedule-level contract with:
+
+```powershell
+python scripts/visualization/gom_rs_publication/test_time_labels.py
+```
+
 ## Validation reference
 
 For the approved Case 7 final frame, the renderer reports:
 
 ```text
 TIME_YEARS=1000
+TIME_LABEL=1000 yr
 SECTION_CELLS=24886
 CLAY_LOOPS=12
 FAULT_LOOPS=1

@@ -12,6 +12,7 @@ import csv
 import json
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import NamedTuple
 
 import matplotlib
 
@@ -97,6 +98,15 @@ COLORBAR_POSITION = (0.055, 0.59, COLORBAR_WIDTH, 0.028)
 COLORBAR_TITLE_POSITION = (0.055, 0.68)
 TIME_LABEL_POSITION = (0.055, 0.79)
 OUTPUT_PAD_INCHES = 0.03 / 4.0
+
+# MRST's physical year is 365.2425 days. The report schedule uses exact
+# hour/day times initially, then switches to explicit years. The displayed
+# label follows those human time scales while TIME_YEARS and file metadata
+# retain the exact PVD value.
+MRST_DAYS_PER_YEAR = 365.2425
+HOURS_PER_DAY = 24.0
+DISPLAY_YEAR_START_DAYS = 365.0
+TIME_BOUNDARY_ATOL_DAYS = 1.0e-8
 
 
 def parse_args() -> argparse.Namespace:
@@ -208,11 +218,56 @@ def infer_physical_time_years(
     return time_years, matched_pvd
 
 
-def format_time_years(time_years: float) -> str:
-    nearest_integer = round(time_years)
-    if np.isclose(time_years, nearest_integer, atol=1.0e-9, rtol=0.0):
-        return str(int(nearest_integer))
-    return f"{time_years:.6g}"
+class PhysicalTimeLabel(NamedTuple):
+    value: str
+    unit: str | None
+
+    @property
+    def plain(self) -> str:
+        if self.unit is None:
+            return self.value
+        return f"{self.value} {self.unit}"
+
+    @property
+    def latex(self) -> str:
+        if self.unit is None:
+            return rf"$t = {self.value}$"
+        return rf"$t = {self.value}\,\mathrm{{{self.unit}}}$"
+
+
+def format_compact_number(value: float, decimal_places: int = 2) -> str:
+    """Round for display and remove unnecessary trailing decimal zeros."""
+    rounded = round(float(value), decimal_places)
+    if rounded == 0:
+        rounded = 0.0
+    return f"{rounded:.{decimal_places}f}".rstrip("0").rstrip(".")
+
+
+def format_physical_time_label(time_years: float) -> PhysicalTimeLabel:
+    """Format a PVD time using compact hours, days, or years.
+
+    Exact physical time remains available through ``time_years``. Only the
+    visible annotation is rounded, to at most two decimal places, so all GOM
+    cases sharing the 210-step report schedule receive identical labels.
+    """
+    time_years = float(time_years)
+    if not np.isfinite(time_years) or time_years < 0:
+        raise ValueError("time_years must be a finite nonnegative value")
+    if np.isclose(time_years, 0.0, atol=1.0e-15, rtol=0.0):
+        return PhysicalTimeLabel("0", None)
+
+    time_days = time_years * MRST_DAYS_PER_YEAR
+    if time_days < 1.0 - TIME_BOUNDARY_ATOL_DAYS:
+        return PhysicalTimeLabel(
+            format_compact_number(time_days * HOURS_PER_DAY),
+            "h",
+        )
+    if time_days < DISPLAY_YEAR_START_DAYS - TIME_BOUNDARY_ATOL_DAYS:
+        return PhysicalTimeLabel(
+            format_compact_number(time_days),
+            "d",
+        )
+    return PhysicalTimeLabel(format_compact_number(time_years), "yr")
 
 
 def load_csp11_colormap(path: Path) -> LinearSegmentedColormap:
@@ -641,7 +696,7 @@ def main() -> None:
         args.pvd,
         args.time_years,
     )
-    time_text = format_time_years(time_years)
+    time_label = format_physical_time_label(time_years)
 
     if args.smooth_length_m < 0:
         raise ValueError("smooth-length-m must be nonnegative")
@@ -847,7 +902,7 @@ def main() -> None:
 
     figure.text(
         *TIME_LABEL_POSITION,
-        rf"$t = {time_text}\,\mathrm{{yr}}$",
+        time_label.latex,
         ha="left",
         va="top",
         fontsize=10.0,
@@ -861,7 +916,8 @@ def main() -> None:
             "geology-aware smoothing "
             "with exact boundary clipping, tight layout, LaTeX typography, "
             f"10-point annotation above the top seal, physical time "
-            f"{time_text} years, black left-aligned text, and a colorbar "
+            f"{time_label.plain} (exactly {time_years:.17g} years), black "
+            "left-aligned text, and a colorbar "
             f"{METADATA_COLORBAR_DESCRIPTION}, with quarter-sized outer "
             "margins"
         ),
@@ -908,6 +964,7 @@ def main() -> None:
     print(f"VIEW_Y_LIMITS={args.view_y_min:g},{args.view_y_max:g}")
     print(f"VIEW_Z_LIMITS={args.view_z_min:g},{args.view_z_max:g}")
     print(f"TIME_YEARS={time_years:g}")
+    print(f"TIME_LABEL={time_label.plain}")
     print(f"TIME_SOURCE_PVD={matched_pvd if matched_pvd else 'command_line'}")
     print(f"COLORBAR_WIDTH_FIGURE_FRACTION={colorbar_width:.12g}")
     print(f"SECTION_CELLS={section.n_cells}")

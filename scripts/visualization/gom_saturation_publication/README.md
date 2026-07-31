@@ -14,6 +14,7 @@ therefore use the same:
 - gray interbedded clay layers and dark fault-region feature edges;
 - fixed \(0.015\) display threshold;
 - physical-time lookup from the companion PVD collection;
+- adaptive hour/day/year annotation with compact numbers;
 - black, left-aligned, 10 pt LaTeX annotations; and
 - tight publication layout and vector PDF/SVG output.
 
@@ -81,6 +82,7 @@ CLAY_LOOPS=12
 FAULT_LOOPS=1
 GEOLOGICAL_COMPONENTS=51
 COLORBAR_WIDTH_FIGURE_FRACTION=0.250321194832
+TIME_LABEL=1000 yr
 ```
 
 The PDF and SVG preserve the plume shading as vector contour objects. The
