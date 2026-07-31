@@ -1,8 +1,9 @@
 """Create a geology-aware publication cross-section of dissolved CO2 (Rs).
 
 Cell-to-point interpolation and smoothing are performed independently inside
-connected geological domains. Values are therefore never averaged across clay,
-stratigraphic-unit, host/fault, or disconnected-component boundaries.
+connected geological domains. The default mode joins adjacent same-lithology
+stratigraphic units, while still preventing averaging across sand/clay,
+host/fault, rock-region, or disconnected-component boundaries.
 """
 
 from __future__ import annotations
@@ -93,6 +94,8 @@ RS_LIMITS = (0.0, 18.0)
 FIGURE_SIZE_INCHES = (6.1, 3.33)
 REGULAR_GRID_SHAPE = (335, 750)  # z, y
 DISPLAY_CUTOFF = 0.015
+STRATIGRAPHY_SMOOTHING_MODES = ("lithology_connected", "unit")
+DEFAULT_STRATIGRAPHY_SMOOTHING_MODE = "lithology_connected"
 COLORBAR_WIDTH = 0.38 * (5.0 / 9.0)
 COLORBAR_POSITION = (0.055, 0.59, COLORBAR_WIDTH, 0.028)
 COLORBAR_TITLE_POSITION = (0.055, 0.68)
@@ -146,6 +149,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--view-z-min", type=float, default=VIEW_Z_LIMITS[0])
     parser.add_argument("--view-z-max", type=float, default=VIEW_Z_LIMITS[1])
     parser.add_argument("--smooth-length-m", type=float, default=12.5)
+    parser.add_argument(
+        "--stratigraphy-smoothing-mode",
+        choices=STRATIGRAPHY_SMOOTHING_MODES,
+        default=DEFAULT_STRATIGRAPHY_SMOOTHING_MODE,
+        help=(
+            "Use connected sand/clay packets inside the non-fault "
+            "stratigraphy (default), or preserve every stratigraphic unit "
+            "as an independent smoothing domain."
+        ),
+    )
     parser.add_argument("--png-dpi", type=int, default=600)
     return parser.parse_args()
 
@@ -393,8 +406,19 @@ def add_exact_component_clip(
 
 def geological_base_domains(
     section: pv.PolyData,
+    stratigraphy_smoothing_mode: str = DEFAULT_STRATIGRAPHY_SMOOTHING_MODE,
 ) -> list[tuple[str, int, np.ndarray]]:
+    if stratigraphy_smoothing_mode not in STRATIGRAPHY_SMOOTHING_MODES:
+        raise ValueError(
+            "Unsupported stratigraphy smoothing mode: "
+            f"{stratigraphy_smoothing_mode}"
+        )
+
     unit_ids = np.asarray(section.cell_data["stratigraphic_unit_id"], dtype=int)
+    stratigraphy_classes = np.asarray(
+        section.cell_data[STRATIGRAPHY_FLAG],
+        dtype=int,
+    )
     rock_regions = np.asarray(section.cell_data["rock_region"], dtype=int)
     fault_flags = np.asarray(section.cell_data[FAULT_FLAG], dtype=int)
     domains: list[tuple[str, int, np.ndarray]] = []
@@ -406,11 +430,46 @@ def geological_base_domains(
         mask = background & (rock_regions == rock_region)
         domains.append(("background_rock", int(rock_region), mask))
 
-    # Every Al/Ar unit is an independent material domain. This prevents shared
-    # boundary vertices from averaging sand and clay values together.
-    for unit_id in sorted(np.unique(unit_ids[(fault_flags == 0) & (unit_ids > 0)])):
-        mask = (fault_flags == 0) & (unit_ids == unit_id)
-        domains.append(("stratigraphic_unit", int(unit_id), mask))
+    nonfault_stratigraphy = (fault_flags == 0) & (unit_ids > 0)
+    if stratigraphy_smoothing_mode == "unit":
+        # Comparison mode: every Al/Ar unit is independent, including
+        # adjacent units that share the same sand lithology.
+        for unit_id in sorted(np.unique(unit_ids[nonfault_stratigraphy])):
+            mask = nonfault_stratigraphy & (unit_ids == unit_id)
+            domains.append(("stratigraphic_unit", int(unit_id), mask))
+    else:
+        # Default publication mode: adjacent units with the same sand/clay
+        # class and rock region form one candidate material domain. The
+        # connectivity pass below still separates fault-offset sides,
+        # disconnected beds, pinch-outs, and spatial gaps. Sand and clay are
+        # never included in the same interpolation or smoothing operation.
+        material_pairs = sorted(
+            set(
+                zip(
+                    stratigraphy_classes[nonfault_stratigraphy].tolist(),
+                    rock_regions[nonfault_stratigraphy].tolist(),
+                )
+            )
+        )
+        for stratigraphy_class, rock_region in material_pairs:
+            if stratigraphy_class not in (1, 2):
+                raise ValueError(
+                    "Non-fault stratigraphic cells must have sand/clay flag "
+                    f"1 or 2, got {stratigraphy_class}."
+                )
+            mask = (
+                nonfault_stratigraphy
+                & (stratigraphy_classes == stratigraphy_class)
+                & (rock_regions == rock_region)
+            )
+            lithology = "sand" if stratigraphy_class == 1 else "clay"
+            domains.append(
+                (
+                    f"stratigraphic_{lithology}",
+                    int(stratigraphy_class),
+                    mask,
+                )
+            )
 
     # PREDICT and non-PREDICT fault cells are kept separate from host cells and
     # from one another.
@@ -429,9 +488,13 @@ def geological_base_domains(
 
 def connected_geological_components(
     section: pv.PolyData,
+    stratigraphy_smoothing_mode: str = DEFAULT_STRATIGRAPHY_SMOOTHING_MODE,
 ) -> list[dict[str, object]]:
     components: list[dict[str, object]] = []
-    for domain_type, geology_id, mask in geological_base_domains(section):
+    for domain_type, geology_id, mask in geological_base_domains(
+        section,
+        stratigraphy_smoothing_mode,
+    ):
         selected = (
             section.extract_cells(np.flatnonzero(mask))
             .extract_surface(algorithm="dataset_surface")
@@ -451,6 +514,17 @@ def connected_geological_components(
                 .clean()
             )
             raw_rs = np.asarray(component.cell_data[RS_ARRAY], dtype=float)
+            component_unit_ids = sorted(
+                np.unique(
+                    np.asarray(
+                        component.cell_data["stratigraphic_unit_id"],
+                        dtype=int,
+                    )
+                ).tolist()
+            )
+            component_unit_ids = [
+                unit_id for unit_id in component_unit_ids if unit_id > 0
+            ]
             stratigraphy_class = int(
                 np.rint(
                     np.median(
@@ -488,6 +562,9 @@ def connected_geological_components(
                     "component_id": int(component_id),
                     "mesh": component,
                     "cell_count": int(component.n_cells),
+                    "stratigraphic_unit_ids": ";".join(
+                        str(unit_id) for unit_id in component_unit_ids
+                    ),
                     "stratigraphy_class": stratigraphy_class,
                     "rock_region": rock_region,
                     "fault_flag": fault_flag,
@@ -635,6 +712,7 @@ def write_domain_audit(
         "geology_id",
         "component_id",
         "cell_count",
+        "stratigraphic_unit_ids",
         "stratigraphy_class",
         "rock_region",
         "fault_flag",
@@ -733,7 +811,10 @@ def main() -> None:
         section,
         fault_flag > 0,
     )
-    geological_components = connected_geological_components(section)
+    geological_components = connected_geological_components(
+        section,
+        args.stratigraphy_smoothing_mode,
+    )
     y_grid = np.linspace(*Y_LIMITS, REGULAR_GRID_SHAPE[1])
     z_grid = np.linspace(*Z_LIMITS, REGULAR_GRID_SHAPE[0])
 
@@ -900,7 +981,7 @@ def main() -> None:
     tick_labels[0].set_ha("left")
     tick_labels[-1].set_ha("right")
 
-    figure.text(
+    time_text = figure.text(
         *TIME_LABEL_POSITION,
         time_label.latex,
         ha="left",
@@ -909,12 +990,14 @@ def main() -> None:
         color="black",
         zorder=10.0,
     )
+    tight_bbox_artists = [colorbar_title, time_text]
 
     metadata = {
         "Title": (
             f"GOM {METADATA_QUANTITY_NAME} cross-section - "
             "geology-aware smoothing "
             "with exact boundary clipping, tight layout, LaTeX typography, "
+            f"stratigraphy mode {args.stratigraphy_smoothing_mode}, "
             f"10-point annotation above the top seal, physical time "
             f"{time_label.plain} (exactly {time_years:.17g} years), black "
             "left-aligned text, and a colorbar "
@@ -934,6 +1017,7 @@ def main() -> None:
         format="pdf",
         metadata=metadata,
         bbox_inches="tight",
+        bbox_extra_artists=tight_bbox_artists,
         pad_inches=OUTPUT_PAD_INCHES,
     )
     figure.savefig(
@@ -944,6 +1028,7 @@ def main() -> None:
             "Description": metadata["Subject"],
         },
         bbox_inches="tight",
+        bbox_extra_artists=tight_bbox_artists,
         pad_inches=OUTPUT_PAD_INCHES,
     )
     figure.savefig(
@@ -955,6 +1040,7 @@ def main() -> None:
             "Description": metadata["Subject"],
         },
         bbox_inches="tight",
+        bbox_extra_artists=tight_bbox_artists,
         pad_inches=OUTPUT_PAD_INCHES,
     )
     plt.close(figure)
@@ -966,11 +1052,23 @@ def main() -> None:
     print(f"TIME_YEARS={time_years:g}")
     print(f"TIME_LABEL={time_label.plain}")
     print(f"TIME_SOURCE_PVD={matched_pvd if matched_pvd else 'command_line'}")
+    print(
+        "STRATIGRAPHY_SMOOTHING_MODE="
+        f"{args.stratigraphy_smoothing_mode}"
+    )
     print(f"COLORBAR_WIDTH_FIGURE_FRACTION={colorbar_width:.12g}")
     print(f"SECTION_CELLS={section.n_cells}")
     print(f"CLAY_LOOPS={len(clay_loops)}")
     print(f"FAULT_LOOPS={len(fault_loops)}")
     print(f"GEOLOGICAL_COMPONENTS={len(geological_components)}")
+    print(
+        "STRATIGRAPHY_SAND_COMPONENTS="
+        f"{sum(row['domain_type'] == 'stratigraphic_sand' for row in geological_components)}"
+    )
+    print(
+        "STRATIGRAPHY_CLAY_COMPONENTS="
+        f"{sum(row['domain_type'] == 'stratigraphic_clay' for row in geological_components)}"
+    )
     print(f"DISPLAYED_COMPONENTS={displayed_domains}")
     print(f"SMOOTH_LENGTH_M={args.smooth_length_m:g}")
     print(f"DISPLAY_CUTOFF={DISPLAY_CUTOFF:g}")

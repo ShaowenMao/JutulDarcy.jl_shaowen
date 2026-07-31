@@ -15,7 +15,8 @@ The committed renderer corresponds to the approved Case 7 design:
 - CSP11 IceFire coloring with white at zero;
 - gray interbedded clay layers and dark fault-region feature edges;
 - interpolation and smoothing performed independently within each connected
-  geological domain;
+  geological domain, with adjacent same-lithology sand units combined inside
+  the non-fault stratigraphic region;
 - exact clipping at geological boundaries;
 - a fixed \(R_s=0.015\) display threshold;
 - black, left-aligned, 10 pt LaTeX annotations;
@@ -30,10 +31,10 @@ The VTU must contain these cell arrays:
 | Array | Use |
 | --- | --- |
 | `Rs` | Dissolved-CO2 ratio |
-| `stratigraphy_region_flag` | `2` identifies interbedded clay |
+| `stratigraphy_region_flag` | `1` identifies sand and `2` identifies clay; defines the default stratigraphic smoothing domains |
 | `fault_region_flag` | Values greater than zero identify fault cells |
-| `stratigraphic_unit_id` | Prevents smoothing across stratigraphic units |
-| `rock_region` | Prevents smoothing across rock-property regions |
+| `stratigraphic_unit_id` | Retained in the domain audit and used by the optional unit-level comparison mode |
+| `rock_region` | Keeps distinct rock-property regions in separate domains |
 
 Automatic time annotation requires two sibling files beside the VTU:
 
@@ -99,6 +100,27 @@ also written to the output metadata. Test the schedule-level contract with:
 python scripts/visualization/gom_rs_publication/test_time_labels.py
 ```
 
+## Stratigraphic smoothing
+
+The production default `--stratigraphy-smoothing-mode lithology_connected`
+replaces the earlier per-unit rendering behavior. It combines
+adjacent stratigraphic units only when they have the same sand/clay flag and
+rock region. A connectivity pass then keeps fault-offset sides, disconnected
+beds, pinch-outs, and spatial gaps independent. Sand and clay are therefore
+never interpolated or smoothed together.
+
+Use `--stratigraphy-smoothing-mode unit` to reproduce the earlier behavior in
+which every `stratigraphic_unit_id` was an independent domain. This mode is
+retained only for legacy comparison and diagnostics; it is not the publication
+default. The audit CSV records all constituent unit IDs for every connected
+component.
+
+Validate the synthetic clay/sand/sand/sand/clay contract with:
+
+```powershell
+python scripts/visualization/gom_rs_publication/test_stratigraphy_smoothing.py
+```
+
 ## Validation reference
 
 For the approved Case 7 final frame, the renderer reports:
@@ -106,10 +128,13 @@ For the approved Case 7 final frame, the renderer reports:
 ```text
 TIME_YEARS=1000
 TIME_LABEL=1000 yr
+STRATIGRAPHY_SMOOTHING_MODE=lithology_connected
 SECTION_CELLS=24886
 CLAY_LOOPS=12
 FAULT_LOOPS=1
-GEOLOGICAL_COMPONENTS=51
+GEOLOGICAL_COMPONENTS=31
+STRATIGRAPHY_SAND_COMPONENTS=10
+STRATIGRAPHY_CLAY_COMPONENTS=12
 DISPLAYED_COMPONENTS=6
 COLORBAR_WIDTH_FIGURE_FRACTION=0.250321194832
 ```

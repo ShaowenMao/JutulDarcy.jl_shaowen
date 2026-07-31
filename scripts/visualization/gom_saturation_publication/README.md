@@ -10,6 +10,7 @@ therefore use the same:
 
 - vertical slice at reservoir \(x=22{,}500\) m;
 - connected-geology-domain interpolation and smoothing;
+- lithology-connected smoothing inside the non-fault stratigraphic region;
 - exact clipping at geological boundaries;
 - gray interbedded clay layers and dark fault-region feature edges;
 - fixed \(0.015\) display threshold;
@@ -17,6 +18,10 @@ therefore use the same:
 - adaptive hour/day/year annotation with compact numbers;
 - black, left-aligned, 10 pt LaTeX annotations; and
 - tight publication layout and vector PDF/SVG output.
+
+The shared `lithology_connected` behavior is the production default. The
+earlier per-unit stratigraphic smoothing remains available only as an explicit
+legacy-comparison mode.
 
 The saturation-specific choices are:
 
@@ -80,9 +85,12 @@ TIME_YEARS=1000
 SECTION_CELLS=24886
 CLAY_LOOPS=12
 FAULT_LOOPS=1
-GEOLOGICAL_COMPONENTS=51
+GEOLOGICAL_COMPONENTS=31
+STRATIGRAPHY_SAND_COMPONENTS=10
+STRATIGRAPHY_CLAY_COMPONENTS=12
 COLORBAR_WIDTH_FIGURE_FRACTION=0.250321194832
 TIME_LABEL=1000 yr
+STRATIGRAPHY_SMOOTHING_MODE=lithology_connected
 ```
 
 The PDF and SVG preserve the plume shading as vector contour objects. The
