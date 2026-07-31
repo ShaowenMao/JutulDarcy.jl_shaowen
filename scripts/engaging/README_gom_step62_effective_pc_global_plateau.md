@@ -264,6 +264,15 @@ validates the final state and runtime diagnostics, rebuilds retained-restart
 and summary checksums, and promotes `CONTINUATION_PASS` and `PASS` last. A
 retry after a verified `PASS` is an idempotent no-op.
 
+Continuation finalization writes validator products into a new atomic staging
+directory. Before Julia starts, the wrapper copies the original case
+`RUN_METADATA.txt` beside the staged validator output and byte-compares it
+against the source. This is required because the effective-Pc validator
+resolves its immutable run contract relative to the output path. The staged
+metadata SHA-256 is recorded in
+`CONTINUATION_FINALIZATION_METADATA.txt`, preventing a completed future
+continuation from failing only because its validator context is incomplete.
+
 Set `GOM_EFFECTIVE_PC_CONTINUATION_PREFLIGHT_ONLY=true` for a read-only
 checkpoint/QOI audit. It validates and hashes the selected checkpoint but
 does not invoke the simulator or modify the source case.

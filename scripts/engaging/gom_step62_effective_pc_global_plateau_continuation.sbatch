@@ -349,6 +349,14 @@ export JULIA_NUM_GC_THREADS=1
 
 final_summary_stage="$stage_dir/final_state_summary.txt"
 runtime_diagnostics_stage="$stage_dir/runtime_diagnostics.txt"
+# The effective-Pc validator deliberately resolves RUN_METADATA.txt beside its
+# output path. Because continuation finalization writes into an atomic staging
+# directory, stage and byte-verify the immutable source metadata before
+# invoking Julia. This mirrors the validated recovery-finalizer contract.
+run_metadata_stage="$stage_dir/RUN_METADATA.txt"
+cp -- "$case_dir/RUN_METADATA.txt" "$run_metadata_stage"
+test -s "$run_metadata_stage"
+cmp -s "$case_dir/RUN_METADATA.txt" "$run_metadata_stage"
 cd "$continuation_repo"
 julia --startup-file=no --project="$simulation_repo" "$final_check" \
     "$restart_dir" "$summary_dir" "$final_summary_stage" \
@@ -453,6 +461,7 @@ printf '%s\n' \
     "resumed_after_step=$resumed_after" \
     "restart_step=$restart_step" \
     "checkpoint_sha256=$checkpoint_sha256" \
+    "run_metadata_sha256=$(sha256sum "$run_metadata_stage" | awk '{print $1}')" \
     'steps_completed=210' \
     'production_qoi_mode=required' \
     "runtime_diagnostics_output_sha256=$runtime_diagnostics_output_sha256" \
