@@ -73,6 +73,13 @@ DEFAULT_AUDIT_CSV = (
 RS_ARRAY = "Rs"
 STRATIGRAPHY_FLAG = "stratigraphy_region_flag"
 FAULT_FLAG = "fault_region_flag"
+INPUT_ARRAY_DESCRIPTION = "Rs"
+COLORBAR_TICKS = (0.0, 6.0, 12.0, 18.0)
+COLORBAR_TITLE = r"$R_s\;[\mathrm{Sm^3\,CO_2\,/\,Sm^3\,brine}]$"
+MATCH_COLORBAR_TO_TITLE_WIDTH = True
+METADATA_QUANTITY_NAME = "Rs"
+METADATA_SHADING_NAME = "Rs"
+METADATA_COLORBAR_DESCRIPTION = "matched to the title width"
 
 SLICE_X = 22500.0
 Y_LIMITS = (9000.0, 16500.0)
@@ -98,7 +105,10 @@ def parse_args() -> argparse.Namespace:
         "--input",
         type=Path,
         required=True,
-        help="Source GOM VTU containing Rs and geology indicator arrays.",
+        help=(
+            f"Source GOM VTU containing {INPUT_ARRAY_DESCRIPTION} "
+            "and geology indicator arrays."
+        ),
     )
     parser.add_argument("--preset", type=Path, default=DEFAULT_PRESET)
     parser.add_argument("--png", type=Path, default=DEFAULT_PNG)
@@ -787,11 +797,11 @@ def main() -> None:
             )
         )
     colorbar_axes.set_yticks([])
-    colorbar_axes.set_xticks([0.0, 6.0, 12.0, 18.0])
+    colorbar_axes.set_xticks(COLORBAR_TICKS)
     colorbar_axes.xaxis.set_ticks_position("top")
     colorbar_title = figure.text(
         *COLORBAR_TITLE_POSITION,
-        r"$R_s\;[\mathrm{Sm^3\,CO_2\,/\,Sm^3\,brine}]$",
+        COLORBAR_TITLE,
         ha="left",
         va="bottom",
         fontsize=10.0,
@@ -811,22 +821,26 @@ def main() -> None:
     for spine in colorbar_axes.spines.values():
         spine.set_visible(False)
 
-    # Match the colorbar length to the exact rendered width of the LaTeX title.
-    # This is measured after LaTeX layout rather than estimated from characters.
-    figure.canvas.draw()
-    renderer = figure.canvas.get_renderer()
-    title_bounds = colorbar_title.get_window_extent(renderer=renderer).transformed(
-        figure.transFigure.inverted()
-    )
-    colorbar_position = colorbar_axes.get_position()
-    colorbar_axes.set_position(
-        [
-            colorbar_position.x0,
-            colorbar_position.y0,
-            title_bounds.width,
-            colorbar_position.height,
-        ]
-    )
+    colorbar_width = COLORBAR_WIDTH
+    if MATCH_COLORBAR_TO_TITLE_WIDTH:
+        # Match the colorbar length to the exact rendered width of the LaTeX
+        # title. This is measured after LaTeX layout rather than estimated from
+        # characters.
+        figure.canvas.draw()
+        renderer = figure.canvas.get_renderer()
+        title_bounds = colorbar_title.get_window_extent(
+            renderer=renderer
+        ).transformed(figure.transFigure.inverted())
+        colorbar_position = colorbar_axes.get_position()
+        colorbar_width = title_bounds.width
+        colorbar_axes.set_position(
+            [
+                colorbar_position.x0,
+                colorbar_position.y0,
+                colorbar_width,
+                colorbar_position.height,
+            ]
+        )
     tick_labels = colorbar_axes.get_xticklabels()
     tick_labels[0].set_ha("left")
     tick_labels[-1].set_ha("right")
@@ -843,14 +857,17 @@ def main() -> None:
 
     metadata = {
         "Title": (
-            "GOM Rs cross-section - geology-aware smoothing "
+            f"GOM {METADATA_QUANTITY_NAME} cross-section - "
+            "geology-aware smoothing "
             "with exact boundary clipping, tight layout, LaTeX typography, "
             f"10-point annotation above the top seal, physical time "
             f"{time_text} years, black left-aligned text, and a colorbar "
-            "matched to the title width, with quarter-sized outer margins"
+            f"{METADATA_COLORBAR_DESCRIPTION}, with quarter-sized outer "
+            "margins"
         ),
         "Subject": (
-            "Geology-aware vector Rs shading clipped to exact geological "
+            f"Geology-aware vector {METADATA_SHADING_NAME} shading clipped "
+            "to exact geological "
             "boundaries, with clay interbeds, fault edges, and physical-time "
             "annotation"
         ),
@@ -892,7 +909,7 @@ def main() -> None:
     print(f"VIEW_Z_LIMITS={args.view_z_min:g},{args.view_z_max:g}")
     print(f"TIME_YEARS={time_years:g}")
     print(f"TIME_SOURCE_PVD={matched_pvd if matched_pvd else 'command_line'}")
-    print(f"COLORBAR_WIDTH_FIGURE_FRACTION={title_bounds.width:.12g}")
+    print(f"COLORBAR_WIDTH_FIGURE_FRACTION={colorbar_width:.12g}")
     print(f"SECTION_CELLS={section.n_cells}")
     print(f"CLAY_LOOPS={len(clay_loops)}")
     print(f"FAULT_LOOPS={len(fault_loops)}")

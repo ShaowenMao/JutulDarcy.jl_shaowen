@@ -4,6 +4,10 @@ This directory contains the reproducible renderer for the publication-quality
 Gulf of Mexico dissolved-CO2 cross-section. It produces PNG, SVG, PDF, and a
 domain-audit CSV from a three-dimensional VTU result.
 
+The paired gas-saturation configuration reuses this rendering engine and is
+documented in
+`scripts/visualization/gom_saturation_publication/README.md`.
+
 The committed renderer corresponds to the approved Case 7 design:
 
 - a vertical slice at reservoir \(x=22{,}500\) m;
