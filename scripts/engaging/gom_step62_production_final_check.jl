@@ -10,7 +10,8 @@ restart_dir, summary_dir, output_path, expected_case_key,
 
 const EXPECTED_CELLS = 2_165_082
 const EXPECTED_STEPS = 210
-const EXPECTED_RESTARTS = [78, 210]
+const LEGACY_RESTARTS = [78, 210]
+const CURRENT_RESTARTS = [51, 78, 110, 210]
 
 function read_named_row(path)
     lines = readlines(path)
@@ -22,6 +23,17 @@ function read_named_row(path)
     length(unique(names)) == length(names) ||
         error("$path has duplicate column names.")
     return Dict(names .=> values), lines
+end
+
+function parse_csv_values(::Type{T}, value, label) where T
+    parts = split(value, ','; keepempty = true)
+    all(part -> !isempty(strip(part)), parts) ||
+        error("$label contains an empty value: $value")
+    try
+        return parse.(T, strip.(parts))
+    catch exception
+        error("Could not parse $label '$value': $(sprint(showerror, exception))")
+    end
 end
 
 function validate_state(step)
@@ -84,11 +96,45 @@ end
 isdir(restart_dir) || error("Restart directory does not exist: $restart_dir")
 isdir(summary_dir) || error("Summary directory does not exist: $summary_dir")
 
-restart_indices = Jutul.valid_restart_indices(restart_dir)
-restart_indices == EXPECTED_RESTARTS || error(
-    "Expected retained restart steps $EXPECTED_RESTARTS, got $restart_indices."
+config, _ = read_named_row(joinpath(summary_dir, "production_config.tsv"))
+config["case_key"] == expected_case_key ||
+    error("Production configuration has the wrong case key.")
+config["schedule_steps"] == string(EXPECTED_STEPS) ||
+    error("Production configuration has the wrong schedule length.")
+config["rolling_checkpoints"] == "2" ||
+    error("Production configuration has the wrong rolling-checkpoint count.")
+
+expected_restarts = parse_csv_values(
+    Int,
+    config["retain_steps"],
+    "production retain_steps"
 )
-for step in EXPECTED_RESTARTS
+expected_retain_years = parse_csv_values(
+    Float64,
+    config["retain_years"],
+    "production retain_years"
+)
+length(expected_restarts) == length(expected_retain_years) ||
+    error("Production retained step/year counts do not match.")
+expected_restarts == sort(unique(expected_restarts)) ||
+    error("Production retained steps must be sorted and unique.")
+all(step -> 1 <= step <= EXPECTED_STEPS, expected_restarts) ||
+    error("Production retained steps are outside the schedule.")
+all(year -> isfinite(year) && year >= 0.0, expected_retain_years) ||
+    error("Production retained years must be finite and non-negative.")
+(
+    expected_restarts == LEGACY_RESTARTS ||
+    expected_restarts == CURRENT_RESTARTS
+) || error(
+    "Unsupported Step62 retention profile $expected_restarts; expected " *
+    "$LEGACY_RESTARTS (legacy recovery) or $CURRENT_RESTARTS (current)."
+)
+
+restart_indices = Jutul.valid_restart_indices(restart_dir)
+restart_indices == expected_restarts || error(
+    "Expected retained restart steps $expected_restarts, got $restart_indices."
+)
+for step in expected_restarts
     path = joinpath(restart_dir, "jutul_$step.jld2")
     isfile(path) && filesize(path) > 0 ||
         error("Retained restart checkpoint is missing or empty: $path")
@@ -168,17 +214,16 @@ isapprox(
     atol = 1.0e-10
 ) || error("Step 210 is not the 1000-year final state.")
 
-config, _ = read_named_row(joinpath(summary_dir, "production_config.tsv"))
-config["case_key"] == expected_case_key ||
-    error("Production configuration has the wrong case key.")
-config["schedule_steps"] == string(EXPECTED_STEPS) ||
-    error("Production configuration has the wrong schedule length.")
-config["retain_steps"] == "78,210" ||
-    error("Production configuration has the wrong retained steps.")
-config["retain_years"] == "50.0,1000.0" ||
-    error("Production configuration has the wrong retained years.")
-config["rolling_checkpoints"] == "2" ||
-    error("Production configuration has the wrong rolling-checkpoint count.")
+for (step, target_year) in zip(expected_restarts, expected_retain_years)
+    isapprox(
+        parse(Float64, rows[step]["time_years"]),
+        target_year;
+        rtol = 0,
+        atol = 1.0e-10
+    ) || error(
+        "Retained step $step does not match configured year $target_year."
+    )
+end
 
 completion, _ = read_named_row(
     joinpath(summary_dir, "PRODUCTION_OUTPUT_COMPLETE.tsv")
@@ -189,11 +234,12 @@ completion["case_key"] == expected_case_key ||
     error("Production output completion marker has the wrong case key.")
 completion["schedule_steps"] == string(EXPECTED_STEPS) ||
     error("Production output completion marker has the wrong schedule length.")
-completion["retained_restart_steps"] == "78,210" ||
+completion["retained_restart_steps"] == join(expected_restarts, ',') ||
     error("Production output completion marker has the wrong retained steps.")
 
-injection_end = validate_state(78)
-final_state = validate_state(210)
+retained_states = Dict(step => validate_state(step) for step in expected_restarts)
+injection_end = retained_states[78]
+final_state = retained_states[210]
 final_state.scanning_cells > 0 ||
     error("Final hysteresis state has no gas scanning cells.")
 parse(Int, rows[210]["hysteresis_scanning_cells"]) ==
@@ -219,7 +265,8 @@ open(output_path, "w") do io
     println(io, "cells=$EXPECTED_CELLS")
     println(io, "report_steps=$EXPECTED_STEPS")
     println(io, "summary_rows=$EXPECTED_STEPS")
-    println(io, "retained_restart_steps=$(join(EXPECTED_RESTARTS, ','))")
+    println(io, "retained_restart_steps=$(join(expected_restarts, ','))")
+    println(io, "retained_restart_years=$(join(expected_retain_years, ','))")
     println(io, "injection_end_step=78")
     println(io, "injection_end_years=50")
     println(io, "final_step=210")

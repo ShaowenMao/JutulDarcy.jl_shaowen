@@ -8,6 +8,7 @@ include(driver_path)
 
 off_options = co2_case_options(case_name = "GOM_SMALL")
 @test off_options.production_qoi_mode == "off"
+@test off_options.production_retain_years == [25.0, 50.0, 100.0, 1000.0]
 
 required_options = co2_case_options(
     case_name = "GOM_SMALL",

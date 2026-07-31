@@ -55,8 +55,10 @@ cp -- "$GOM_PRODUCTION_MANIFEST_COMPANION_PATH" \
 bash "$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_sampling_cases.sbatch"
 
 test "$(find "$restart_dir" -maxdepth 1 -type f \
-    -name 'jutul_*.jld2' | wc -l)" -eq 2
+    -name 'jutul_*.jld2' | wc -l)" -eq 4
+test -s "$restart_dir/jutul_51.jld2"
 test -s "$restart_dir/jutul_78.jld2"
+test -s "$restart_dir/jutul_110.jld2"
 test -s "$restart_dir/jutul_210.jld2"
 test "$(find "$summary_dir/rows" -maxdepth 1 -type f \
     -name 'step_*.tsv' | wc -l)" -eq 210
@@ -84,7 +86,8 @@ julia --startup-file=no --project=. "$final_check" \
 
 (
     cd "$case_dir"
-    sha256sum restart/jutul_78.jld2 restart/jutul_210.jld2 \
+    sha256sum restart/jutul_51.jld2 restart/jutul_78.jld2 \
+        restart/jutul_110.jld2 restart/jutul_210.jld2 \
         > RETAINED_RESTART_SHA256.txt
     sha256sum restart/production_output/report_steps.tsv \
         restart/production_output/PRODUCTION_OUTPUT_COMPLETE.tsv \
@@ -120,7 +123,7 @@ printf '%s\n' \
     "cells=2165082" \
     "steps_completed=210" \
     "summary_rows=210" \
-    "retained_restart_steps=78,210" \
+    "retained_restart_steps=51,78,110,210" \
     "schedule_end_years=1000" \
     "hysteresis_active=true" \
     "hysteresis_s_min=0.05" \

@@ -29,6 +29,54 @@ function run_production_spe1(
     )
 end
 
+@testset "Production output keeps four milestones plus rolling checkpoints" begin
+    mktempdir() do root
+        summary_dir = joinpath(root, "summary")
+        row_dir = joinpath(summary_dir, "rows")
+        retention_dir = joinpath(summary_dir, "retention")
+        mkpath.((summary_dir, row_dir, retention_dir))
+        milestones = [51, 78, 110, 210]
+        policy = JutulDarcy.ProductionOutputPolicy(
+            root,
+            summary_dir,
+            row_dir,
+            retention_dir,
+            collect(1.0:210.0),
+            210,
+            Set(milestones),
+            [25.0, 50.0, 100.0, 1000.0],
+            2,
+            "four_milestone_test",
+            repeat("c", 64),
+            false,
+            0,
+            nothing,
+            nothing,
+            false,
+            nothing
+        )
+
+        for step in (51, 78, 110, 111, 112)
+            write(joinpath(root, "jutul_$step.jld2"), "checkpoint")
+        end
+        kept, deleted = JutulDarcy.production_delete_obsolete_restarts!(
+            policy,
+            112
+        )
+        @test kept == [51, 78, 110, 111, 112]
+        @test isempty(deleted)
+
+        write(joinpath(root, "jutul_210.jld2"), "checkpoint")
+        kept, deleted = JutulDarcy.production_delete_obsolete_restarts!(
+            policy,
+            210
+        )
+        @test kept == milestones
+        @test deleted == [111, 112]
+        @test JutulDarcy.production_restart_indices(policy) == milestones
+    end
+end
+
 @testset "Production configuration rejects extra restart keys" begin
     mktempdir() do root
         summary_dir = joinpath(root, "summary")

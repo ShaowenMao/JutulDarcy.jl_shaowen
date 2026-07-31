@@ -197,7 +197,7 @@ function co2_case_options(;
         in_memory_reports = nothing,
         production_output_mode::Bool = false,
         production_summary_dir = nothing,
-        production_retain_years = [50.0, 1000.0],
+        production_retain_years = [25.0, 50.0, 100.0, 1000.0],
         production_rolling_checkpoints::Int = 2,
         production_case_key::AbstractString = "",
         production_campaign_manifest_sha256::AbstractString = "",
@@ -491,7 +491,7 @@ function run_co2_case(;
         in_memory_reports = nothing,
         production_output_mode::Bool = false,
         production_summary_dir = nothing,
-        production_retain_years = [50.0, 1000.0],
+        production_retain_years = [25.0, 50.0, 100.0, 1000.0],
         production_rolling_checkpoints::Int = 2,
         production_case_key::AbstractString = "",
         production_campaign_manifest_sha256::AbstractString = "",
@@ -826,7 +826,10 @@ function run_co2_case_from_env(; default_case_name::AbstractString, allowed_case
         production_summary_dir =
             co2_get_env_optional_str("PRODUCTION_SUMMARY_DIR"),
         production_retain_years =
-            co2_get_env_float_list("PRODUCTION_RETAIN_YEARS", [50.0, 1000.0]),
+            co2_get_env_float_list(
+                "PRODUCTION_RETAIN_YEARS",
+                [25.0, 50.0, 100.0, 1000.0]
+            ),
         production_rolling_checkpoints =
             co2_get_env_int("PRODUCTION_ROLLING_CHECKPOINTS", 2),
         production_case_key = co2_get_env_str(

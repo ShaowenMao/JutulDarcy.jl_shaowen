@@ -46,11 +46,13 @@ grep -Fxq "case_key=$GOM_PRODUCTION_CASE_KEY" \
     "$source_case/production_summary.txt"
 grep -Fxq 'steps_completed=210' "$source_case/production_summary.txt"
 grep -Fxq 'summary_rows=210' "$source_case/production_summary.txt"
-grep -Fxq 'retained_restart_steps=78,210' \
+grep -Fxq 'retained_restart_steps=51,78,110,210' \
     "$source_case/production_summary.txt"
 grep -Fxq 'production_output_mode=true' \
     "$source_case/production_summary.txt"
+test -s "$restart_dir/jutul_51.jld2"
 test -s "$restart_dir/jutul_78.jld2"
+test -s "$restart_dir/jutul_110.jld2"
 test -s "$restart_dir/jutul_210.jld2"
 (
     cd "$source_case"

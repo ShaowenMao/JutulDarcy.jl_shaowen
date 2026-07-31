@@ -31,7 +31,7 @@ workflow_scripts="$GOM_RECOVERY_WORKFLOW_REPO/scripts/engaging"
 sim_scripts="$GOM_RECOVERY_SIM_REPO/scripts/engaging"
 resolver="$GOM_RECOVERY_SIM_REPO/scripts/engaging/gom_step62_production_manifest.py"
 validator="$workflow_scripts/gom_step62_production_final_check.jl"
-expected_validator_sha256="82ae9403a3cf59e62c5243a5aab0a11c8419d40c84909f062736ef8dd046937b"
+expected_validator_sha256="3659a1b617934f5ef1bda18dc65abe2dbe8794183cbcdba17a5817bdb717177e"
 mkdir -p "$gom_root/logs" "$gom_root/submissions"
 
 "$production_python" "$resolver" --manifest "$GOM_PRODUCTION_MANIFEST" \

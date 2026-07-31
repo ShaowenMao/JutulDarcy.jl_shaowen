@@ -2977,7 +2977,7 @@ function simulate_mrst_case(fn;
         in_memory_reports::Int = 10,
         production_output_mode::Bool = false,
         production_summary_dir = nothing,
-        production_retain_years = [50.0, 1000.0],
+        production_retain_years = [25.0, 50.0, 100.0, 1000.0],
         production_rolling_checkpoints::Int = 2,
         production_case_key::AbstractString = "",
         production_campaign_manifest_sha256::AbstractString = "",

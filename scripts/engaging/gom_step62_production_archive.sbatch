@@ -122,7 +122,7 @@ for task in "${archive_tasks[@]}"; do
     grep -Fxq 'status=pass' "$smoke_case/smoke_summary.txt"
     grep -Fxq 'status=pass' "$full_case/production_summary.txt"
     grep -Fxq 'status=pass' "$vtu_case/export_summary.txt"
-    grep -Fxq 'retained_restart_steps=78,210' \
+    grep -Fxq 'retained_restart_steps=51,78,110,210' \
         "$full_case/production_summary.txt"
     (
         cd "$full_case"

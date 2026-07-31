@@ -151,9 +151,21 @@ manifest task identities.
 
 ## Production-output contract
 
-During a full run, scratch holds the requested milestone checkpoint plus the
-two newest restart-safe checkpoints. Every closed report step writes one
-small, atomic TSV summary row before obsolete checkpoints are removed.
+The current full-run profile retains exact report-boundary checkpoints at
+25, 50, 100, and 1,000 years (steps 51, 78, 110, and 210). During a running
+case, scratch holds every milestone already reached plus the two newest
+restart-safe rolling checkpoints. The peak is therefore five JLD2 files per
+active case after 100 years; completion removes the rolling files and leaves
+exactly the four milestones. Every closed report step writes one small,
+atomic TSV summary row before obsolete checkpoints are removed.
+
+A Step62 restart is approximately 254 MB in the measured pilot outputs. Four
+final checkpoints therefore require about 1.02 GB per case (approximately
+1.65 TB for 1,620 archived cases), while the five-file running peak is about
+1.27 GB per active case. Keeping the two additional milestones does not add
+restart writes: Jutul already writes each report-step restart atomically and
+the retention policy controls which files are deleted. It adds only two final
+validation reads and does not impose a new array-concurrency limit.
 
 ## Recovering an interrupted immutable campaign
 
@@ -167,20 +179,28 @@ Submission is campaign-locked against duplicate active DAGs, and its receipt
 is copied to durable campaign storage before the submission is considered
 complete.
 
-For the r4 seven-case pilot, six cases are validation-only. Task 5 resumes
-from its latest explicitly selected valid checkpoint. VTU and archive stages
-remain dependency-gated until all seven case directories contain verified
-restart hashes, production summaries, and PASS markers.
+For the legacy r4 seven-case pilot, six cases are validation-only. Task 5
+resumes from its latest explicitly selected valid checkpoint. VTU and archive
+stages remain dependency-gated until all seven case directories contain
+verified restart hashes, production summaries, and PASS markers.
 
-After successful report step 210, each case contains:
+The final checker reads the immutable `production_config.tsv` and supports
+the legacy 50/1,000-year profile solely so those existing campaigns remain
+recoverable. The current full-run script independently requires the new
+four-checkpoint profile, so a new run cannot silently fall back to the legacy
+contract.
+
+After successful report step 210, each current-profile case contains:
 
 - exactly 210 per-step summary rows;
 - one consolidated `report_steps.tsv`;
 - `PRODUCTION_OUTPUT_COMPLETE.tsv`;
-- restart `jutul_78.jld2` (50 years, end of injection); and
+- restart `jutul_51.jld2` (25 years);
+- restart `jutul_78.jld2` (50 years, end of injection);
+- restart `jutul_110.jld2` (100 years); and
 - restart `jutul_210.jld2` (1,000 years).
 
-The final checker reads both retained states, verifies pressure, saturation,
+The final checker reads all retained states, verifies pressure, saturation,
 `Rs`, and `MaxSaturations`, checks all 210 summary rows against the
 consolidated table, and requires a nonempty final hysteresis scanning state.
 It does not require the deleted intermediate restart files.
@@ -243,7 +263,8 @@ input and one newly added geology input.
 ## Standard VTU output
 
 The VTU array resolves the exact full-result case directory from its case key
-and full array job ID. It exports:
+and full array job ID. Retaining 25- and 100-year restarts does not expand the
+default visualization output. The VTU stage continues to export:
 
 - initial condition (0 years);
 - retained report step 78 (50 years); and
@@ -265,7 +286,7 @@ outputs into:
 
 The three-step smoke summaries, per-step TSV evidence, metadata, and logs are
 archived, but their disposable rolling JLD2 files are not. The full cases keep
-both retained production checkpoints.
+all four retained production checkpoints.
 
 It then writes one archive-wide `SHA256SUMS`, verifies every destination
 file, and atomically renames the staging directory to:

@@ -103,7 +103,7 @@ gom_production_export_locked_physics() {
     # Existing frozen pilot inputs predate exact QoI semantics, so this
     # remains off unless a regenerated campaign explicitly requires it.
     export PRODUCTION_QOI_MODE="${PRODUCTION_QOI_MODE:-off}"
-    export PRODUCTION_RETAIN_YEARS=50,1000
+    export PRODUCTION_RETAIN_YEARS=25,50,100,1000
     export PRODUCTION_ROLLING_CHECKPOINTS=2
     export PRODUCTION_CASE_KEY="$GOM_PRODUCTION_CASE_KEY"
     export PRODUCTION_CAMPAIGN_MANIFEST_SHA256="$GOM_PRODUCTION_MANIFEST_SHA256"
@@ -163,7 +163,7 @@ gom_production_write_metadata() {
         "well_volume_fraction=1e-3" \
         "production_output_mode=true" \
         "production_qoi_mode=$PRODUCTION_QOI_MODE" \
-        "production_retain_years=50,1000" \
+        "production_retain_years=25,50,100,1000" \
         "production_rolling_checkpoints=2" \
         "memory=${SLURM_MEM_PER_NODE:-unknown}" \
         "cpus=${SLURM_CPUS_PER_TASK:-unknown}" \

@@ -847,7 +847,7 @@ function setup_production_output(
         schedule_dt,
         restart;
         summary_dir = nothing,
-        retain_years = [50.0, 1000.0],
+        retain_years = [25.0, 50.0, 100.0, 1000.0],
         rolling_checkpoints::Integer = 2,
         case_key::AbstractString = "",
         campaign_manifest_sha256::AbstractString = "",
