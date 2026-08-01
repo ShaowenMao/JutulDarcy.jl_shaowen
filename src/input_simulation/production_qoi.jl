@@ -1,8 +1,10 @@
-const PRODUCTION_QOI_SCHEMA_VERSION = 1
+const PRODUCTION_QOI_SCHEMA_VERSION = 3
 const PRODUCTION_QOI_ROW_PATTERN = r"^step_(\d{6})\.tsv$"
 const PRODUCTION_QOI_SG_THRESHOLDS = (1.0e-4, 1.0e-3, 1.0e-2)
 const PRODUCTION_QOI_FLUX_METHOD =
     "report_endpoint_instantaneous_blackoil_component_mass_flux"
+const PRODUCTION_QOI_MOBILITY_METHOD =
+    "cell_local_active_krg_zero_mobility_endpoint_branch_partition_v2"
 
 """
 One immutable accounting region. `atomic_codes` refers to the disjoint
@@ -36,6 +38,27 @@ struct ProductionQoIInterface
     definition::String
 end
 
+"""
+Static cell-level inputs needed to reproduce the gas relative-permeability
+branch used by the simulator. Dynamic quantities (`Sg` and historical
+`Sg_max`) are read from each report state.
+
+`mode` is `:drainage`, `:killough`, or `:imbibition_only`. Production GoM
+hysteresis cases use `:killough`; unsupported hysteresis algorithms fail during
+setup instead of silently producing an approximate trapped inventory.
+"""
+struct ProductionQoIGasMobilityAccounting
+    mode::Symbol
+    drainage_critical::Vector{Float64}
+    imbibition_critical::Vector{Float64}
+    drainage_s_max::Vector{Float64}
+    imbibition_s_max::Vector{Float64}
+    killough_tolerance::Float64
+    killough_s_min::Float64
+    activation_s_threshold::Float64
+    activation_epsilon::Float64
+end
+
 mutable struct ProductionQoIContext
     mode::String
     summary_dir::String
@@ -53,7 +76,7 @@ mutable struct ProductionQoIContext
     initial_pressure::Vector{Float64}
     pore_volume::Vector{Float64}
     centroids::Matrix{Float64}
-    gas_critical_saturation::Vector{Float64}
+    gas_mobility::ProductionQoIGasMobilityAccounting
     initial_atomic_total_co2_mass_kg::Vector{Float64}
     initial_total_co2_mass_kg::Float64
     primary_label_sha256::String
@@ -230,32 +253,214 @@ function production_qoi_injector_name(mrst_data)
     return ""
 end
 
-function production_qoi_critical_saturation(rmodel, nc::Integer)
+function production_qoi_effective_gas_relperm(
+        relperm,
+        state,
+        cell::Integer;
+        drainage::Bool
+    )
+    phases = relperm.phases
+    phases in (:og, :wg) || error(
+        "QoI gas-mobility accounting requires a two-phase OG or WG " *
+        "relative-permeability model; found $phases."
+    )
+    reg = Int(region(relperm.regions, cell))
+    if phases == :og
+        wet_tables = relperm.krog
+    else
+        wet_tables = relperm.krw
+    end
+    gas_tables = relperm.krg
+    if drainage
+        wet_base = table_by_region(wet_tables, reg)
+        gas_base = table_by_region(gas_tables, reg)
+    else
+        wet_base = imbibition_table_by_region(wet_tables, reg)
+        gas_base = imbibition_table_by_region(gas_tables, reg)
+    end
+    scalers = get_endpoint_scalers(
+        state,
+        endpoint_scaling_model(relperm),
+        Val(phases);
+        drainage = drainage
+    )
+    _, gas = get_two_phase_relperms(
+        relperm,
+        cell,
+        wet_base,
+        gas_base,
+        scalers
+    )
+    return gas
+end
+
+function production_qoi_gas_mobility_accounting(
+        rmodel,
+        state,
+        nc::Integer
+    )
     relperm = rmodel[:RelativePermeabilities]
     relperm isa ReservoirRelativePermeabilities || error(
         "QoI mobile/immobile accounting requires ReservoirRelativePermeabilities."
     )
-    krg = relperm.krg
-    regions = relperm.regions
-    use_imbibition = hysteresis_is_active(relperm)
-    by_region = Dict{Int, Float64}()
-    result = Vector{Float64}(undef, nc)
-    @inbounds for cell in 1:nc
-        reg = Int(region(regions, cell))
-        critical = get!(by_region, reg) do
-            table = use_imbibition ?
-                imbibition_table_by_region(krg, reg) :
-                table_by_region(krg, reg)
-            value = Float64(table.critical)
-            isfinite(value) && 0.0 <= value <= 1.0 || error(
-                "Gas critical saturation for relative-permeability region " *
-                "$reg is invalid: $value."
-            )
-            value
-        end
-        result[cell] = critical
+    gas_hysteresis = relperm.hysteresis_g
+    if gas_hysteresis isa NoHysteresis
+        mode = :drainage
+        killough_tolerance = NaN
+        killough_s_min = NaN
+    elseif gas_hysteresis isa KilloughHysteresis
+        mode = :killough
+        killough_tolerance = Float64(gas_hysteresis.tol)
+        killough_s_min = Float64(gas_hysteresis.s_min)
+        haskey(state, :MaxSaturations) || error(
+            "Killough QoI accounting requires MaxSaturations in the " *
+            "simulator state."
+        )
+    elseif gas_hysteresis isa ImbibitionOnlyHysteresis
+        mode = :imbibition_only
+        killough_tolerance = NaN
+        killough_s_min = NaN
+    else
+        error(
+            "Rigorous QoI trapped-mass accounting does not support gas " *
+            "hysteresis model $(typeof(gas_hysteresis)). Supported models " *
+            "are NoHysteresis, KilloughHysteresis, and " *
+            "ImbibitionOnlyHysteresis."
+        )
     end
-    return result
+
+    drainage_critical = Vector{Float64}(undef, nc)
+    imbibition_critical = Vector{Float64}(undef, nc)
+    drainage_s_max = Vector{Float64}(undef, nc)
+    imbibition_s_max = Vector{Float64}(undef, nc)
+    @inbounds for cell in 1:nc
+        drainage = production_qoi_effective_gas_relperm(
+            relperm,
+            state,
+            cell;
+            drainage = true
+        )
+        if mode == :drainage
+            imbibition = drainage
+        else
+            imbibition = production_qoi_effective_gas_relperm(
+                relperm,
+                state,
+                cell;
+                drainage = false
+            )
+        end
+        drainage_critical[cell] = Float64(value(drainage.critical))
+        imbibition_critical[cell] = Float64(value(imbibition.critical))
+        drainage_s_max[cell] = Float64(value(drainage.s_max))
+        imbibition_s_max[cell] = Float64(value(imbibition.s_max))
+        for (label, endpoint) in (
+                ("drainage critical", drainage_critical[cell]),
+                ("imbibition critical", imbibition_critical[cell]),
+                ("drainage maximum", drainage_s_max[cell]),
+                ("imbibition maximum", imbibition_s_max[cell])
+            )
+            isfinite(endpoint) && 0.0 <= endpoint <= 1.0 || error(
+                "Gas $label saturation for cell $cell is invalid: $endpoint."
+            )
+        end
+        drainage_critical[cell] <= drainage_s_max[cell] || error(
+            "Gas drainage endpoints are reversed in cell $cell."
+        )
+        imbibition_critical[cell] <= imbibition_s_max[cell] || error(
+            "Gas imbibition endpoints are reversed in cell $cell."
+        )
+        mode == :drainage ||
+            imbibition_critical[cell] >= drainage_critical[cell] || error(
+            "Gas imbibition critical saturation is below the drainage " *
+            "critical saturation in cell $cell."
+        )
+    end
+    return ProductionQoIGasMobilityAccounting(
+        mode,
+        drainage_critical,
+        imbibition_critical,
+        drainage_s_max,
+        imbibition_s_max,
+        killough_tolerance,
+        killough_s_min,
+        Float64(relperm.hysteresis_s_threshold),
+        Float64(relperm.hysteresis_s_eps)
+    )
+end
+
+function production_qoi_active_gas_mobility(
+        accounting::ProductionQoIGasMobilityAccounting,
+        cell::Integer,
+        gas_saturation::Real,
+        historical_maximum::Union{Nothing, Real}
+    )
+    drainage_critical = accounting.drainage_critical[cell]
+    if accounting.mode == :drainage
+        return (
+            critical = drainage_critical,
+            branch = :drainage,
+            history_dependent = false
+        )
+    elseif accounting.mode == :imbibition_only
+        return (
+            critical = accounting.imbibition_critical[cell],
+            branch = :imbibition,
+            history_dependent = true
+        )
+    end
+
+    accounting.mode == :killough || error(
+        "Unknown QoI gas-mobility accounting mode $(accounting.mode)."
+    )
+    isnothing(historical_maximum) && error(
+        "Killough QoI accounting requires local historical gas saturation."
+    )
+    sg = Float64(gas_saturation)
+    sg_max = Float64(historical_maximum)
+    epsilon = accounting.activation_epsilon
+    if sg >= sg_max - epsilon ||
+            sg <= accounting.activation_s_threshold
+        return (
+            critical = drainage_critical,
+            branch = :drainage,
+            history_dependent = false
+        )
+    elseif sg_max >= accounting.imbibition_s_max[cell] - epsilon
+        return (
+            critical = accounting.imbibition_critical[cell],
+            branch = :imbibition,
+            history_dependent = true
+        )
+    elseif sg < accounting.killough_s_min
+        return (
+            critical = drainage_critical,
+            branch = :drainage_below_killough_s_min,
+            history_dependent = false
+        )
+    end
+
+    scanning_critical = if accounting.imbibition_critical[cell] ==
+            drainage_critical
+        drainage_critical
+    else
+        killough_scanning_critical_saturation(
+            accounting.killough_tolerance,
+            drainage_critical,
+            accounting.imbibition_critical[cell],
+            accounting.drainage_s_max[cell],
+            sg_max
+        )
+    end
+    isfinite(scanning_critical) && 0.0 <= scanning_critical <= 1.0 || error(
+        "Killough scanning critical saturation is invalid in cell $cell: " *
+        "$scanning_critical."
+    )
+    return (
+        critical = Float64(scanning_critical),
+        branch = :scanning,
+        history_dependent = true
+    )
 end
 
 function production_qoi_neighbors(rmodel, nc::Integer)
@@ -1096,8 +1301,11 @@ function setup_production_qoi(
     initial_state = production_qoi_full_reservoir_state(sim)
     initial_pressure =
         production_qoi_initial_pressure(mrst_data, initial_state, nc)
-    gas_critical_saturation =
-        production_qoi_critical_saturation(rmodel, nc)
+    gas_mobility = production_qoi_gas_mobility_accounting(
+        rmodel,
+        initial_state,
+        nc
+    )
 
     qoi_root = joinpath(summary_dir, "qoi")
     ready_dir = joinpath(qoi_root, "ready")
@@ -1149,7 +1357,7 @@ function setup_production_qoi(
         initial_pressure,
         pore_volume,
         centroids,
-        gas_critical_saturation,
+        gas_mobility,
         zeros(Float64, length(compiled.atomic_regions)),
         NaN,
         compiled.primary_label_sha256,
@@ -1178,24 +1386,58 @@ const PRODUCTION_QOI_BUNDLE_COLUMNS = Symbol[
     :region_role,
     :cell_count,
     :pore_volume_m3,
+    :free_co2_mass_kg,
     :mobile_free_co2_mass_kg,
     :immobile_free_co2_mass_kg,
+    :drainage_critical_immobile_free_co2_mass_kg,
+    :residual_trapped_co2_mass_kg,
+    :hysteresis_incremental_trapped_co2_mass_kg,
     :dissolved_co2_mass_kg,
     :total_co2_mass_kg,
     :fraction_of_net_domain_co2_change,
     :gas_saturation_mean,
+    :gas_saturation_pv_weighted_mean,
     :gas_saturation_max,
     :historical_gas_saturation_max,
     :hysteresis_scanning_cell_count,
+    :hysteresis_imbibition_cell_count,
+    :hysteresis_active_cell_count,
+    :residual_trapped_cell_count,
+    :hysteresis_incremental_trapped_cell_count,
+    :active_gas_critical_saturation_pv_weighted_mean,
+    :active_gas_critical_saturation_max,
     :gas_filled_pore_volume_m3,
+    :mobile_free_gas_pore_volume_m3,
+    :immobile_free_gas_pore_volume_m3,
+    :drainage_critical_immobile_gas_pore_volume_m3,
+    :residual_trapped_gas_pore_volume_m3,
+    :hysteresis_incremental_trapped_gas_pore_volume_m3,
     :cells_sg_ge_1e_4,
     :cells_sg_ge_1e_3,
     :cells_sg_ge_1e_2,
+    :pore_volume_sg_ge_1e_4_m3,
+    :pore_volume_sg_ge_1e_3_m3,
+    :pore_volume_sg_ge_1e_2_m3,
     :pressure_change_mean_pa,
+    :pressure_change_pv_weighted_mean_pa,
+    :pressure_change_pv_weighted_rms_pa,
     :pressure_change_max_pa,
     :pressure_change_abs_max_pa,
     :capillary_pressure_mean_pa,
+    :capillary_pressure_pv_weighted_mean_pa,
     :capillary_pressure_max_pa,
+    :free_co2_centroid_x_m,
+    :free_co2_centroid_y_m,
+    :free_co2_centroid_z_m,
+    :free_co2_spread_x_m,
+    :free_co2_spread_y_m,
+    :free_co2_spread_z_m,
+    :dissolved_co2_centroid_x_m,
+    :dissolved_co2_centroid_y_m,
+    :dissolved_co2_centroid_z_m,
+    :dissolved_co2_spread_x_m,
+    :dissolved_co2_spread_y_m,
+    :dissolved_co2_spread_z_m,
     :plume_cell_count_sg_ge_1e_4,
     :plume_x_min_m,
     :plume_x_max_m,
@@ -1203,8 +1445,15 @@ const PRODUCTION_QOI_BUNDLE_COLUMNS = Symbol[
     :plume_y_max_m,
     :plume_z_min_m,
     :plume_z_max_m,
+    :mobility_partition_method,
+    :domain_free_co2_mass_kg,
     :domain_mobile_free_co2_mass_kg,
     :domain_immobile_free_co2_mass_kg,
+    :domain_drainage_critical_immobile_free_co2_mass_kg,
+    :domain_residual_trapped_co2_mass_kg,
+    :domain_residual_trapped_gas_pore_volume_m3,
+    :domain_hysteresis_incremental_trapped_co2_mass_kg,
+    :domain_hysteresis_incremental_trapped_gas_pore_volume_m3,
     :domain_dissolved_co2_mass_kg,
     :domain_total_co2_mass_kg,
     :net_domain_co2_change_kg,
@@ -1225,7 +1474,16 @@ const PRODUCTION_QOI_BUNDLE_COLUMNS = Symbol[
     :domain_pressure_change_max_pa,
     :fault_pressure_change_max_pa,
     :domain_hysteresis_scanning_cell_count,
+    :domain_hysteresis_active_cell_count,
+    :domain_residual_trapped_cell_count,
+    :domain_hysteresis_incremental_trapped_cell_count,
     :fault_hysteresis_scanning_cell_count,
+    :fault_residual_trapped_co2_mass_kg,
+    :top_seal_residual_trapped_co2_mass_kg,
+    :overburden_residual_trapped_co2_mass_kg,
+    :fault_hysteresis_incremental_trapped_co2_mass_kg,
+    :top_seal_hysteresis_incremental_trapped_co2_mass_kg,
+    :overburden_hysteresis_incremental_trapped_co2_mass_kg,
     :injector_name,
     :injector_bhp_pa,
     :interface_id,
@@ -1254,8 +1512,15 @@ const PRODUCTION_QOI_GLOBAL_COLUMNS = Symbol[
     :time_seconds,
     :time_years,
     :qoi_evaluation_seconds,
+    :mobility_partition_method,
+    :domain_free_co2_mass_kg,
     :domain_mobile_free_co2_mass_kg,
     :domain_immobile_free_co2_mass_kg,
+    :domain_drainage_critical_immobile_free_co2_mass_kg,
+    :domain_residual_trapped_co2_mass_kg,
+    :domain_residual_trapped_gas_pore_volume_m3,
+    :domain_hysteresis_incremental_trapped_co2_mass_kg,
+    :domain_hysteresis_incremental_trapped_gas_pore_volume_m3,
     :domain_dissolved_co2_mass_kg,
     :domain_total_co2_mass_kg,
     :net_domain_co2_change_kg,
@@ -1276,7 +1541,16 @@ const PRODUCTION_QOI_GLOBAL_COLUMNS = Symbol[
     :domain_pressure_change_max_pa,
     :fault_pressure_change_max_pa,
     :domain_hysteresis_scanning_cell_count,
+    :domain_hysteresis_active_cell_count,
+    :domain_residual_trapped_cell_count,
+    :domain_hysteresis_incremental_trapped_cell_count,
     :fault_hysteresis_scanning_cell_count,
+    :fault_residual_trapped_co2_mass_kg,
+    :top_seal_residual_trapped_co2_mass_kg,
+    :overburden_residual_trapped_co2_mass_kg,
+    :fault_hysteresis_incremental_trapped_co2_mass_kg,
+    :top_seal_hysteresis_incremental_trapped_co2_mass_kg,
+    :overburden_hysteresis_incremental_trapped_co2_mass_kg,
     :injector_name,
     :injector_bhp_pa,
     :flux_method
@@ -1294,24 +1568,58 @@ const PRODUCTION_QOI_REGION_COLUMNS = Symbol[
     :region_role,
     :cell_count,
     :pore_volume_m3,
+    :free_co2_mass_kg,
     :mobile_free_co2_mass_kg,
     :immobile_free_co2_mass_kg,
+    :drainage_critical_immobile_free_co2_mass_kg,
+    :residual_trapped_co2_mass_kg,
+    :hysteresis_incremental_trapped_co2_mass_kg,
     :dissolved_co2_mass_kg,
     :total_co2_mass_kg,
     :fraction_of_net_domain_co2_change,
     :gas_saturation_mean,
+    :gas_saturation_pv_weighted_mean,
     :gas_saturation_max,
     :historical_gas_saturation_max,
     :hysteresis_scanning_cell_count,
+    :hysteresis_imbibition_cell_count,
+    :hysteresis_active_cell_count,
+    :residual_trapped_cell_count,
+    :hysteresis_incremental_trapped_cell_count,
+    :active_gas_critical_saturation_pv_weighted_mean,
+    :active_gas_critical_saturation_max,
     :gas_filled_pore_volume_m3,
+    :mobile_free_gas_pore_volume_m3,
+    :immobile_free_gas_pore_volume_m3,
+    :drainage_critical_immobile_gas_pore_volume_m3,
+    :residual_trapped_gas_pore_volume_m3,
+    :hysteresis_incremental_trapped_gas_pore_volume_m3,
     :cells_sg_ge_1e_4,
     :cells_sg_ge_1e_3,
     :cells_sg_ge_1e_2,
+    :pore_volume_sg_ge_1e_4_m3,
+    :pore_volume_sg_ge_1e_3_m3,
+    :pore_volume_sg_ge_1e_2_m3,
     :pressure_change_mean_pa,
+    :pressure_change_pv_weighted_mean_pa,
+    :pressure_change_pv_weighted_rms_pa,
     :pressure_change_max_pa,
     :pressure_change_abs_max_pa,
     :capillary_pressure_mean_pa,
+    :capillary_pressure_pv_weighted_mean_pa,
     :capillary_pressure_max_pa,
+    :free_co2_centroid_x_m,
+    :free_co2_centroid_y_m,
+    :free_co2_centroid_z_m,
+    :free_co2_spread_x_m,
+    :free_co2_spread_y_m,
+    :free_co2_spread_z_m,
+    :dissolved_co2_centroid_x_m,
+    :dissolved_co2_centroid_y_m,
+    :dissolved_co2_centroid_z_m,
+    :dissolved_co2_spread_x_m,
+    :dissolved_co2_spread_y_m,
+    :dissolved_co2_spread_z_m,
     :plume_cell_count_sg_ge_1e_4,
     :plume_x_min_m,
     :plume_x_max_m,
@@ -1390,6 +1698,8 @@ function production_qoi_state_arrays(state, nc::Integer)
     length(rs) == nc || error("Rs has the wrong cell count.")
     all(value -> value isa Real && isfinite(value), rs) ||
         error("Rs contains a non-finite value.")
+    all(value -> value >= 0.0, rs) ||
+        error("Rs contains a negative dissolved-gas ratio.")
     bo = view(shrinkage, 1, :)
     bg = view(shrinkage, 2, :)
     gas_density = view(densities, 2, :)
@@ -1399,8 +1709,12 @@ function production_qoi_state_arrays(state, nc::Integer)
     all(value -> -1.0e-8 <= value <= 1.0 + 1.0e-8, sw) &&
         all(value -> -1.0e-8 <= value <= 1.0 + 1.0e-8, sg) ||
         error("QoI state contains saturation outside tolerance.")
-    all(>(0.0), bg) ||
-        error("QoI state contains a non-positive gas shrinkage factor.")
+    all(cell -> abs(sw[cell] + sg[cell] - 1.0) <= 1.0e-6, 1:nc) ||
+        error("QoI liquid and gas saturations do not sum to one.")
+    all(>(0.0), bo) && all(>(0.0), bg) ||
+        error("QoI state contains a non-positive shrinkage factor.")
+    all(>(0.0), gas_density) ||
+        error("QoI state contains a non-positive gas density.")
 
     capillary_pressure = nothing
     if haskey(state, :CapillaryPressure)
@@ -1471,22 +1785,47 @@ function production_qoi_atomic_inventory(context, state)
     natomic = length(context.atomic_regions)
     count = zeros(Int, natomic)
     pv = zeros(Float64, natomic)
+    free = zeros(Float64, natomic)
     mobile = zeros(Float64, natomic)
     immobile = zeros(Float64, natomic)
+    drainage_critical_immobile = zeros(Float64, natomic)
+    residual_trapped = zeros(Float64, natomic)
+    hysteresis_incremental_trapped = zeros(Float64, natomic)
     dissolved = zeros(Float64, natomic)
     total = zeros(Float64, natomic)
     sg_sum = zeros(Float64, natomic)
+    sg_pv_sum = zeros(Float64, natomic)
     sg_max = fill(-Inf, natomic)
     historical_sg_max = fill(-Inf, natomic)
     scanning_count = zeros(Int, natomic)
+    imbibition_count = zeros(Int, natomic)
+    hysteresis_active_count = zeros(Int, natomic)
+    residual_trapped_count = zeros(Int, natomic)
+    hysteresis_incremental_trapped_count = zeros(Int, natomic)
+    active_critical_pv_sum = zeros(Float64, natomic)
+    active_critical_max = fill(-Inf, natomic)
     gas_pv = zeros(Float64, natomic)
+    mobile_gas_pv = zeros(Float64, natomic)
+    immobile_gas_pv = zeros(Float64, natomic)
+    drainage_critical_gas_pv = zeros(Float64, natomic)
+    residual_trapped_gas_pv = zeros(Float64, natomic)
+    hysteresis_incremental_trapped_gas_pv = zeros(Float64, natomic)
     threshold_counts = zeros(Int, 3, natomic)
+    threshold_pv = zeros(Float64, 3, natomic)
     dp_sum = zeros(Float64, natomic)
+    dp_pv_sum = zeros(Float64, natomic)
+    dp2_pv_sum = zeros(Float64, natomic)
     dp_max = fill(-Inf, natomic)
     dp_abs_max = zeros(Float64, natomic)
     pc_sum = zeros(Float64, natomic)
+    pc_pv_sum = zeros(Float64, natomic)
+    pc_pv = zeros(Float64, natomic)
     pc_max = fill(-Inf, natomic)
     pc_count = zeros(Int, natomic)
+    free_coordinate_sum = zeros(Float64, 3, natomic)
+    free_coordinate_sumsq = zeros(Float64, 3, natomic)
+    dissolved_coordinate_sum = zeros(Float64, 3, natomic)
+    dissolved_coordinate_sumsq = zeros(Float64, 3, natomic)
     plume_count = zeros(Int, natomic)
     plume_min = fill(Inf, 3, natomic)
     plume_max = fill(-Inf, 3, natomic)
@@ -1498,43 +1837,115 @@ function production_qoi_atomic_inventory(context, state)
         sw = arrays.sw[cell]
         fv = arrays.fluid_volume[cell]
         rho_g = arrays.gas_density[cell]
-        sg_critical = context.gas_critical_saturation[cell]
-        immobile_sg = min(max(sg, 0.0), sg_critical)
-        mobile_sg = max(sg - sg_critical, 0.0)
+        cell_pv = context.pore_volume[cell]
+        historical_sg = isnothing(arrays.max_gas_saturation) ?
+            nothing : arrays.max_gas_saturation[cell]
+        mobility = production_qoi_active_gas_mobility(
+            context.gas_mobility,
+            cell,
+            sg,
+            historical_sg
+        )
+        nonnegative_sg = max(sg, 0.0)
+        immobile_sg = min(nonnegative_sg, mobility.critical)
+        drainage_baseline_sg = min(
+            immobile_sg,
+            min(
+                nonnegative_sg,
+                context.gas_mobility.drainage_critical[cell]
+            )
+        )
+        if mobility.history_dependent
+            # On a scanning/imbibition branch, the complete zero-mobility
+            # inventory is conventional residual-trapped gas. The amount
+            # above the drainage critical baseline is retained separately as
+            # an overlapping measure of the incremental hysteresis effect.
+            drainage_immobile_sg = 0.0
+            residual_trapped_sg = immobile_sg
+            hysteresis_incremental_trapped_sg =
+                max(immobile_sg - drainage_baseline_sg, 0.0)
+        else
+            # Subcritical gas on the drainage branch is immobile but is not
+            # residual trapping caused by an imbibition history.
+            drainage_immobile_sg = immobile_sg
+            residual_trapped_sg = 0.0
+            hysteresis_incremental_trapped_sg = 0.0
+        end
+        mobile_sg = nonnegative_sg - immobile_sg
         mobile_mass = mobile_sg*fv*rho_g
         immobile_mass = immobile_sg*fv*rho_g
+        drainage_critical_mass = drainage_immobile_sg*fv*rho_g
+        residual_trapped_mass = residual_trapped_sg*fv*rho_g
+        hysteresis_incremental_trapped_mass =
+            hysteresis_incremental_trapped_sg*fv*rho_g
+        free_mass = mobile_mass + immobile_mass
         dissolved_mass =
             sw*fv*arrays.rs[cell]*arrays.bo[cell]*rho_g/arrays.bg[cell]
-        total_mass = mobile_mass + immobile_mass + dissolved_mass
+        total_mass = free_mass + dissolved_mass
         dp = arrays.pressure[cell] - context.initial_pressure[cell]
 
         count[code] += 1
-        pv[code] += context.pore_volume[cell]
+        pv[code] += cell_pv
+        free[code] += free_mass
         mobile[code] += mobile_mass
         immobile[code] += immobile_mass
+        drainage_critical_immobile[code] += drainage_critical_mass
+        residual_trapped[code] += residual_trapped_mass
+        hysteresis_incremental_trapped[code] +=
+            hysteresis_incremental_trapped_mass
         dissolved[code] += dissolved_mass
         total[code] += total_mass
         sg_sum[code] += sg
+        sg_pv_sum[code] += sg*cell_pv
         sg_max[code] = max(sg_max[code], sg)
-        if !isnothing(arrays.max_gas_saturation)
-            historical_sg = arrays.max_gas_saturation[cell]
+        if !isnothing(historical_sg)
             historical_sg_max[code] =
                 max(historical_sg_max[code], historical_sg)
-            scanning_count[code] += historical_sg > sg + 1.0e-12
         end
-        gas_pv[code] += max(sg, 0.0)*fv
+        scanning_count[code] += mobility.branch == :scanning
+        imbibition_count[code] += mobility.branch == :imbibition
+        hysteresis_active_count[code] += mobility.history_dependent
+        residual_trapped_count[code] += residual_trapped_sg > 1.0e-12
+        hysteresis_incremental_trapped_count[code] +=
+            hysteresis_incremental_trapped_sg > 1.0e-12
+        active_critical_pv_sum[code] += mobility.critical*cell_pv
+        active_critical_max[code] =
+            max(active_critical_max[code], mobility.critical)
+        gas_pv[code] += nonnegative_sg*fv
+        mobile_gas_pv[code] += mobile_sg*fv
+        immobile_gas_pv[code] += immobile_sg*fv
+        drainage_critical_gas_pv[code] += drainage_immobile_sg*fv
+        residual_trapped_gas_pv[code] += residual_trapped_sg*fv
+        hysteresis_incremental_trapped_gas_pv[code] +=
+            hysteresis_incremental_trapped_sg*fv
         for threshold_index in 1:3
-            threshold_counts[threshold_index, code] +=
-                sg >= PRODUCTION_QOI_SG_THRESHOLDS[threshold_index]
+            if sg >= PRODUCTION_QOI_SG_THRESHOLDS[threshold_index]
+                threshold_counts[threshold_index, code] += 1
+                threshold_pv[threshold_index, code] += cell_pv
+            end
         end
         dp_sum[code] += dp
+        dp_pv_sum[code] += dp*cell_pv
+        dp2_pv_sum[code] += dp^2*cell_pv
         dp_max[code] = max(dp_max[code], dp)
         dp_abs_max[code] = max(dp_abs_max[code], abs(dp))
         if !isnothing(arrays.capillary_pressure)
             pc = arrays.capillary_pressure[cell]
             pc_sum[code] += pc
+            pc_pv_sum[code] += pc*cell_pv
+            pc_pv[code] += cell_pv
             pc_max[code] = max(pc_max[code], pc)
             pc_count[code] += 1
+        end
+        for axis in 1:3
+            coordinate = context.centroids[axis, cell]
+            free_coordinate_sum[axis, code] += free_mass*coordinate
+            free_coordinate_sumsq[axis, code] +=
+                free_mass*coordinate^2
+            dissolved_coordinate_sum[axis, code] +=
+                dissolved_mass*coordinate
+            dissolved_coordinate_sumsq[axis, code] +=
+                dissolved_mass*coordinate^2
         end
         if sg >= PRODUCTION_QOI_SG_THRESHOLDS[1]
             plume_count[code] += 1
@@ -1565,22 +1976,49 @@ function production_qoi_atomic_inventory(context, state)
     return (
         count = count,
         pore_volume = pv,
+        free = free,
         mobile = mobile,
         immobile = immobile,
+        drainage_critical_immobile = drainage_critical_immobile,
+        residual_trapped = residual_trapped,
+        hysteresis_incremental_trapped = hysteresis_incremental_trapped,
         dissolved = dissolved,
         total = total,
         sg_sum = sg_sum,
+        sg_pv_sum = sg_pv_sum,
         sg_max = sg_max,
         historical_sg_max = historical_sg_max,
         scanning_count = scanning_count,
+        imbibition_count = imbibition_count,
+        hysteresis_active_count = hysteresis_active_count,
+        residual_trapped_count = residual_trapped_count,
+        hysteresis_incremental_trapped_count =
+            hysteresis_incremental_trapped_count,
+        active_critical_pv_sum = active_critical_pv_sum,
+        active_critical_max = active_critical_max,
         gas_pore_volume = gas_pv,
+        mobile_gas_pore_volume = mobile_gas_pv,
+        immobile_gas_pore_volume = immobile_gas_pv,
+        drainage_critical_gas_pore_volume = drainage_critical_gas_pv,
+        residual_trapped_gas_pore_volume = residual_trapped_gas_pv,
+        hysteresis_incremental_trapped_gas_pore_volume =
+            hysteresis_incremental_trapped_gas_pv,
         threshold_counts = threshold_counts,
+        threshold_pore_volume = threshold_pv,
         dp_sum = dp_sum,
+        dp_pv_sum = dp_pv_sum,
+        dp2_pv_sum = dp2_pv_sum,
         dp_max = dp_max,
         dp_abs_max = dp_abs_max,
         pc_sum = pc_sum,
+        pc_pv_sum = pc_pv_sum,
+        pc_pore_volume = pc_pv,
         pc_max = pc_max,
         pc_count = pc_count,
+        free_coordinate_sum = free_coordinate_sum,
+        free_coordinate_sumsq = free_coordinate_sumsq,
+        dissolved_coordinate_sum = dissolved_coordinate_sum,
+        dissolved_coordinate_sumsq = dissolved_coordinate_sumsq,
         plume_count = plume_count,
         plume_min = plume_min,
         plume_max = plume_max
@@ -1604,6 +2042,13 @@ function production_qoi_base_row(
     )
 end
 
+function production_qoi_weighted_moments(weight, first_moment, second_moment)
+    weight > 0.0 || return (mean = NaN, spread = NaN)
+    mean_value = first_moment/weight
+    variance = max(second_moment/weight - mean_value^2, 0.0)
+    return (mean = mean_value, spread = sqrt(variance))
+end
+
 function production_qoi_region_rows(
         context,
         inventory,
@@ -1622,6 +2067,25 @@ function production_qoi_region_rows(
         pore_volume = sum(inventory.pore_volume[codes])
         plume_count = sum(inventory.plume_count[codes])
         pc_count = sum(inventory.pc_count[codes])
+        pc_pore_volume = sum(inventory.pc_pore_volume[codes])
+        free_mass = sum(inventory.free[codes])
+        dissolved_mass = sum(inventory.dissolved[codes])
+        free_moments = ntuple(
+            axis -> production_qoi_weighted_moments(
+                free_mass,
+                sum(inventory.free_coordinate_sum[axis, codes]),
+                sum(inventory.free_coordinate_sumsq[axis, codes])
+            ),
+            3
+        )
+        dissolved_moments = ntuple(
+            axis -> production_qoi_weighted_moments(
+                dissolved_mass,
+                sum(inventory.dissolved_coordinate_sum[axis, codes]),
+                sum(inventory.dissolved_coordinate_sumsq[axis, codes])
+            ),
+            3
+        )
         row = production_qoi_base_row(context, "region", step, seconds)
         merge!(
             row,
@@ -1631,12 +2095,18 @@ function production_qoi_region_rows(
                 :region_role => region.role,
                 :cell_count => cell_count,
                 :pore_volume_m3 => pore_volume,
+                :free_co2_mass_kg => free_mass,
                 :mobile_free_co2_mass_kg =>
                     sum(inventory.mobile[codes]),
                 :immobile_free_co2_mass_kg =>
                     sum(inventory.immobile[codes]),
-                :dissolved_co2_mass_kg =>
-                    sum(inventory.dissolved[codes]),
+                :drainage_critical_immobile_free_co2_mass_kg =>
+                    sum(inventory.drainage_critical_immobile[codes]),
+                :residual_trapped_co2_mass_kg =>
+                    sum(inventory.residual_trapped[codes]),
+                :hysteresis_incremental_trapped_co2_mass_kg =>
+                    sum(inventory.hysteresis_incremental_trapped[codes]),
+                :dissolved_co2_mass_kg => dissolved_mass,
                 :total_co2_mass_kg => sum(inventory.total[codes]),
                 :fraction_of_net_domain_co2_change =>
                     net_change > 1.0e-12 ?
@@ -1646,22 +2116,60 @@ function production_qoi_region_rows(
                         )/net_change : NaN,
                 :gas_saturation_mean =>
                     sum(inventory.sg_sum[codes])/cell_count,
+                :gas_saturation_pv_weighted_mean =>
+                    sum(inventory.sg_pv_sum[codes])/pore_volume,
                 :gas_saturation_max => maximum(inventory.sg_max[codes]),
                 :historical_gas_saturation_max =>
                     all(isfinite, inventory.historical_sg_max[codes]) ?
                         maximum(inventory.historical_sg_max[codes]) : NaN,
                 :hysteresis_scanning_cell_count =>
                     sum(inventory.scanning_count[codes]),
+                :hysteresis_imbibition_cell_count =>
+                    sum(inventory.imbibition_count[codes]),
+                :hysteresis_active_cell_count =>
+                    sum(inventory.hysteresis_active_count[codes]),
+                :residual_trapped_cell_count =>
+                    sum(inventory.residual_trapped_count[codes]),
+                :hysteresis_incremental_trapped_cell_count =>
+                    sum(inventory.hysteresis_incremental_trapped_count[codes]),
+                :active_gas_critical_saturation_pv_weighted_mean =>
+                    sum(inventory.active_critical_pv_sum[codes])/pore_volume,
+                :active_gas_critical_saturation_max =>
+                    maximum(inventory.active_critical_max[codes]),
                 :gas_filled_pore_volume_m3 =>
                     sum(inventory.gas_pore_volume[codes]),
+                :mobile_free_gas_pore_volume_m3 =>
+                    sum(inventory.mobile_gas_pore_volume[codes]),
+                :immobile_free_gas_pore_volume_m3 =>
+                    sum(inventory.immobile_gas_pore_volume[codes]),
+                :drainage_critical_immobile_gas_pore_volume_m3 =>
+                    sum(inventory.drainage_critical_gas_pore_volume[codes]),
+                :residual_trapped_gas_pore_volume_m3 =>
+                    sum(inventory.residual_trapped_gas_pore_volume[codes]),
+                :hysteresis_incremental_trapped_gas_pore_volume_m3 =>
+                    sum(
+                        inventory.hysteresis_incremental_trapped_gas_pore_volume[
+                            codes
+                        ]
+                    ),
                 :cells_sg_ge_1e_4 =>
                     sum(inventory.threshold_counts[1, codes]),
                 :cells_sg_ge_1e_3 =>
                     sum(inventory.threshold_counts[2, codes]),
                 :cells_sg_ge_1e_2 =>
                     sum(inventory.threshold_counts[3, codes]),
+                :pore_volume_sg_ge_1e_4_m3 =>
+                    sum(inventory.threshold_pore_volume[1, codes]),
+                :pore_volume_sg_ge_1e_3_m3 =>
+                    sum(inventory.threshold_pore_volume[2, codes]),
+                :pore_volume_sg_ge_1e_2_m3 =>
+                    sum(inventory.threshold_pore_volume[3, codes]),
                 :pressure_change_mean_pa =>
                     sum(inventory.dp_sum[codes])/cell_count,
+                :pressure_change_pv_weighted_mean_pa =>
+                    sum(inventory.dp_pv_sum[codes])/pore_volume,
+                :pressure_change_pv_weighted_rms_pa =>
+                    sqrt(sum(inventory.dp2_pv_sum[codes])/pore_volume),
                 :pressure_change_max_pa =>
                     maximum(inventory.dp_max[codes]),
                 :pressure_change_abs_max_pa =>
@@ -1669,9 +2177,24 @@ function production_qoi_region_rows(
                 :capillary_pressure_mean_pa =>
                     pc_count > 0 ?
                         sum(inventory.pc_sum[codes])/pc_count : NaN,
+                :capillary_pressure_pv_weighted_mean_pa =>
+                    pc_pore_volume > 0.0 ?
+                        sum(inventory.pc_pv_sum[codes])/pc_pore_volume : NaN,
                 :capillary_pressure_max_pa =>
                     pc_count > 0 ?
                         maximum(inventory.pc_max[codes]) : NaN,
+                :free_co2_centroid_x_m => free_moments[1].mean,
+                :free_co2_centroid_y_m => free_moments[2].mean,
+                :free_co2_centroid_z_m => free_moments[3].mean,
+                :free_co2_spread_x_m => free_moments[1].spread,
+                :free_co2_spread_y_m => free_moments[2].spread,
+                :free_co2_spread_z_m => free_moments[3].spread,
+                :dissolved_co2_centroid_x_m => dissolved_moments[1].mean,
+                :dissolved_co2_centroid_y_m => dissolved_moments[2].mean,
+                :dissolved_co2_centroid_z_m => dissolved_moments[3].mean,
+                :dissolved_co2_spread_x_m => dissolved_moments[1].spread,
+                :dissolved_co2_spread_y_m => dissolved_moments[2].spread,
+                :dissolved_co2_spread_z_m => dissolved_moments[3].spread,
                 :plume_cell_count_sg_ge_1e_4 => plume_count,
                 :plume_x_min_m => plume_count > 0 ?
                     minimum(inventory.plume_min[1, codes]) : NaN,
@@ -1738,10 +2261,24 @@ function production_qoi_global_row(
     merge!(
         row,
         Dict{Symbol, Any}(
+            :mobility_partition_method =>
+                PRODUCTION_QOI_MOBILITY_METHOD,
+            :domain_free_co2_mass_kg =>
+                domain[:free_co2_mass_kg],
             :domain_mobile_free_co2_mass_kg =>
                 domain[:mobile_free_co2_mass_kg],
             :domain_immobile_free_co2_mass_kg =>
                 domain[:immobile_free_co2_mass_kg],
+            :domain_drainage_critical_immobile_free_co2_mass_kg =>
+                domain[:drainage_critical_immobile_free_co2_mass_kg],
+            :domain_residual_trapped_co2_mass_kg =>
+                domain[:residual_trapped_co2_mass_kg],
+            :domain_residual_trapped_gas_pore_volume_m3 =>
+                domain[:residual_trapped_gas_pore_volume_m3],
+            :domain_hysteresis_incremental_trapped_co2_mass_kg =>
+                domain[:hysteresis_incremental_trapped_co2_mass_kg],
+            :domain_hysteresis_incremental_trapped_gas_pore_volume_m3 =>
+                domain[:hysteresis_incremental_trapped_gas_pore_volume_m3],
             :domain_dissolved_co2_mass_kg =>
                 domain[:dissolved_co2_mass_kg],
             :domain_total_co2_mass_kg => domain[:total_co2_mass_kg],
@@ -1778,8 +2315,26 @@ function production_qoi_global_row(
                 fault[:pressure_change_max_pa],
             :domain_hysteresis_scanning_cell_count =>
                 domain[:hysteresis_scanning_cell_count],
+            :domain_hysteresis_active_cell_count =>
+                domain[:hysteresis_active_cell_count],
+            :domain_residual_trapped_cell_count =>
+                domain[:residual_trapped_cell_count],
+            :domain_hysteresis_incremental_trapped_cell_count =>
+                domain[:hysteresis_incremental_trapped_cell_count],
             :fault_hysteresis_scanning_cell_count =>
                 fault[:hysteresis_scanning_cell_count],
+            :fault_residual_trapped_co2_mass_kg =>
+                fault[:residual_trapped_co2_mass_kg],
+            :top_seal_residual_trapped_co2_mass_kg =>
+                top_seal[:residual_trapped_co2_mass_kg],
+            :overburden_residual_trapped_co2_mass_kg =>
+                overburden[:residual_trapped_co2_mass_kg],
+            :fault_hysteresis_incremental_trapped_co2_mass_kg =>
+                fault[:hysteresis_incremental_trapped_co2_mass_kg],
+            :top_seal_hysteresis_incremental_trapped_co2_mass_kg =>
+                top_seal[:hysteresis_incremental_trapped_co2_mass_kg],
+            :overburden_hysteresis_incremental_trapped_co2_mass_kg =>
+                overburden[:hysteresis_incremental_trapped_co2_mass_kg],
             :injector_name => context.injector_name,
             :injector_bhp_pa =>
                 production_qoi_injector_bhp(context, sim),
@@ -2054,6 +2609,188 @@ function production_qoi_parse_table(path::AbstractString)
     return header, rows
 end
 
+function production_qoi_require_close(observed, expected, label)
+    tolerance = max(
+        1.0e-3,
+        1.0e-10*max(abs(observed), abs(expected))
+    )
+    abs(observed - expected) <= tolerance || error(
+        "$label does not close: observed=$observed expected=$expected."
+    )
+    return nothing
+end
+
+function production_qoi_validate_partition_row(row, label; global_row = false)
+    prefix = global_row ? "domain_" : ""
+    getmass(name) = parse(Float64, row[prefix * name * "_co2_mass_kg"])
+    free = getmass("free")
+    mobile = getmass("mobile_free")
+    immobile = getmass("immobile_free")
+    drainage_critical = getmass("drainage_critical_immobile_free")
+    residual = getmass("residual_trapped")
+    hysteresis_incremental = getmass("hysteresis_incremental_trapped")
+    dissolved = getmass("dissolved")
+    total = getmass("total")
+    all(
+        value -> isfinite(value) && value >= -1.0e-6,
+        (free, mobile, immobile, drainage_critical,
+            residual, hysteresis_incremental, dissolved, total)
+    ) || error("$label contains an invalid CO2 component mass.")
+    production_qoi_require_close(
+        free,
+        mobile + immobile,
+        "$label free-phase partition"
+    )
+    production_qoi_require_close(
+        immobile,
+        drainage_critical + residual,
+        "$label immobile partition"
+    )
+    hysteresis_incremental <= residual +
+        max(1.0e-6, 1.0e-10*max(residual, hysteresis_incremental)) || error(
+        "$label incremental hysteresis-trapped mass exceeds total " *
+        "residual-trapped mass."
+    )
+    production_qoi_require_close(
+        total,
+        free + dissolved,
+        "$label dissolved/free partition"
+    )
+    return (
+        free = free,
+        mobile = mobile,
+        immobile = immobile,
+        drainage_critical = drainage_critical,
+        residual = residual,
+        hysteresis_incremental = hysteresis_incremental,
+        dissolved = dissolved,
+        total = total
+    )
+end
+
+function production_qoi_validate_region_diagnostics(row, label, mobility_mode)
+    cell_count = parse(Int, row["cell_count"])
+    pore_volume = parse(Float64, row["pore_volume_m3"])
+    cell_count > 0 || error("$label has no cells.")
+    isfinite(pore_volume) && pore_volume > 0.0 ||
+        error("$label has invalid pore volume.")
+
+    threshold_counts = (
+        parse(Int, row["cells_sg_ge_1e_4"]),
+        parse(Int, row["cells_sg_ge_1e_3"]),
+        parse(Int, row["cells_sg_ge_1e_2"])
+    )
+    0 <= threshold_counts[3] <= threshold_counts[2] <=
+        threshold_counts[1] <= cell_count ||
+        error("$label has inconsistent gas-saturation threshold counts.")
+    parse(Int, row["plume_cell_count_sg_ge_1e_4"]) ==
+        threshold_counts[1] ||
+        error("$label has inconsistent plume and threshold cell counts.")
+
+    threshold_pore_volumes = (
+        parse(Float64, row["pore_volume_sg_ge_1e_4_m3"]),
+        parse(Float64, row["pore_volume_sg_ge_1e_3_m3"]),
+        parse(Float64, row["pore_volume_sg_ge_1e_2_m3"])
+    )
+    pv_tolerance = max(1.0e-6, 1.0e-12*pore_volume)
+    all(isfinite, threshold_pore_volumes) &&
+        -pv_tolerance <= threshold_pore_volumes[3] <=
+        threshold_pore_volumes[2] + pv_tolerance &&
+        threshold_pore_volumes[2] <=
+        threshold_pore_volumes[1] + pv_tolerance &&
+        threshold_pore_volumes[1] <= pore_volume + pv_tolerance ||
+        error("$label has inconsistent occupied pore volumes.")
+
+    scanning_count = parse(Int, row["hysteresis_scanning_cell_count"])
+    imbibition_count = parse(Int, row["hysteresis_imbibition_cell_count"])
+    active_count = parse(Int, row["hysteresis_active_cell_count"])
+    residual_count = parse(Int, row["residual_trapped_cell_count"])
+    hysteresis_incremental_count = parse(
+        Int,
+        row["hysteresis_incremental_trapped_cell_count"]
+    )
+    0 <= scanning_count && 0 <= imbibition_count &&
+        active_count == scanning_count + imbibition_count &&
+        active_count <= cell_count ||
+        error("$label has inconsistent hysteresis branch counts.")
+    0 <= residual_count <= active_count ||
+        error("$label has an inconsistent residual-trapped cell count.")
+    0 <= hysteresis_incremental_count <= residual_count || error(
+        "$label has an inconsistent incremental hysteresis-trapped cell count."
+    )
+    mobility_mode == :drainage && active_count != 0 && error(
+        "$label reports active gas hysteresis with drainage-only accounting."
+    )
+    mobility_mode == :drainage &&
+        (residual_count != 0 || hysteresis_incremental_count != 0) && error(
+        "$label reports residual trapping with drainage-only accounting."
+    )
+
+    critical_mean = parse(
+        Float64,
+        row["active_gas_critical_saturation_pv_weighted_mean"]
+    )
+    critical_max = parse(
+        Float64,
+        row["active_gas_critical_saturation_max"]
+    )
+    critical_tolerance = 1.0e-12
+    isfinite(critical_mean) && isfinite(critical_max) &&
+        -critical_tolerance <= critical_mean <=
+        critical_max + critical_tolerance &&
+        critical_max <= 1.0 + critical_tolerance ||
+        error("$label has invalid active gas critical saturation.")
+
+    sg_mean = parse(Float64, row["gas_saturation_mean"])
+    sg_pv_mean = parse(Float64, row["gas_saturation_pv_weighted_mean"])
+    sg_max = parse(Float64, row["gas_saturation_max"])
+    all(isfinite, (sg_mean, sg_pv_mean, sg_max)) &&
+        -1.0e-8 <= sg_mean <= sg_max + 1.0e-12 &&
+        -1.0e-8 <= sg_pv_mean <= sg_max + 1.0e-12 &&
+        sg_max <= 1.0 + 1.0e-8 ||
+        error("$label has invalid gas-saturation statistics.")
+    historical_sg_max = parse(
+        Float64,
+        row["historical_gas_saturation_max"]
+    )
+    if mobility_mode == :killough
+        isfinite(historical_sg_max) &&
+            -1.0e-8 <= historical_sg_max <= 1.0 + 1.0e-8 ||
+            error("$label has invalid historical gas saturation.")
+    end
+
+    for field in (
+            "pressure_change_mean_pa",
+            "pressure_change_pv_weighted_mean_pa",
+            "pressure_change_pv_weighted_rms_pa",
+            "pressure_change_max_pa",
+            "pressure_change_abs_max_pa"
+        )
+        isfinite(parse(Float64, row[field])) ||
+            error("$label has non-finite $field.")
+    end
+    parse(Float64, row["pressure_change_pv_weighted_rms_pa"]) >= 0.0 ||
+        error("$label has negative pressure-change RMS.")
+    parse(Float64, row["pressure_change_abs_max_pa"]) >= 0.0 ||
+        error("$label has negative absolute pressure change.")
+
+    for (mass_field, prefix) in (
+            ("free_co2_mass_kg", "free_co2"),
+            ("dissolved_co2_mass_kg", "dissolved_co2")
+        )
+        mass = parse(Float64, row[mass_field])
+        for axis in ("x", "y", "z")
+            centroid = parse(Float64, row["$(prefix)_centroid_$(axis)_m"])
+            spread = parse(Float64, row["$(prefix)_spread_$(axis)_m"])
+            if mass > 1.0e-12
+                isfinite(centroid) && isfinite(spread) && spread >= 0.0 ||
+                    error("$label has invalid $prefix $axis moments.")
+            end
+        end
+    end
+    return nothing
+end
+
 function production_qoi_validate_bundle(
         context::ProductionQoIContext,
         path::AbstractString,
@@ -2072,6 +2809,13 @@ function production_qoi_validate_bundle(
         error("QoI bundle $path has an unsupported schema.")
     all(row -> parse(Int, row["step"]) == expected_step, rows) ||
         error("QoI bundle $path contains the wrong report step.")
+    all(row -> row["case_key"] == context.case_key, rows) ||
+        error("QoI bundle $path contains the wrong case key.")
+    all(
+        row -> lowercase(row["campaign_manifest_sha256"]) ==
+            lowercase(context.campaign_manifest_sha256),
+        rows
+    ) || error("QoI bundle $path contains the wrong campaign manifest digest.")
     count(row -> row["record_type"] == "global", rows) == 1 ||
         error("QoI bundle $path must contain exactly one global record.")
     region_ids = sort!([
@@ -2086,8 +2830,102 @@ function production_qoi_validate_bundle(
     ])
     interface_ids ==
         sort!([interface.id for interface in context.interfaces]) || error(
-            "QoI bundle $path has missing or duplicate interface records."
+        "QoI bundle $path has missing or duplicate interface records."
+    )
+    if PRODUCTION_QOI_SCHEMA_VERSION >= 2
+        global_row = only(filter(row -> row["record_type"] == "global", rows))
+        global_row["mobility_partition_method"] ==
+            PRODUCTION_QOI_MOBILITY_METHOD || error(
+            "QoI bundle $path has the wrong mobility partition method."
         )
+        global_partition = production_qoi_validate_partition_row(
+            global_row,
+            "QoI global row at step $expected_step";
+            global_row = true
+        )
+        region_rows = filter(row -> row["record_type"] == "region", rows)
+        domain_row = only(filter(
+            row -> row["region_id"] == "domain_all",
+            region_rows
+        ))
+        domain_partition = production_qoi_validate_partition_row(
+            domain_row,
+            "QoI domain region at step $expected_step"
+        )
+        atomic_rows = filter(row -> row["region_role"] == "atomic", region_rows)
+        for field in keys(global_partition)
+            production_qoi_require_close(
+                domain_partition[field],
+                global_partition[field],
+                "QoI domain/global $field at step $expected_step"
+            )
+            atomic_sum = sum(
+                production_qoi_validate_partition_row(
+                    row,
+                    "QoI atomic region $(row["region_id"]) at step " *
+                    "$expected_step"
+                )[field]
+                for row in atomic_rows
+            )
+            production_qoi_require_close(
+                atomic_sum,
+                domain_partition[field],
+                "QoI atomic/domain $field at step $expected_step"
+            )
+        end
+        for row in region_rows
+            id = row["region_id"]
+            production_qoi_validate_partition_row(
+                row,
+                "QoI region $id at step $expected_step"
+            )
+            production_qoi_validate_region_diagnostics(
+                row,
+                "QoI region $id at step $expected_step",
+                context.gas_mobility.mode
+            )
+            gas_pv = parse(Float64, row["gas_filled_pore_volume_m3"])
+            mobile_pv = parse(
+                Float64,
+                row["mobile_free_gas_pore_volume_m3"]
+            )
+            immobile_pv = parse(
+                Float64,
+                row["immobile_free_gas_pore_volume_m3"]
+            )
+            drainage_pv = parse(
+                Float64,
+                row["drainage_critical_immobile_gas_pore_volume_m3"]
+            )
+            residual_pv = parse(
+                Float64,
+                row["residual_trapped_gas_pore_volume_m3"]
+            )
+            hysteresis_incremental_pv = parse(
+                Float64,
+                row["hysteresis_incremental_trapped_gas_pore_volume_m3"]
+            )
+            production_qoi_require_close(
+                gas_pv,
+                mobile_pv + immobile_pv,
+                "QoI gas-volume partition for $id at step $expected_step"
+            )
+            production_qoi_require_close(
+                immobile_pv,
+                drainage_pv + residual_pv,
+                "QoI immobile-volume partition for $id at step $expected_step"
+            )
+            hysteresis_incremental_pv <= residual_pv +
+                max(
+                    1.0e-6,
+                    1.0e-10*max(residual_pv, hysteresis_incremental_pv)
+                ) || error(
+                "QoI incremental hysteresis-trapped gas volume exceeds " *
+                "total residual-trapped gas volume for $id at step " *
+                "$expected_step."
+            )
+        end
+    end
     return rows
 end
 
@@ -2214,6 +3052,35 @@ function production_qoi_first_arrival_years(
     return NaN
 end
 
+function production_qoi_first_arrival_interval(
+        rows,
+        field::AbstractString;
+        threshold = PRODUCTION_QOI_SG_THRESHOLDS[1]
+    )
+    previous_time = 0.0
+    for row in rows
+        time = parse(Float64, row["time_years"])
+        value = parse(Float64, row[field])
+        if isfinite(value) && value >= threshold
+            return (start_years = previous_time, end_years = time)
+        end
+        previous_time = time
+    end
+    return (start_years = NaN, end_years = NaN)
+end
+
+function production_qoi_peak_global(rows, field::AbstractString)
+    isempty(rows) && return (NaN, NaN)
+    values = [parse(Float64, row[field]) for row in rows]
+    finite = findall(isfinite, values)
+    isempty(finite) && return (NaN, NaN)
+    selected_index = finite[argmax(values[finite])]
+    return (
+        values[selected_index],
+        parse(Float64, rows[selected_index]["time_years"])
+    )
+end
+
 function production_qoi_peak_interface(
         rows,
         interface_id::AbstractString
@@ -2241,17 +3108,32 @@ const PRODUCTION_QOI_CASE_SUMMARY_COLUMNS = Symbol[
     :final_step,
     :final_time_seconds,
     :final_time_years,
+    :mobility_partition_method,
     :arrival_sg_threshold,
     :first_fault_arrival_years,
+    :first_fault_arrival_interval_start_years,
+    :first_fault_arrival_interval_end_years,
     :first_top_seal_arrival_years,
+    :first_top_seal_arrival_interval_start_years,
+    :first_top_seal_arrival_interval_end_years,
     :first_complete_top_seal_arrival_years,
+    :first_complete_top_seal_arrival_interval_start_years,
+    :first_complete_top_seal_arrival_interval_end_years,
     :first_overburden_arrival_years,
+    :first_overburden_arrival_interval_start_years,
+    :first_overburden_arrival_interval_end_years,
     :peak_storage_to_fault_forward_rate_kg_s,
     :peak_storage_to_fault_forward_rate_time_years,
     :peak_fault_to_nonfault_forward_rate_kg_s,
     :peak_fault_to_nonfault_forward_rate_time_years,
+    :final_domain_free_co2_mass_kg,
     :final_domain_mobile_free_co2_mass_kg,
     :final_domain_immobile_free_co2_mass_kg,
+    :final_domain_drainage_critical_immobile_free_co2_mass_kg,
+    :final_domain_residual_trapped_co2_mass_kg,
+    :final_domain_residual_trapped_gas_pore_volume_m3,
+    :final_domain_hysteresis_incremental_trapped_co2_mass_kg,
+    :final_domain_hysteresis_incremental_trapped_gas_pore_volume_m3,
     :final_domain_dissolved_co2_mass_kg,
     :final_domain_total_co2_mass_kg,
     :final_net_domain_co2_change_kg,
@@ -2260,6 +3142,12 @@ const PRODUCTION_QOI_CASE_SUMMARY_COLUMNS = Symbol[
     :final_top_seal_total_co2_mass_kg,
     :final_complete_top_seal_total_co2_mass_kg,
     :final_overburden_total_co2_mass_kg,
+    :peak_domain_residual_trapped_co2_mass_kg,
+    :peak_domain_residual_trapped_co2_mass_time_years,
+    :peak_domain_hysteresis_incremental_trapped_co2_mass_kg,
+    :peak_domain_hysteresis_incremental_trapped_co2_mass_time_years,
+    :peak_overburden_total_co2_mass_kg,
+    :peak_overburden_total_co2_mass_time_years,
     :maximum_fault_pressure_change_pa,
     :maximum_qoi_evaluation_seconds,
     :interface_flux_method,
@@ -2296,35 +3184,31 @@ function production_qoi_write_case_summary!(
     setvalue(:final_step, parse(Int, final["step"]))
     setvalue(:final_time_seconds, parse(Float64, final["time_seconds"]))
     setvalue(:final_time_years, parse(Float64, final["time_years"]))
+    setvalue(:mobility_partition_method, PRODUCTION_QOI_MOBILITY_METHOD)
     setvalue(:arrival_sg_threshold, PRODUCTION_QOI_SG_THRESHOLDS[1])
-    setvalue(
-        :first_fault_arrival_years,
-        production_qoi_first_arrival_years(
-            global_rows,
-            "fault_gas_saturation_max"
+    for (name, field) in (
+            ("fault", "fault_gas_saturation_max"),
+            ("top_seal", "top_seal_gas_saturation_max"),
+            (
+                "complete_top_seal",
+                "complete_top_seal_gas_saturation_max"
+            ),
+            ("overburden", "overburden_gas_saturation_max")
         )
-    )
-    setvalue(
-        :first_top_seal_arrival_years,
-        production_qoi_first_arrival_years(
+        interval = production_qoi_first_arrival_interval(
             global_rows,
-            "top_seal_gas_saturation_max"
+            field
         )
-    )
-    setvalue(
-        :first_complete_top_seal_arrival_years,
-        production_qoi_first_arrival_years(
-            global_rows,
-            "complete_top_seal_gas_saturation_max"
+        setvalue(Symbol("first_$(name)_arrival_years"), interval.end_years)
+        setvalue(
+            Symbol("first_$(name)_arrival_interval_start_years"),
+            interval.start_years
         )
-    )
-    setvalue(
-        :first_overburden_arrival_years,
-        production_qoi_first_arrival_years(
-            global_rows,
-            "overburden_gas_saturation_max"
+        setvalue(
+            Symbol("first_$(name)_arrival_interval_end_years"),
+            interval.end_years
         )
-    )
+    end
     setvalue(
         :peak_storage_to_fault_forward_rate_kg_s,
         storage_peak
@@ -2342,10 +3226,22 @@ function production_qoi_write_case_summary!(
         outward_peak_time
     )
     for (target, source) in (
+            (:final_domain_free_co2_mass_kg,
+                "domain_free_co2_mass_kg"),
             (:final_domain_mobile_free_co2_mass_kg,
                 "domain_mobile_free_co2_mass_kg"),
             (:final_domain_immobile_free_co2_mass_kg,
                 "domain_immobile_free_co2_mass_kg"),
+            (:final_domain_drainage_critical_immobile_free_co2_mass_kg,
+                "domain_drainage_critical_immobile_free_co2_mass_kg"),
+            (:final_domain_residual_trapped_co2_mass_kg,
+                "domain_residual_trapped_co2_mass_kg"),
+            (:final_domain_residual_trapped_gas_pore_volume_m3,
+                "domain_residual_trapped_gas_pore_volume_m3"),
+            (:final_domain_hysteresis_incremental_trapped_co2_mass_kg,
+                "domain_hysteresis_incremental_trapped_co2_mass_kg"),
+            (:final_domain_hysteresis_incremental_trapped_gas_pore_volume_m3,
+                "domain_hysteresis_incremental_trapped_gas_pore_volume_m3"),
             (:final_domain_dissolved_co2_mass_kg,
                 "domain_dissolved_co2_mass_kg"),
             (:final_domain_total_co2_mass_kg,
@@ -2365,6 +3261,36 @@ function production_qoi_write_case_summary!(
         )
         setvalue(target, parse(Float64, final[source]))
     end
+    residual_peak, residual_peak_time = production_qoi_peak_global(
+        global_rows,
+        "domain_residual_trapped_co2_mass_kg"
+    )
+    incremental_peak, incremental_peak_time = production_qoi_peak_global(
+        global_rows,
+        "domain_hysteresis_incremental_trapped_co2_mass_kg"
+    )
+    overburden_peak, overburden_peak_time = production_qoi_peak_global(
+        global_rows,
+        "overburden_total_co2_mass_kg"
+    )
+    setvalue(:peak_domain_residual_trapped_co2_mass_kg, residual_peak)
+    setvalue(
+        :peak_domain_residual_trapped_co2_mass_time_years,
+        residual_peak_time
+    )
+    setvalue(
+        :peak_domain_hysteresis_incremental_trapped_co2_mass_kg,
+        incremental_peak
+    )
+    setvalue(
+        :peak_domain_hysteresis_incremental_trapped_co2_mass_time_years,
+        incremental_peak_time
+    )
+    setvalue(:peak_overburden_total_co2_mass_kg, overburden_peak)
+    setvalue(
+        :peak_overburden_total_co2_mass_time_years,
+        overburden_peak_time
+    )
     setvalue(
         :maximum_fault_pressure_change_pa,
         maximum(
@@ -2453,6 +3379,7 @@ function production_consolidate_qoi!(
             status = "complete",
             case_key = context.case_key,
             schedule_steps = final_schedule_step,
+            mobility_partition_method = PRODUCTION_QOI_MOBILITY_METHOD,
             primary_label_sha256 = context.primary_label_sha256,
             region_manifest_sha256 = context.region_manifest_sha256,
             interface_manifest_sha256 = context.interface_manifest_sha256,

@@ -73,6 +73,11 @@ grep -Fxq 'nonpredict_pc_reference_contact_angle_deg=30.0' "$summary"
 grep -Fxq 'mrst_transmissibility_present=false' "$summary"
 grep -Fxq 'jutul_transmissibility=true' "$summary"
 grep -Fxq 'qoi_schema=gom_qoi_semantics_v1' "$summary"
+grep -Fxq 'qoi_output_schema=3' "$summary"
+grep -Fxq \
+    'qoi_mobility_partition_method=cell_local_active_krg_zero_mobility_endpoint_branch_partition_v2' \
+    "$summary"
+grep -Fxq 'qoi_gas_hysteresis_mode=killough' "$summary"
 grep -Fxq \
     'qoi_primary_label_sha256=af168e103f8bbd2579fc2b15adfb92a8f23a8415ecb8a9929a965d93427a882d' \
     "$summary"

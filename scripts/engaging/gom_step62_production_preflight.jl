@@ -181,6 +181,28 @@ issubset(REQUIRED_QOI_INTERFACES, qoi_interface_ids) ||
     error("One or more required QoI containment interfaces is missing.")
 all(!isempty(interface.faces) for interface in qoi_interfaces) ||
     error("A compiled QoI interface contains no simulator faces.")
+qoi_initial_state = merge(
+    setup.case.parameters[:Reservoir],
+    setup.case.state0[:Reservoir]
+)
+qoi_mobility = JutulDarcy.production_qoi_gas_mobility_accounting(
+    reservoir_model,
+    qoi_initial_state,
+    EXPECTED_CELLS
+)
+qoi_mobility.mode == :killough || error(
+    "Production QoI does not resolve the expected Killough gas hysteresis."
+)
+all(value -> isfinite(value) && 0.0 <= value <= 1.0,
+    qoi_mobility.drainage_critical) ||
+    error("QoI drainage critical saturations are invalid.")
+all(value -> isfinite(value) && 0.0 <= value <= 1.0,
+    qoi_mobility.imbibition_critical) ||
+    error("QoI imbibition critical saturations are invalid.")
+all(qoi_mobility.drainage_critical .<= qoi_mobility.drainage_s_max) ||
+    error("QoI drainage endpoints are reversed.")
+all(qoi_mobility.imbibition_critical .<= qoi_mobility.imbibition_s_max) ||
+    error("QoI imbibition endpoints are reversed.")
 
 for (offset, expected_pc) in enumerate(
         EXPECTED_NONPREDICT_PC_ENTRY_PRESSURES_PA
@@ -329,6 +351,13 @@ open(summary_path, "w") do io
     println(io, "jutul_transmissibility=true")
     println(io, "transmissibility_min=$(minimum(transmissibility))")
     println(io, "qoi_schema=gom_qoi_semantics_v1")
+    println(io, "qoi_output_schema=$(JutulDarcy.PRODUCTION_QOI_SCHEMA_VERSION)")
+    println(
+        io,
+        "qoi_mobility_partition_method=" *
+        JutulDarcy.PRODUCTION_QOI_MOBILITY_METHOD
+    )
+    println(io, "qoi_gas_hysteresis_mode=$(qoi_mobility.mode)")
     println(io, "qoi_primary_label_sha256=$(qoi.primary_label_sha256)")
     println(io, "qoi_atomic_regions=$(length(qoi.atomic_regions))")
     println(io, "qoi_reporting_regions=$(length(qoi.regions))")

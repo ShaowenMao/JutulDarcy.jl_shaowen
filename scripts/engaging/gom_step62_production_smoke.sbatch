@@ -98,6 +98,26 @@ if test "${PRODUCTION_QOI_MODE:-off}" != "off"; then
     test -s "$summary_dir/interface_flux_steps.tsv"
     test -s "$summary_dir/leakage_case_summary.tsv"
     test ! -e "$summary_dir/QOI_OUTPUT_COMPLETE.tsv"
+    head -n 1 "$summary_dir/leakage_global_steps.tsv" | \
+        grep -Fq 'domain_residual_trapped_co2_mass_kg'
+    head -n 1 "$summary_dir/leakage_global_steps.tsv" | \
+        grep -Fq 'domain_hysteresis_incremental_trapped_co2_mass_kg'
+    head -n 1 "$summary_dir/regional_co2_inventory_steps.tsv" | \
+        grep -Fq 'drainage_critical_immobile_free_co2_mass_kg'
+    awk -F '\t' '
+        NR == 1 {
+            for (i = 1; i <= NF; i++) {
+                if ($i == "schema_version") schema = i
+                if ($i == "mobility_partition_method") method = i
+            }
+            next
+        }
+        NR == 2 {
+            if ($schema != "3") exit 1
+            if ($method != "cell_local_active_krg_zero_mobility_endpoint_branch_partition_v2") exit 1
+            exit 0
+        }
+    ' "$summary_dir/leakage_global_steps.tsv"
     qoi_validation=pass
 fi
 

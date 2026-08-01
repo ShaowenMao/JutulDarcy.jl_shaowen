@@ -162,7 +162,7 @@ gom_production_write_metadata() {
         "transmissibility_source=JutulDarcy_grid_and_rock" \
         "well_volume_fraction=1e-3" \
         "production_output_mode=true" \
-        "production_qoi_mode=$PRODUCTION_QOI_MODE" \
+        "production_qoi_mode=${PRODUCTION_QOI_MODE:-off}" \
         "production_retain_years=25,50,100,1000" \
         "production_rolling_checkpoints=2" \
         "memory=${SLURM_MEM_PER_NODE:-unknown}" \

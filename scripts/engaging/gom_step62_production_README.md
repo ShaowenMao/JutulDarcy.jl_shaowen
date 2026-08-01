@@ -214,14 +214,17 @@ should run with:
 export PRODUCTION_QOI_MODE=required
 ```
 
+The input-label schema `gom_qoi_semantics_v1` is independent of the tabular
+QoI output schema version; the current output format is schema 3.
+
 `required` fails before simulation if the common input lacks the exact
 primary-UCID partition or the paired specific input lacks Al/Ar
 side/unit/facies labels. `auto` enables the logger only when both blocks are
 present; `off` retains the legacy production-output behavior. The seven
 already-frozen pilot inputs must remain `off` until they are regenerated.
 
-The QoI logger writes one restart-safe bundle per report step and consolidates
-it into:
+QoI output schema 3 writes one restart-safe bundle per report step and
+consolidates it into:
 
 - `leakage_global_steps.tsv`;
 - `regional_co2_inventory_steps.tsv`;
@@ -235,13 +238,51 @@ storage LM2; each of Al1–Al21 and Ar1–Ar21; MM–UM; Younger; all nine fault
 bands (including W1–W6); and the remaining AmphB complete seal. Aggregate
 regions are exact unions of these atoms.
 
-At each report boundary, free-phase CO2 is divided using the active gas
-relative-permeability table's critical gas saturation: gas below that
-threshold is reported as `immobile_free`, and gas above it as `mobile_free`.
-This is an operational mobility classification; it is not labeled
-residually trapped during drainage. Dissolved CO2 uses the black-oil `Rs`,
-shrinkage factors, fluid volume, and gas reference mass density. Regional
-inventories are checked against the gas-component `TotalMasses` field.
+At each report boundary, free-phase CO2 is divided using the exact gas
+relative-permeability branch evaluated by the simulator. For Killough
+hysteresis, the logger combines the cell's drainage and imbibition endpoints
+with its restart-safe historical maximum gas saturation (`MaxSaturations`) to
+recover the local zero-mobility endpoint of the active scanning curve. The
+same helper computes this endpoint for both the nonlinear solver and the QoI
+logger.
+
+The non-overlapping free-phase inventory is:
+
+- `mobile_free`: gas saturation above the active zero-mobility endpoint;
+- `drainage_critical_immobile_free`: immobile gas in cells that are currently
+  on the drainage (non-history-dependent) branch; and
+- `residual_trapped`: the complete immobile gas inventory in cells that are
+  currently on an active Killough scanning or bounding imbibition branch.
+
+Consequently, `immobile_free` is exactly
+`drainage_critical_immobile_free + residual_trapped`, and `free_co2` is exactly
+`mobile_free + immobile_free`. This branch-exclusive definition gives zero
+residual-trapped mass before reversal, with hysteresis disabled, and whenever
+the simulator evaluates the drainage branch. It reports the complete
+zero-mobility gas represented by the active scanning/imbibition curve rather
+than interpreting `Sg_max - Sg` as trapped gas.
+
+`hysteresis_incremental_trapped` is retained as a separate, overlapping
+diagnostic. It is the portion of `residual_trapped` above the drainage critical
+saturation baseline. It therefore measures the incremental immobilization
+introduced by hysteresis, is always less than or equal to `residual_trapped`,
+and must not be added to the non-overlapping mass partition. In a
+drainage-equivalent fault region it can be zero even when the cell is on a
+history-dependent branch and its complete immobile inventory is classified as
+`residual_trapped`.
+
+Dissolved CO2 uses the black-oil `Rs`, shrinkage factors, fluid volume, and gas
+reference mass density. Every regional and global row enforces
+`total = free + dissolved`, and the domain inventory is checked against the
+gas-component `TotalMasses` field.
+
+Schema 3 also records mobile, immobile, drainage-critical, total residual, and
+incremental hysteresis-trapped gas pore volumes; exact scanning/full-
+imbibition branch counts; pore-volume-
+weighted saturation, pressure, and capillary-pressure statistics; occupied
+pore volume at `Sg >= 1e-4`, `1e-3`, and `1e-2`; and mass-weighted centroids
+and spreads for free and dissolved CO2. These supplement the retained raw cell
+counts and thresholded centroid bounds with less mesh-sensitive diagnostics.
 Pressure changes use the exact initial pressure cell by cell. Plume bounds
 use `Sg >= 1e-4`; counts are also written for `1e-3` and `1e-2`.
 `net_domain_co2_change_kg` is the current domain inventory minus the initial
@@ -253,6 +294,13 @@ mass flux, including dissolved gas transported in the liquid phase. They are
 instantaneous report-endpoint rates. They are not multiplied by a report
 duration or presented as cumulative transfer because adaptive ministeps can
 make that integration inaccurate.
+
+`leakage_case_summary.tsv` stores interval-censored arrival bounds (the
+preceding and first detected report), the final trapping partition, and peak
+residual and overburden inventories. Schema 1 and 2 outputs remain valid
+historical artifacts, but an older report prefix cannot be resumed with
+schema-3 code; the immutable production configuration deliberately rejects
+mixed schemas.
 
 Each smoke job stops first at report step 2 and resumes to report step 3. It
 requires three atomic summary rows and exactly rolling restart checkpoints 2

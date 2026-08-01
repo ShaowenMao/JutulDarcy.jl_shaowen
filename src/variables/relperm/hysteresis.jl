@@ -138,18 +138,63 @@ function hysteresis_impl(t::CarlsonHysteresis, drain, imb, s, s_max)
     return imb(s_shifted)
 end
 
+"""
+    killough_scanning_critical_saturation(h_model, drain, imb, S_max)
+
+Return the local saturation at which the Killough scanning curve has zero
+relative permeability. The value depends on the historical maximum saturation
+`S_max` and is therefore cell-local even when the drainage and imbibition
+tables are region-level inputs.
+
+This helper is shared by the relative-permeability evaluator and diagnostic
+inventory calculations so that trapped-saturation accounting cannot drift from
+the constitutive model used by the nonlinear solver.
+"""
+Base.@propagate_inbounds @inline function killough_scanning_critical_saturation(
+        h_model::KilloughHysteresis,
+        drain,
+        imb,
+        S_max
+    )
+    return killough_scanning_critical_saturation(
+        h_model.tol,
+        drain.critical,
+        imb.critical,
+        drain.s_max,
+        S_max
+    )
+end
+
+Base.@propagate_inbounds @inline function killough_scanning_critical_saturation(
+        tolerance,
+        S_crit_drainage,
+        S_crit_imbibition,
+        kr_s_max,
+        S_max
+    )
+    # TODO: Check that kr_s_max matches that of imbibition?
+    K = 1.0/(S_crit_imbibition - S_crit_drainage) -
+        1.0/(kr_s_max - S_crit_drainage)
+    M = 1.0 + tolerance*(kr_s_max - S_max)
+    return S_crit_drainage +
+        (S_max - S_crit_drainage)/
+        (M + K*(S_max - S_crit_drainage))
+end
+
 function hysteresis_impl(h_model::KilloughHysteresis, drain, imb, S, S_max)
     if S < h_model.s_min
         kr = drain(S)
     else
         S_crit_imbibition = imb.critical
-        S_crit_drainage = drain.critical
-        # TODO: Check that this matches that of imbibition?
         kr_s_max = drain.s_max
-        K = 1.0/(S_crit_imbibition - S_crit_drainage) - 1.0/(kr_s_max - S_crit_drainage)
-        M = 1.0 + h_model.tol*(kr_s_max - S_max)
-        S_crit = S_crit_drainage + (S_max - S_crit_drainage)/(M + K*(S_max - S_crit_drainage))
-        S_norm = S_crit_imbibition + (S - S_crit)*(kr_s_max - S_crit_imbibition)/(S_max - S_crit)
+        S_crit = killough_scanning_critical_saturation(
+            h_model,
+            drain,
+            imb,
+            S_max
+        )
+        S_norm = S_crit_imbibition +
+            (S - S_crit)*(kr_s_max - S_crit_imbibition)/(S_max - S_crit)
         kr = imb(S_norm)*drain(S_max)/drain(kr_s_max)
     end
     return kr

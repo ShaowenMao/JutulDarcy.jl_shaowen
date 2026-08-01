@@ -468,6 +468,8 @@ function production_config_values(policy::ProductionOutputPolicy)
             base,
             (
                 qoi_schema_version = PRODUCTION_QOI_SCHEMA_VERSION,
+                qoi_mobility_partition_method =
+                    PRODUCTION_QOI_MOBILITY_METHOD,
                 qoi_mode = qoi.mode,
                 qoi_primary_label_sha256 = qoi.primary_label_sha256,
                 qoi_region_manifest_sha256 =

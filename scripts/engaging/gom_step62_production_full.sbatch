@@ -83,6 +83,13 @@ cd "$JUTULDARCY_COMBINED_REPO"
 julia --startup-file=no --project=. "$final_check" \
     "$restart_dir" "$summary_dir" "$case_dir/final_state_summary.txt" \
     "$GOM_PRODUCTION_CASE_KEY" "$GOM_PRODUCTION_MANIFEST_SHA256"
+if test "${PRODUCTION_QOI_MODE:-off}" != "off"; then
+    grep -Fxq 'qoi_output_schema=3' "$case_dir/final_state_summary.txt"
+    grep -Fxq 'qoi_mass_partition_validated=true' \
+        "$case_dir/final_state_summary.txt"
+    grep -Fxq 'qoi_atomic_partition_validated=true' \
+        "$case_dir/final_state_summary.txt"
+fi
 
 (
     cd "$case_dir"
