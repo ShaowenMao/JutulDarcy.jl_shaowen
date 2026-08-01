@@ -88,6 +88,8 @@ while test "$cursor" -le "$end"; do
     grep -Fxq 'status=pass' "$shard/SHARD_COMPLETE"
     grep -Fxq "campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256" \
         "$shard/SHARD_COMPLETE"
+    grep -Fxq "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
+        "$shard/SHARD_COMPLETE"
     grep -Fxq "task_start=$cursor" "$shard/SHARD_COMPLETE"
     grep -Fxq "task_end=$shard_end" "$shard/SHARD_COMPLETE"
     grep -Fxq "case_count=$shard_case_count" "$shard/SHARD_COMPLETE"
@@ -123,6 +125,7 @@ printf '%s\n' \
     "submission_id=$GOM_PRODUCTION_SUBMISSION_ID" \
     "campaign_id=$GOM_PRODUCTION_CAMPAIGN_ID" \
     "campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256" \
+    "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
     "case_order_sha256=$GOM_PRODUCTION_CASE_ORDER_SHA256" \
     "selection_start=$start" \
     "selection_end=$end" \
@@ -152,6 +155,7 @@ if test "$start" -eq 1 && \
         "status=pass" \
         "campaign_id=$GOM_PRODUCTION_CAMPAIGN_ID" \
         "campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256" \
+        "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
         "case_order_sha256=$GOM_PRODUCTION_CASE_ORDER_SHA256" \
         "case_count=$GOM_PRODUCTION_CASE_COUNT" \
         "shard_count=$expected_shards" \
@@ -167,6 +171,7 @@ printf '%s\n' \
     "submission_id=$GOM_PRODUCTION_SUBMISSION_ID" \
     "campaign_id=$GOM_PRODUCTION_CAMPAIGN_ID" \
     "campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256" \
+    "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
     "selection_start=$start" \
     "selection_end=$end" \
     "case_count=$selection_count" \

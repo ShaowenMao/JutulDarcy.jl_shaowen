@@ -40,6 +40,14 @@ end
     include("production_qoi.jl")
 end
 
+@testitem "Engaging script compatibility" begin
+    include("engaging_script_compat.jl")
+end
+
+@testitem "VTU geology indicators" begin
+    include("vtu_geology_indicators.jl")
+end
+
 @testitem "CO2 case driver options" begin
     include("co2_case_driver.jl")
 end

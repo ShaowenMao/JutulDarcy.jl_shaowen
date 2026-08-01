@@ -458,12 +458,21 @@ function normalize_mrst_explicit_fault_hysteresis_mode(mode)
 end
 
 function normalize_mrst_fault_pc_entry_treatment(treatment)
-    if isnothing(treatment)
-        return "none"
+    normalized = if isnothing(treatment)
+        "none"
     elseif treatment isa Symbol
-        return lowercase(String(treatment))
+        lowercase(String(treatment))
     else
-        return lowercase(strip(String(treatment)))
+        lowercase(strip(String(treatment)))
+    end
+    if normalized in (
+            "all_active_plateau",
+            "domain_plateau",
+            "plateau_all_active_drainage"
+        )
+        return "plateau_all_active"
+    else
+        return normalized
     end
 end
 
@@ -475,7 +484,10 @@ function apply_mrst_fault_pc_entry_treatment!(tables, regions;
     normalized in ("", "none", "off", "false", "0") && return nothing
 
     if !(normalized in ("plateau", "entry_plateau", "pc_plateau"))
-        error("Unknown FAULT_PC_ENTRY_TREATMENT=$treatment. Valid options: none, plateau.")
+        error(
+            "Unknown FAULT_PC_ENTRY_TREATMENT=$treatment. Valid options: " *
+            "none, plateau, plateau_all_active."
+        )
     end
 
     adjusted = 0
@@ -518,6 +530,339 @@ function apply_mrst_fault_pc_entry_treatment!(tables, regions;
     return summary
 end
 
+function mrst_sgof_table_digest(
+        tables,
+        regions;
+        columns = 1:4,
+        row_starts = nothing
+    )
+    length(tables) == length(regions) ||
+        error("Cannot digest SGOF tables with inconsistent region metadata.")
+    isnothing(row_starts) || length(row_starts) == length(tables) ||
+        error("Cannot digest SGOF tables with inconsistent row starts.")
+
+    io = IOBuffer()
+    for (index, (region, table)) in enumerate(zip(regions, tables))
+        table isa AbstractMatrix ||
+            error("SGOF region $region is not a matrix.")
+        rows = isnothing(row_starts) ? (1:size(table, 1)) :
+            (Int(row_starts[index]):size(table, 1))
+        write(io, htol(UInt64(region)))
+        write(io, htol(UInt64(length(rows))))
+        write(io, htol(UInt64(length(columns))))
+        for row in rows, column in columns
+            value = Float64(table[row, column])
+            write(io, htol(reinterpret(UInt64, value)))
+        end
+    end
+    return bytes2hex(SHA.sha256(take!(io)))
+end
+
+function apply_mrst_all_active_pc_entry_plateau!(tables, regions)
+    length(tables) == length(regions) ||
+        error("Active drainage SGOF tables and regions have different lengths.")
+    length(unique(regions)) == length(regions) ||
+        error("Active drainage SGOF region IDs must be unique.")
+
+    original = deepcopy(tables)
+    entry_rows = ones(Int, length(tables))
+    entry_sg = fill(NaN, length(tables))
+    entry_pressure = zeros(Float64, length(tables))
+    adjusted_regions = Int[]
+    already_plateaued_regions = Int[]
+    true_zero_pc_regions = Int[]
+
+    for (index, (region, table)) in enumerate(zip(regions, tables))
+        table isa AbstractMatrix && size(table, 1) >= 2 &&
+            size(table, 2) >= 4 || error(
+            "Active drainage SGOF region $region is not a valid table."
+        )
+        sg = Float64.(table[:, 1])
+        pc = Float64.(table[:, 4])
+        all(isfinite, sg) && all(isfinite, pc) ||
+            error("Active drainage SGOF region $region is non-finite.")
+        all(diff(sg) .> 0) ||
+            error("Active drainage SGOF region $region has invalid Sg nodes.")
+        all(pc .>= 0) && all(diff(pc) .>= 0) ||
+            error(
+                "Active drainage SGOF region $region has invalid Pc values."
+            )
+        iszero(sg[1]) || error(
+            "Active drainage SGOF region $region does not start at Sg=0."
+        )
+
+        entry = findfirst(>(0.0), pc)
+        if isnothing(entry)
+            push!(true_zero_pc_regions, Int(region))
+            continue
+        end
+        entry_rows[index] = entry
+        entry_sg[index] = sg[entry]
+        entry_pressure[index] = pc[entry]
+        if entry == 1
+            push!(already_plateaued_regions, Int(region))
+        else
+            table[1:(entry - 1), 4] .= table[entry, 4]
+            push!(adjusted_regions, Int(region))
+        end
+    end
+
+    kr_before = mrst_sgof_table_digest(
+        original,
+        regions;
+        columns = 1:3
+    )
+    kr_after = mrst_sgof_table_digest(
+        tables,
+        regions;
+        columns = 1:3
+    )
+    kr_before == kr_after ||
+        error("Domain-wide Pc plateau unexpectedly changed Sg or Kr.")
+
+    pc_tail_before = mrst_sgof_table_digest(
+        original,
+        regions;
+        columns = 4:4,
+        row_starts = entry_rows
+    )
+    pc_tail_after = mrst_sgof_table_digest(
+        tables,
+        regions;
+        columns = 4:4,
+        row_starts = entry_rows
+    )
+    pc_tail_before == pc_tail_after ||
+        error("Domain-wide Pc plateau changed Pc at or above entry.")
+
+    for (region, before, after) in zip(regions, original, tables)
+        size(before) == size(after) ||
+            error("Domain-wide Pc plateau resized SGOF region $region.")
+        before[:, 1:3] == after[:, 1:3] ||
+            error("Domain-wide Pc plateau changed Kr in region $region.")
+    end
+
+    active_tables = length(tables)
+    nonzero_entry_tables =
+        length(adjusted_regions) + length(already_plateaued_regions)
+    nonzero_entry_tables + length(true_zero_pc_regions) == active_tables ||
+        error("Domain-wide Pc plateau accounting is inconsistent.")
+
+    return Dict{String, Any}(
+        "treatment" => "plateau_all_active",
+        "scope" => "all_active_drainage",
+        "entry_rule" => "first_strictly_positive_pc_node",
+        "active_tables" => active_tables,
+        "nonzero_entry_tables" => nonzero_entry_tables,
+        "adjusted_tables" => length(adjusted_regions),
+        "already_plateaued_tables" => length(already_plateaued_regions),
+        "true_zero_pc_tables" => length(true_zero_pc_regions),
+        "skipped_tables" => length(true_zero_pc_regions),
+        "adjusted_regions" => adjusted_regions,
+        "already_plateaued_regions" => already_plateaued_regions,
+        "true_zero_pc_regions" => true_zero_pc_regions,
+        "entry_row_indices" => entry_rows,
+        "entry_sg" => entry_sg,
+        "entry_pressure_pa" => entry_pressure,
+        "input_drainage_sha256" => mrst_sgof_table_digest(
+            original,
+            regions
+        ),
+        "output_drainage_sha256" => mrst_sgof_table_digest(
+            tables,
+            regions
+        ),
+        "kr_sha256_before" => kr_before,
+        "kr_sha256_after" => kr_after,
+        "pc_tail_sha256_before" => pc_tail_before,
+        "pc_tail_sha256_after" => pc_tail_after,
+        "kr_unchanged" => true,
+        "pc_at_and_above_entry_unchanged" => true
+    )
+end
+
+"""
+    apply_mrst_all_active_pc_entry_plateau_to_data!(mrst_data;
+        explicit_regions = Int[],
+        mirror_explicit_hysteresis = false)
+
+Apply the domain-wide entry plateau directly to the active drainage SGOF
+tables in an assembled MRST data dictionary. This helper is intentionally
+independent of the split-input assembly path so a whole-input control and a
+split-input case can be transformed by the same deterministic operation
+before their setup results are compared.
+
+When `mirror_explicit_hysteresis` is true, only the named `explicit_regions`
+are copied to their paired imbibition tables. Shared/base imbibition tables
+are left byte-for-byte unchanged.
+"""
+function apply_mrst_all_active_pc_entry_plateau_to_data!(mrst_data;
+        explicit_regions = Int[],
+        mirror_explicit_hysteresis::Bool = false
+    )
+    haskey(mrst_data, "deck") &&
+        haskey(mrst_data["deck"], "PROPS") &&
+        haskey(mrst_data["deck"]["PROPS"], "SGOF") ||
+        error("Domain-wide Pc plateau requires deck.PROPS.SGOF.")
+    haskey(mrst_data, "rock") &&
+        haskey(mrst_data["rock"], "regions") &&
+        haskey(mrst_data["rock"]["regions"], "saturation") ||
+        error("Domain-wide Pc plateau requires rock.regions.saturation.")
+
+    props = mrst_data["deck"]["PROPS"]
+    all_tables = mrst_get_vec(props["SGOF"])
+    sat = Int.(mrst_get_vec(mrst_data["rock"]["regions"]["saturation"]))
+    isempty(sat) && error("Domain-wide Pc plateau received empty SATNUM.")
+    drainage_regions = sort!(unique(sat))
+    all(>(0), drainage_regions) ||
+        error("Domain-wide Pc plateau requires positive active SATNUM ids.")
+    drainage_region_count = maximum(drainage_regions)
+    all(region -> region <= length(all_tables), drainage_regions) ||
+        error("Active SATNUM is outside deck.PROPS.SGOF.")
+
+    drainage_tables = [all_tables[region] for region in drainage_regions]
+    summary = apply_mrst_all_active_pc_entry_plateau!(
+        drainage_tables,
+        drainage_regions
+    )
+
+    explicit = sort!(unique(Int.(collect(explicit_regions))))
+    if mirror_explicit_hysteresis
+        isempty(explicit) && error(
+            "Mirroring explicit hysteresis Pc requires explicit_regions."
+        )
+        all(region -> region in drainage_regions, explicit) ||
+            error("Explicit hysteresis region is not an active drainage region.")
+        length(all_tables) >= 2*drainage_region_count || error(
+            "Paired drainage/imbibition SGOF tables are incomplete."
+        )
+        explicit == collect(first(explicit):drainage_region_count) || error(
+            "Explicit hysteresis regions must be contiguous through the " *
+            "last active drainage region."
+        )
+        base_regions = collect(1:(first(explicit) - 1))
+        base_imbibition_tables = [
+            all_tables[drainage_region_count + region]
+            for region in base_regions
+        ]
+        base_imbibition_before = mrst_sgof_table_digest(
+            base_imbibition_tables,
+            base_regions
+        )
+        for region in explicit
+            drainage = all_tables[region]
+            imbibition = all_tables[drainage_region_count + region]
+            size(drainage) == size(imbibition) || error(
+                "Explicit drainage/imbibition SGOF size mismatch in region $region."
+            )
+            imbibition[:, 4] .= drainage[:, 4]
+            drainage == imbibition || error(
+                "Explicit drainage/imbibition SGOF mismatch after Pc mirror " *
+                "in region $region."
+            )
+        end
+        base_imbibition_after = mrst_sgof_table_digest(
+            base_imbibition_tables,
+            base_regions
+        )
+        base_imbibition_before == base_imbibition_after || error(
+            "Domain-wide Pc plateau changed shared/base imbibition tables."
+        )
+        summary["base_imbibition_sha256_before"] =
+            base_imbibition_before
+        summary["base_imbibition_sha256_after"] =
+            base_imbibition_after
+        summary["base_imbibition_unchanged"] = true
+    elseif !isempty(explicit)
+        error(
+            "explicit_regions were provided without " *
+            "mirror_explicit_hysteresis=true."
+        )
+    end
+
+    summary["mirrored_explicit_hysteresis_tables"] = length(explicit)
+    summary["drainage_region_count"] = drainage_region_count
+    return summary
+end
+
+"""
+    apply_mrst_whole_pc_entry_treatment!(mrst_data; ...)
+
+Apply a requested Pc entry treatment to an already combined MRST MAT
+dictionary before reservoir-domain/model setup. The domain-wide plateau uses
+the same deterministic helper as split assembly. If explicit hysteresis
+mirroring is requested, the shared/explicit boundary must be supplied by
+`metadata.shared_drainage_saturation_region_count`; ambiguous whole inputs
+fail closed.
+"""
+function apply_mrst_whole_pc_entry_treatment!(mrst_data;
+        fault_pc_entry_treatment = "none",
+        explicit_fault_hysteresis_mode = "disable"
+    )
+    treatment =
+        normalize_mrst_fault_pc_entry_treatment(fault_pc_entry_treatment)
+    treatment in ("", "none", "off", "false", "0") && return nothing
+    treatment == "plateau_all_active" || error(
+        "Whole-MAT MRST input supports FAULT_PC_ENTRY_TREATMENT=none " *
+        "or plateau_all_active. The legacy explicit-fault-only plateau " *
+        "requires split input."
+    )
+
+    hysteresis_mode =
+        normalize_mrst_explicit_fault_hysteresis_mode(
+            explicit_fault_hysteresis_mode
+        )
+    disabled_modes =
+        ("", "disable", "disabled", "none", "off", "false", "0")
+    reservoir_modes = ("reservoir", "reservoir_only", "reservoir-only")
+    (hysteresis_mode in disabled_modes ||
+        hysteresis_mode in reservoir_modes) || error(
+        "Unknown EXPLICIT_FAULT_HYSTERESIS_MODE=" *
+        "$explicit_fault_hysteresis_mode. Valid options: disable, reservoir."
+    )
+    mirror_explicit = hysteresis_mode in reservoir_modes
+    explicit_regions = Int[]
+    if mirror_explicit
+        metadata = get(mrst_data, "metadata", Dict{String, Any}())
+        haskey(metadata, "shared_drainage_saturation_region_count") || error(
+            "Whole-MAT explicit hysteresis mirroring requires " *
+            "metadata.shared_drainage_saturation_region_count."
+        )
+        raw_base_regions =
+            metadata["shared_drainage_saturation_region_count"]
+        base_regions = Int(round(
+            raw_base_regions isa AbstractArray ?
+                only(vec(raw_base_regions)) : raw_base_regions
+        ))
+        sat = Int.(round.(mrst_get_vec(
+            mrst_data["rock"]["regions"]["saturation"]
+        )))
+        drainage_regions = maximum(sat)
+        0 < base_regions <= drainage_regions || error(
+            "Whole-MAT shared drainage-region metadata is inconsistent."
+        )
+        if base_regions == drainage_regions
+            mirror_explicit = false
+        else
+            explicit_regions = collect((base_regions + 1):drainage_regions)
+        end
+    end
+
+    summary = apply_mrst_all_active_pc_entry_plateau_to_data!(
+        mrst_data;
+        explicit_regions = explicit_regions,
+        mirror_explicit_hysteresis = mirror_explicit
+    )
+    domain_summary = get!(
+        mrst_data,
+        "fault_saturation_domain_summary",
+        Dict{String, Any}()
+    )
+    domain_summary["pc_entry_treatment"] = summary
+    domain_summary["input_mode"] = "whole"
+    return summary
+end
+
 function apply_mrst_explicit_fault_saturation_data!(assembled, specific;
         fault_pc_entry_treatment = "none",
         fault_pc_entry_sg_max::Real = 1.0e-4,
@@ -556,12 +901,20 @@ function apply_mrst_explicit_fault_saturation_data!(assembled, specific;
     order = sortperm(custom_regions)
     custom_regions = custom_regions[order]
     custom_tables = [deepcopy(table) for table in custom_tables[order]]
-    pc_entry_summary = apply_mrst_fault_pc_entry_treatment!(
-        custom_tables,
-        custom_regions;
-        treatment = fault_pc_entry_treatment,
-        sg_max = fault_pc_entry_sg_max
-    )
+    normalized_pc_treatment =
+        normalize_mrst_fault_pc_entry_treatment(fault_pc_entry_treatment)
+    apply_domain_plateau =
+        normalized_pc_treatment == "plateau_all_active"
+    pc_entry_summary = if apply_domain_plateau
+        nothing
+    else
+        apply_mrst_fault_pc_entry_treatment!(
+            custom_tables,
+            custom_regions;
+            treatment = normalized_pc_treatment,
+            sg_max = fault_pc_entry_sg_max
+        )
+    end
     base_regions = minimum(custom_regions) - 1
     maximum_region = maximum(custom_regions)
     custom_regions == collect((base_regions + 1):maximum_region) || error(
@@ -644,6 +997,16 @@ function apply_mrst_explicit_fault_saturation_data!(assembled, specific;
         end
         runspec["NOHYST"] = true
         update_mrst_tabdims_num_saturation_tables!(assembled, maximum_region)
+    end
+
+    if apply_domain_plateau
+        pc_entry_summary =
+            apply_mrst_all_active_pc_entry_plateau_to_data!(
+                assembled;
+                explicit_regions =
+                    reservoir_hysteresis ? custom_regions : Int[],
+                mirror_explicit_hysteresis = reservoir_hysteresis
+            )
     end
 
     assembled["fault_saturation_domain_mode"] = "reservoir_ready_explicit"
@@ -2142,11 +2505,21 @@ function setup_case_from_mrst(casename;
         convert_grid = false,
         diffusion = nothing,
         use_mrst_transmissibility::Bool = true,
+        fault_pc_entry_treatment = "none",
+        explicit_fault_hysteresis_mode = "disable",
         kwarg...
     )
-    data_domain, mrst_data = reservoir_domain_from_mrst(
-        casename,
-        extraout = true,
+    input_path = get_mrst_input_path(String(casename))
+    @debug "Reading MAT file $input_path..."
+    mrst_data = MAT.matread(input_path)
+    apply_mrst_whole_pc_entry_treatment!(
+        mrst_data;
+        fault_pc_entry_treatment = fault_pc_entry_treatment,
+        explicit_fault_hysteresis_mode = explicit_fault_hysteresis_mode
+    )
+    data_domain = reservoir_domain_from_mrst_data(
+        mrst_data;
+        extraout = false,
         convert_grid = convert_grid,
         diffusion = diffusion,
         use_mrst_transmissibility = use_mrst_transmissibility
@@ -2767,7 +3140,13 @@ function export_mrst_case_vtu_from_output(fn, output_path;
             explicit_fault_hysteresis_mode = explicit_fault_hysteresis_mode
         )
     else
-        setup_case_from_mrst(fn; setup_kwargs...)
+        setup_case_from_mrst(
+            fn;
+            setup_kwargs...,
+            fault_pc_entry_treatment = fault_pc_entry_treatment,
+            explicit_fault_hysteresis_mode =
+                explicit_fault_hysteresis_mode
+        )
     end
 
     model = case.model
@@ -2920,6 +3299,13 @@ Simulate a MRST case from `file_name` as exported by `writeJutulInput` in MRST.
 - `fault_pc_entry_treatment = "none"`: For explicit split fault SGOF tables,
   set to `"plateau"` to replace `Pc(Sg=0)=0` with the first positive entry
   pressure when the second saturation point is below `fault_pc_entry_sg_max`.
+  Set to `"plateau_all_active"` to apply an entry plateau to every active
+  drainage SGOF table, from `Sg=0` through that table's first strictly
+  positive Pc node. True zero-Pc tables are preserved exactly. This global
+  mode is supported for split and whole MRST MAT inputs; whole inputs that
+  request explicit hysteresis mirroring must provide
+  `metadata.shared_drainage_saturation_region_count`. Eclipse DATA inputs
+  reject table-rewrite modes.
 - `explicit_fault_hysteresis_mode = "disable"`: For explicit split fault
   SGOF tables, keep the conservative default of disabling hysteresis. Set to
   `"reservoir"` to keep reservoir hysteresis active while duplicating each
@@ -3018,6 +3404,16 @@ function simulate_mrst_case(fn;
             fn = get_mrst_input_path(fn)
         end
     end
+    if is_data
+        pc_treatment =
+            normalize_mrst_fault_pc_entry_treatment(
+                fault_pc_entry_treatment
+            )
+        pc_treatment in ("", "none", "off", "false", "0") || error(
+            "FAULT_PC_ENTRY_TREATMENT=$fault_pc_entry_treatment requires " *
+            "MRST MAT input; Eclipse DATA input is not rewritten."
+        )
+    end
     if split_wells
         fg = :perwell
     else
@@ -3114,7 +3510,10 @@ function simulate_mrst_case(fn;
             diffusion = diffusion,
             disable_hysteresis = disable_hysteresis,
             hysteresis_s_min = hysteresis_s_min,
-            use_mrst_transmissibility = use_mrst_transmissibility
+            use_mrst_transmissibility = use_mrst_transmissibility,
+            fault_pc_entry_treatment = fault_pc_entry_treatment,
+            explicit_fault_hysteresis_mode =
+                explicit_fault_hysteresis_mode
         )
         deck = mrst_data["deck"]
     end

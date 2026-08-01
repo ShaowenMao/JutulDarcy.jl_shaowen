@@ -19,6 +19,7 @@ umask 027
 : "${GOM_PRODUCTION_MANIFEST:?Set GOM_PRODUCTION_MANIFEST.}"
 : "${JUTULDARCY_COMBINED_REPO:?Set JUTULDARCY_COMBINED_REPO.}"
 : "${GOM_PRODUCTION_CHECK_JOB_ID:?Set GOM_PRODUCTION_CHECK_JOB_ID.}"
+: "${GOM_PRODUCTION_PREFLIGHT_JOB_ID:?Set GOM_PRODUCTION_PREFLIGHT_JOB_ID.}"
 : "${GOM_PRODUCTION_FULL_JOB_ID:?Set GOM_PRODUCTION_FULL_JOB_ID.}"
 : "${GOM_PRODUCTION_VTU_JOB_ID:?Set GOM_PRODUCTION_VTU_JOB_ID.}"
 : "${GOM_PRODUCTION_TASK_START:?Set GOM_PRODUCTION_TASK_START.}"
@@ -27,6 +28,7 @@ umask 027
 
 for job_id in \
     "$GOM_PRODUCTION_CHECK_JOB_ID" \
+    "$GOM_PRODUCTION_PREFLIGHT_JOB_ID" \
     "$GOM_PRODUCTION_FULL_JOB_ID" \
     "$GOM_PRODUCTION_VTU_JOB_ID"
 do
@@ -75,11 +77,33 @@ mkdir -p "$incoming_parent" "$campaign_parent/shards" \
     "$campaign_parent/submissions"
 
 check_root="$gom_root/results/gom_step62_production_campaign_check_job${GOM_PRODUCTION_CHECK_JOB_ID}"
-full_root="$gom_root/results/gom_step62_production_full_job${GOM_PRODUCTION_FULL_JOB_ID}"
-vtu_root="$gom_root/results/gom_step62_production_vtu_job${GOM_PRODUCTION_VTU_JOB_ID}"
+case "$GOM_PRODUCTION_PHYSICS_PROFILE" in
+    legacy_fault_plateau_npctheta30)
+        preflight_root="$gom_root/results/gom_step62_production_preflight_job${GOM_PRODUCTION_PREFLIGHT_JOB_ID}"
+        full_root="$gom_root/results/gom_step62_production_full_job${GOM_PRODUCTION_FULL_JOB_ID}"
+        vtu_root="$gom_root/results/gom_step62_production_vtu_job${GOM_PRODUCTION_VTU_JOB_ID}"
+        preflight_log_prefix=gom_s62_prod_pf
+        full_log_prefix=gom_s62_prod_full
+        vtu_log_prefix=gom_s62_prod_vtu
+        ;;
+    sandpc_effective_globalplateau_v1)
+        preflight_root="$gom_root/results/gom_step62_effective_pc_global_plateau_preflight_job${GOM_PRODUCTION_PREFLIGHT_JOB_ID}"
+        full_root="$gom_root/results/gom_step62_effective_pc_global_plateau_full_job${GOM_PRODUCTION_FULL_JOB_ID}"
+        vtu_root="$gom_root/results/gom_step62_effective_pc_global_plateau_vtu_job${GOM_PRODUCTION_VTU_JOB_ID}"
+        preflight_log_prefix=gom_s62_epc_pf
+        full_log_prefix=gom_s62_epc_full
+        vtu_log_prefix=gom_s62_epc_vtu
+        ;;
+    *)
+        echo "Unsupported physics profile: $GOM_PRODUCTION_PHYSICS_PROFILE" >&2
+        exit 1
+        ;;
+esac
 test -f "$check_root/PASS"
 grep -Fxq 'status=pass' "$check_root/campaign_check_summary.txt"
 grep -Fxq "case_count=$GOM_PRODUCTION_CASE_COUNT" \
+    "$check_root/campaign_check_summary.txt"
+grep -Fxq "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
     "$check_root/campaign_check_summary.txt"
 
 copy_log_if_present() {
@@ -88,6 +112,22 @@ copy_log_if_present() {
     if test -f "$path"; then
         cp -- "$path" "$destination/"
     fi
+}
+
+set_case_paths() {
+    task="$1"
+    case_key="$2"
+    preflight_case="$preflight_root/$case_key"
+    case "$GOM_PRODUCTION_PHYSICS_PROFILE" in
+        legacy_fault_plateau_npctheta30)
+            full_tag="gom_step62_production_${case_key}_hyst_faultpcplateau_npctheta30_full1000y_job${GOM_PRODUCTION_FULL_JOB_ID}_${task}"
+            ;;
+        sandpc_effective_globalplateau_v1)
+            full_tag="gom_step62_effective_pc_global_plateau_${case_key}_sandpc_effective_globalplateau_v1_full1000y_job${GOM_PRODUCTION_FULL_JOB_ID}_${task}"
+            ;;
+    esac
+    full_case="$full_root/$full_tag"
+    vtu_case="$vtu_root/$case_key"
 }
 
 compact_atomic_rows() {
@@ -130,6 +170,8 @@ verify_existing_shard() {
     grep -Fxq 'status=pass' "$final/SHARD_COMPLETE"
     grep -Fxq "campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256" \
         "$final/SHARD_COMPLETE"
+    grep -Fxq "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
+        "$final/SHARD_COMPLETE"
     grep -Fxq "task_start=$start" "$final/SHARD_COMPLETE"
     grep -Fxq "task_end=$end" "$final/SHARD_COMPLETE"
     grep -Fxq "case_count=$shard_case_count" "$final/SHARD_COMPLETE"
@@ -157,19 +199,36 @@ else
             resolve --task "$task" --format shell)"
         eval "$resolved_case"
         case_key="$GOM_PRODUCTION_CASE_KEY"
-        full_tag="gom_step62_production_${case_key}_hyst_faultpcplateau_npctheta30_full1000y_job${GOM_PRODUCTION_FULL_JOB_ID}_${task}"
-        full_case="$full_root/$full_tag"
-        vtu_case="$vtu_root/$case_key"
+        set_case_paths "$task" "$case_key"
 
+        test -f "$preflight_case/PASS"
         test -f "$full_case/PASS"
         test -f "$vtu_case/PASS"
+        grep -Fxq 'status=pass' "$preflight_case/preflight_summary.txt"
+        if test "$GOM_PRODUCTION_PHYSICS_PROFILE" = \
+            sandpc_effective_globalplateau_v1; then
+            grep -Fxq "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
+                "$preflight_case/preflight_summary.txt"
+        fi
         grep -Fxq 'status=pass' "$full_case/production_summary.txt"
+        grep -Fxq "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
+            "$full_case/production_summary.txt"
         grep -Fxq "case_key=$case_key" "$full_case/production_summary.txt"
         grep -Fxq 'steps_completed=210' "$full_case/production_summary.txt"
         grep -Fxq 'retained_restart_steps=51,78,110,210' \
             "$full_case/production_summary.txt"
         grep -Fxq "production_qoi_mode=$GOM_PRODUCTION_QOI_MODE" \
             "$full_case/production_summary.txt"
+        case "$GOM_PRODUCTION_PHYSICS_PROFILE" in
+            legacy_fault_plateau_npctheta30)
+                grep -Fxq 'fault_pc_entry_treatment=plateau' \
+                    "$full_case/production_summary.txt"
+                ;;
+            sandpc_effective_globalplateau_v1)
+                grep -Fxq 'fault_pc_entry_treatment=plateau_all_active' \
+                    "$full_case/production_summary.txt"
+                ;;
+        esac
         grep -Fxq 'status=pass' "$vtu_case/export_summary.txt"
         (
             cd "$full_case"
@@ -183,6 +242,7 @@ else
 
         destination="$incoming/payload/cases/$case_key"
         mkdir -p "$destination"
+        cp -a -- "$preflight_case" "$destination/preflight"
         cp -a -- "$full_case" "$destination/production"
         cp -a -- "$vtu_case" "$destination/vtu"
         if test "$GOM_PRODUCTION_ARCHIVE_COMPACT_ATOMIC_ROWS" = true; then
@@ -194,16 +254,22 @@ else
             "$GOM_PRODUCTION_REALIZATION_ID" >> "$incoming/CASE_INDEX.tsv"
 
         copy_log_if_present \
-            "$gom_root/logs/gom_s62_prod_full-${GOM_PRODUCTION_FULL_JOB_ID}_${task}.out" \
+            "$gom_root/logs/${preflight_log_prefix}-${GOM_PRODUCTION_PREFLIGHT_JOB_ID}_${task}.out" \
             "$incoming/payload/slurm_logs"
         copy_log_if_present \
-            "$gom_root/logs/gom_s62_prod_full-${GOM_PRODUCTION_FULL_JOB_ID}_${task}.err" \
+            "$gom_root/logs/${preflight_log_prefix}-${GOM_PRODUCTION_PREFLIGHT_JOB_ID}_${task}.err" \
             "$incoming/payload/slurm_logs"
         copy_log_if_present \
-            "$gom_root/logs/gom_s62_prod_vtu-${GOM_PRODUCTION_VTU_JOB_ID}_${task}.out" \
+            "$gom_root/logs/${full_log_prefix}-${GOM_PRODUCTION_FULL_JOB_ID}_${task}.out" \
             "$incoming/payload/slurm_logs"
         copy_log_if_present \
-            "$gom_root/logs/gom_s62_prod_vtu-${GOM_PRODUCTION_VTU_JOB_ID}_${task}.err" \
+            "$gom_root/logs/${full_log_prefix}-${GOM_PRODUCTION_FULL_JOB_ID}_${task}.err" \
+            "$incoming/payload/slurm_logs"
+        copy_log_if_present \
+            "$gom_root/logs/${vtu_log_prefix}-${GOM_PRODUCTION_VTU_JOB_ID}_${task}.out" \
+            "$incoming/payload/slurm_logs"
+        copy_log_if_present \
+            "$gom_root/logs/${vtu_log_prefix}-${GOM_PRODUCTION_VTU_JOB_ID}_${task}.err" \
             "$incoming/payload/slurm_logs"
     done
 
@@ -221,6 +287,8 @@ else
         "task_start=$start" \
         "task_end=$end" \
         "case_count=$shard_case_count" \
+        "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
+        "preflight_job_id=$GOM_PRODUCTION_PREFLIGHT_JOB_ID" \
         "full_job_id=$GOM_PRODUCTION_FULL_JOB_ID" \
         "vtu_job_id=$GOM_PRODUCTION_VTU_JOB_ID" \
         "archive_job_id=$SLURM_JOB_ID" \
@@ -241,6 +309,7 @@ else
         "submission_id=$GOM_PRODUCTION_SUBMISSION_ID" \
         "campaign_id=$GOM_PRODUCTION_CAMPAIGN_ID" \
         "campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256" \
+        "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
         "task_start=$start" \
         "task_end=$end" \
         "case_count=$shard_case_count" \
@@ -259,10 +328,11 @@ if test "$GOM_PRODUCTION_ARCHIVE_REMOVE_VERIFIED_SCRATCH" = true; then
             resolve --task "$task" --format shell)"
         eval "$resolved_case"
         case_key="$GOM_PRODUCTION_CASE_KEY"
-        full_tag="gom_step62_production_${case_key}_hyst_faultpcplateau_npctheta30_full1000y_job${GOM_PRODUCTION_FULL_JOB_ID}_${task}"
+        set_case_paths "$task" "$case_key"
         for target_and_root in \
-            "$full_root/$full_tag|$full_root" \
-            "$vtu_root/$case_key|$vtu_root"
+            "$preflight_case|$preflight_root" \
+            "$full_case|$full_root" \
+            "$vtu_case|$vtu_root"
         do
             target="${target_and_root%%|*}"
             allowed_root="${target_and_root#*|}"

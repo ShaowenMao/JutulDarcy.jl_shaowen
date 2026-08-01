@@ -25,6 +25,25 @@ test "$GOM_PRODUCTION_SCHEMA_VERSION" -eq 2 || {
     echo "The ensemble submitter requires manifest schema 2." >&2
     exit 1
 }
+case "$GOM_PRODUCTION_PHYSICS_PROFILE" in
+    legacy_fault_plateau_npctheta30)
+        preflight_script="$scripts/gom_step62_production_preflight.sbatch"
+        full_script="$scripts/gom_step62_production_full.sbatch"
+        vtu_script="$scripts/gom_step62_production_vtu.sbatch"
+        ;;
+    sandpc_effective_globalplateau_v1)
+        preflight_script="$scripts/gom_step62_effective_pc_global_plateau_preflight.sbatch"
+        full_script="$scripts/gom_step62_effective_pc_global_plateau_full.sbatch"
+        vtu_script="$scripts/gom_step62_effective_pc_global_plateau_vtu.sbatch"
+        ;;
+    *)
+        echo "Unsupported physics profile: $GOM_PRODUCTION_PHYSICS_PROFILE" >&2
+        exit 1
+        ;;
+esac
+test -f "$preflight_script"
+test -f "$full_script"
+test -f "$vtu_script"
 
 selection_start="${GOM_PRODUCTION_SELECTION_START:-1}"
 selection_end="${GOM_PRODUCTION_SELECTION_END:-$GOM_PRODUCTION_CASE_COUNT}"
@@ -102,9 +121,10 @@ check_job="$submitted_job_id"
 
 shard_receipt="$gom_root/submissions/${submission_id}_shards.tsv"
 temporary_shards="${shard_receipt}.tmp.$$"
-printf 'shard_index\ttask_start\ttask_end\tfull_job\tvtu_job\tarchive_job\twave_gate_archive_job\n' \
+printf 'shard_index\ttask_start\ttask_end\tpreflight_job\tfull_job\tvtu_job\tarchive_job\twave_gate_archive_job\n' \
     > "$temporary_shards"
 
+preflight_jobs=()
 full_jobs=()
 vtu_jobs=()
 archive_jobs=()
@@ -134,9 +154,17 @@ while test "$cursor" -le "$selection_end"; do
     submit_job --kill-on-invalid-dep=yes \
         --dependency="$dependency" \
         --array="$array_spec" \
-        --time=4-00:00:00 \
         --export="$common_export" \
-        "$scripts/gom_step62_production_full.sbatch"
+        "$preflight_script"
+    preflight_job="$submitted_job_id"
+    preflight_jobs+=("$preflight_job")
+
+    submit_job --kill-on-invalid-dep=yes \
+        --dependency="aftercorr:$preflight_job" \
+        --array="$array_spec" \
+        --time=4-00:00:00 \
+        --export="$common_export,GOM_PRODUCTION_PREFLIGHT_JOB_ID=$preflight_job" \
+        "$full_script"
     full_job="$submitted_job_id"
     full_jobs+=("$full_job")
 
@@ -144,19 +172,19 @@ while test "$cursor" -le "$selection_end"; do
         --dependency="aftercorr:$full_job" \
         --array="$array_spec" \
         --export="$common_export,GOM_PRODUCTION_FULL_JOB_ID=$full_job" \
-        "$scripts/gom_step62_production_vtu.sbatch"
+        "$vtu_script"
     vtu_job="$submitted_job_id"
     vtu_jobs+=("$vtu_job")
 
     submit_job --kill-on-invalid-dep=yes \
         --dependency="afterok:$vtu_job" \
-        --export="$common_export,GOM_PRODUCTION_CHECK_JOB_ID=$check_job,GOM_PRODUCTION_FULL_JOB_ID=$full_job,GOM_PRODUCTION_VTU_JOB_ID=$vtu_job,GOM_PRODUCTION_TASK_START=$cursor,GOM_PRODUCTION_TASK_END=$shard_end,GOM_PRODUCTION_SUBMISSION_ID=$submission_id" \
+        --export="$common_export,GOM_PRODUCTION_CHECK_JOB_ID=$check_job,GOM_PRODUCTION_PREFLIGHT_JOB_ID=$preflight_job,GOM_PRODUCTION_FULL_JOB_ID=$full_job,GOM_PRODUCTION_VTU_JOB_ID=$vtu_job,GOM_PRODUCTION_TASK_START=$cursor,GOM_PRODUCTION_TASK_END=$shard_end,GOM_PRODUCTION_SUBMISSION_ID=$submission_id" \
         "$scripts/gom_step62_production_shard_archive.sbatch"
     archive_job="$submitted_job_id"
     archive_jobs+=("$archive_job")
 
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "$shard_index" "$cursor" "$shard_end" "$full_job" \
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$shard_index" "$cursor" "$shard_end" "$preflight_job" "$full_job" \
         "$vtu_job" "$archive_job" "$wave_gate" >> "$temporary_shards"
     cursor=$((shard_end + 1))
 done
@@ -189,7 +217,9 @@ printf '%s\n' \
     "shard_window=$shard_window" \
     "max_concurrent=$max_concurrent" \
     "qoi_mode=$GOM_PRODUCTION_QOI_MODE" \
+    "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
     "campaign_check_job=$check_job" \
+    "preflight_array_jobs=$(IFS=:; echo "${preflight_jobs[*]}")" \
     "full_array_jobs=$(IFS=:; echo "${full_jobs[*]}")" \
     "vtu_array_jobs=$(IFS=:; echo "${vtu_jobs[*]}")" \
     "archive_jobs=$archive_job_ids" \

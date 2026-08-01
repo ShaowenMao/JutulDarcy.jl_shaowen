@@ -105,8 +105,24 @@ gom_production_export_locked_physics() {
     export USE_MRST_TRANSMISSIBILITY=false
     export IGNORE_MRST_T=true
     export FAULT_SATURATION_DOMAIN_MODE=input
-    export FAULT_PC_ENTRY_TREATMENT=plateau
-    export FAULT_PC_ENTRY_SG_MAX=1.0e-4
+    case "$GOM_PRODUCTION_PHYSICS_PROFILE" in
+        legacy_fault_plateau_npctheta30)
+            export FAULT_PC_ENTRY_TREATMENT=plateau
+            export FAULT_PC_ENTRY_SG_MAX=1.0e-4
+            ;;
+        sandpc_effective_globalplateau_v1)
+            export FAULT_PC_ENTRY_TREATMENT=plateau_all_active
+            unset FAULT_PC_ENTRY_SG_MAX
+            test "$GOM_PRODUCTION_QOI_MODE" = required || {
+                echo "The effective/global-plateau profile requires QoI mode required." >&2
+                return 1
+            }
+            ;;
+        *)
+            echo "Unsupported production physics profile: $GOM_PRODUCTION_PHYSICS_PROFILE" >&2
+            return 1
+            ;;
+    esac
     export EXPLICIT_FAULT_HYSTERESIS_MODE=reservoir
     export ENABLE_DIFFUSION=false
 
@@ -172,8 +188,8 @@ gom_production_write_metadata() {
         "hysteresis=true" \
         "hysteresis_s_min=0.05" \
         "fault_hysteresis=drainage_equivalent" \
-        "fault_pc_entry_treatment=plateau" \
-        "fault_pc_entry_sg_max=1e-4" \
+        "fault_pc_entry_treatment=$FAULT_PC_ENTRY_TREATMENT" \
+        "fault_pc_entry_sg_max=${FAULT_PC_ENTRY_SG_MAX:-not_applicable}" \
         "nonpredict_pc_reference_contact_angle_deg=30" \
         "transmissibility_source=JutulDarcy_grid_and_rock" \
         "well_volume_fraction=1e-3" \
