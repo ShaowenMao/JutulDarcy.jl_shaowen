@@ -4,7 +4,7 @@
 #SBATCH --account=mit_amf_advanced_cpu
 #SBATCH --qos=mit_amf_advanced_cpu
 #SBATCH --array=1-7
-#SBATCH --time=12:00:00
+#SBATCH --time=4-00:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=18G
 #SBATCH --output=/home/%u/orcd/scratch/gom_grid/logs/%x-%A_%a.out
@@ -139,7 +139,7 @@ printf '%s\n' \
     "nonpredict_pc_reference_contact_angle_deg=30" \
     "transmissibility_source=JutulDarcy_grid_and_rock" \
     "production_output_mode=true" \
-    "production_qoi_mode=${PRODUCTION_QOI_MODE:-off}" \
+    "production_qoi_mode=$PRODUCTION_QOI_MODE" \
     "result_dir=$case_dir" \
     > "$case_dir/production_summary.txt"
 printf 'PASS\n' > "$case_dir/PASS"

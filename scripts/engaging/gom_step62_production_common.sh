@@ -1,5 +1,5 @@
 #!/bin/bash
-# Shared, immutable configuration for the Step62 seven-case pilot.
+# Shared, immutable configuration for Step62 production campaigns.
 
 set -euo pipefail
 
@@ -18,15 +18,26 @@ gom_production_resolve_task() {
     )"
     eval "$resolved_case"
     export GOM_PRODUCTION_CAMPAIGN_ID
+    export GOM_PRODUCTION_SCHEMA_VERSION
+    export GOM_PRODUCTION_ENSEMBLE_KIND
     export GOM_PRODUCTION_MANIFEST_PATH
     export GOM_PRODUCTION_MANIFEST_COMPANION_PATH
     export GOM_PRODUCTION_MANIFEST_SHA256
+    export GOM_PRODUCTION_CASE_ORDER_SHA256
     export GOM_PRODUCTION_ARCHIVE_ROOT
     export GOM_PRODUCTION_SOURCE_INPUT_MANIFEST_SHA256
     export GOM_PRODUCTION_MRST_PREPARE_COMMIT
     export GOM_PRODUCTION_JUTULDARCY_COMMIT
     export GOM_PRODUCTION_JUTUL_MANIFEST_SHA256
     export GOM_PRODUCTION_CASE_COUNT
+    export GOM_PRODUCTION_PHYSICS_PROFILE
+    export GOM_PRODUCTION_QOI_MODE
+    export GOM_PRODUCTION_RETAIN_YEARS
+    export GOM_PRODUCTION_ROLLING_CHECKPOINTS
+    export GOM_PRODUCTION_ARCHIVE_SHARD_SIZE
+    export GOM_PRODUCTION_ARCHIVE_SHARD_COUNT
+    export GOM_PRODUCTION_ARCHIVE_COMPACT_ATOMIC_ROWS
+    export GOM_PRODUCTION_ARCHIVE_REMOVE_VERIFIED_SCRATCH
     export GOM_PRODUCTION_TASK
     export GOM_PRODUCTION_CASE_KEY
     export GOM_PRODUCTION_GEOLOGY_ID
@@ -100,11 +111,12 @@ gom_production_export_locked_physics() {
     export ENABLE_DIFFUSION=false
 
     export PRODUCTION_OUTPUT_MODE=true
-    # Existing frozen pilot inputs predate exact QoI semantics, so this
-    # remains off unless a regenerated campaign explicitly requires it.
-    export PRODUCTION_QOI_MODE="${PRODUCTION_QOI_MODE:-off}"
-    export PRODUCTION_RETAIN_YEARS=25,50,100,1000
-    export PRODUCTION_ROLLING_CHECKPOINTS=2
+    # These settings come from the checksum-pinned campaign manifest. Schema
+    # 1 manifests resolve to their legacy defaults; schema 2 locks them
+    # explicitly and full_1620 requires QoI mode "required".
+    export PRODUCTION_QOI_MODE="$GOM_PRODUCTION_QOI_MODE"
+    export PRODUCTION_RETAIN_YEARS="$GOM_PRODUCTION_RETAIN_YEARS"
+    export PRODUCTION_ROLLING_CHECKPOINTS="$GOM_PRODUCTION_ROLLING_CHECKPOINTS"
     export PRODUCTION_CASE_KEY="$GOM_PRODUCTION_CASE_KEY"
     export PRODUCTION_CAMPAIGN_MANIFEST_SHA256="$GOM_PRODUCTION_MANIFEST_SHA256"
     export RESTART_CACHE_MODE=off
@@ -129,9 +141,13 @@ gom_production_write_metadata() {
         "node=$SLURMD_NODENAME" \
         "started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         "phase=$phase" \
+        "campaign_schema_version=$GOM_PRODUCTION_SCHEMA_VERSION" \
         "campaign_id=$GOM_PRODUCTION_CAMPAIGN_ID" \
+        "ensemble_kind=$GOM_PRODUCTION_ENSEMBLE_KIND" \
+        "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
         "campaign_manifest=$GOM_PRODUCTION_MANIFEST_PATH" \
         "campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256" \
+        "case_order_sha256=$GOM_PRODUCTION_CASE_ORDER_SHA256" \
         "source_input_manifest_sha256=$GOM_PRODUCTION_SOURCE_INPUT_MANIFEST_SHA256" \
         "mrst_prepare_commit=$GOM_PRODUCTION_MRST_PREPARE_COMMIT" \
         "jutuldarcy_commit=$GOM_PRODUCTION_JUTULDARCY_COMMIT" \
@@ -162,9 +178,9 @@ gom_production_write_metadata() {
         "transmissibility_source=JutulDarcy_grid_and_rock" \
         "well_volume_fraction=1e-3" \
         "production_output_mode=true" \
-        "production_qoi_mode=${PRODUCTION_QOI_MODE:-off}" \
-        "production_retain_years=25,50,100,1000" \
-        "production_rolling_checkpoints=2" \
+        "production_qoi_mode=$PRODUCTION_QOI_MODE" \
+        "production_retain_years=$PRODUCTION_RETAIN_YEARS" \
+        "production_rolling_checkpoints=$PRODUCTION_ROLLING_CHECKPOINTS" \
         "memory=${SLURM_MEM_PER_NODE:-unknown}" \
         "cpus=${SLURM_CPUS_PER_TASK:-unknown}" \
         > "$destination"

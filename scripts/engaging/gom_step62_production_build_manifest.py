@@ -1,5 +1,5 @@
 #!/usr/bin/env python3.12
-"""Build the immutable TOML contract for the Step62 seven-case pilot."""
+"""Build an immutable Step62 split-input campaign contract."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import csv
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import tempfile
 
@@ -22,8 +22,15 @@ CANONICAL_CASE_KEYS = (
     "s03_c012_case08",
     "s04_c024_case03",
 )
+FULL_ENSEMBLE_CASE_KEYS = tuple(
+    f"s{scenario:02d}_c{geology:03d}_case{realization:02d}"
+    for scenario in range(1, 7)
+    for geology in range(1, 28)
+    for realization in range(1, 11)
+)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
+GEOLOGY_ID_RE = re.compile(r"^s(?P<scenario>\d{2})_c(?P<geology>\d{3})$")
 
 
 def sha256_file(path: Path) -> str:
@@ -79,7 +86,59 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--mrst-prepare-commit", required=True)
     parser.add_argument("--source-input-manifest-sha256", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--schema-version", type=int, choices=(1, 2), default=1)
+    parser.add_argument(
+        "--ensemble-kind",
+        choices=("pilot_7", "subset", "full_1620"),
+    )
+    parser.add_argument(
+        "--qoi-mode", choices=("off", "auto", "required"), default="required"
+    )
+    parser.add_argument(
+        "--physics-profile",
+        choices=(
+            "legacy_fault_plateau_npctheta30",
+            "sandpc_effective_globalplateau_v1",
+        ),
+    )
+    parser.add_argument("--archive-shard-size", type=int, default=50)
     return parser.parse_args()
+
+
+def integral_realization(row: dict[str, str]) -> int:
+    realization_text = row["realizationId"].strip()
+    realization = int(float(realization_text))
+    if float(realization_text) != realization:
+        raise ValueError(f"non-integral realization ID: {realization_text}")
+    return realization
+
+
+def validate_case_identity(row: dict[str, str]) -> tuple[int, int, int]:
+    geology_id = row["geologyId"].strip()
+    match = GEOLOGY_ID_RE.fullmatch(geology_id)
+    if match is None:
+        raise ValueError(f"invalid geology ID: {geology_id!r}")
+    scenario = int(match.group("scenario"))
+    geology = int(match.group("geology"))
+    realization = integral_realization(row)
+    if not 1 <= realization <= 10:
+        raise ValueError(
+            f"{row['caseKey']} realization ID must be in 1:10"
+        )
+    expected_key = f"{geology_id}_case{realization:02d}"
+    if row["caseKey"] != expected_key:
+        raise ValueError(
+            f"case key {row['caseKey']!r} does not match {expected_key!r}"
+        )
+    return scenario, geology, realization
+
+
+def case_order_sha256(case_rows: list[dict[str, str]]) -> str:
+    payload = "".join(
+        f"{task}\t{row['caseKey']}\n"
+        for task, row in enumerate(case_rows, start=1)
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def main() -> int:
@@ -90,9 +149,11 @@ def main() -> int:
         raise ValueError("refusing to replace an existing immutable manifest")
     if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]*", arguments.campaign_id):
         raise ValueError("campaign ID contains unsafe characters")
-    archive_root = Path(arguments.archive_root)
+    archive_root = PurePosixPath(arguments.archive_root)
     if not archive_root.is_absolute():
         raise ValueError("archive root must be absolute")
+    if arguments.archive_shard_size <= 0:
+        raise ValueError("archive shard size must be positive")
     jutuldarcy_commit = require_commit(
         arguments.jutuldarcy_commit, "JutulDarcy commit"
     )
@@ -130,8 +191,48 @@ def main() -> int:
     ]
     if len(common_rows) != 1:
         raise ValueError("derived manifest must contain exactly one common row")
-    if [row["caseKey"] for row in case_rows] != list(CANONICAL_CASE_KEYS):
-        raise ValueError("derived manifest case order/identity is not canonical")
+    if arguments.schema_version == 1:
+        if arguments.ensemble_kind not in (None, "pilot_7"):
+            raise ValueError("schema 1 supports only ensemble-kind pilot_7")
+        ensemble_kind = "pilot_7"
+        if arguments.physics_profile not in (
+            None,
+            "legacy_fault_plateau_npctheta30",
+        ):
+            raise ValueError("schema 1 supports only the legacy physics profile")
+        physics_profile = "legacy_fault_plateau_npctheta30"
+    else:
+        if arguments.ensemble_kind is None:
+            raise ValueError("schema 2 requires --ensemble-kind")
+        ensemble_kind = arguments.ensemble_kind
+        if arguments.physics_profile is None:
+            raise ValueError("schema 2 requires --physics-profile")
+        physics_profile = arguments.physics_profile
+
+    case_keys = [row["caseKey"] for row in case_rows]
+    if ensemble_kind == "pilot_7":
+        if case_keys != list(CANONICAL_CASE_KEYS):
+            raise ValueError(
+                "derived manifest case order/identity is not the canonical pilot"
+            )
+    else:
+        order_keys = [validate_case_identity(row) for row in case_rows]
+        if len(set(case_keys)) != len(case_keys):
+            raise ValueError("derived manifest contains duplicate case keys")
+        if order_keys != sorted(order_keys):
+            raise ValueError(
+                "schema 2 subset/full cases must use deterministic "
+                "scenario/geology/realization order"
+            )
+        if ensemble_kind == "full_1620" and tuple(case_keys) != (
+            FULL_ENSEMBLE_CASE_KEYS
+        ):
+            raise ValueError(
+                "full_1620 must contain exactly s01..s06, c001..c027, "
+                "and case01..case10 in canonical order"
+            )
+    if not case_rows:
+        raise ValueError("derived manifest contains no geology-specific rows")
     if any(
         require_digest(row["inputManifestSha256"], "embedded source digest")
         != source_sha256
@@ -160,7 +261,7 @@ def main() -> int:
     artifacts = [resolve_artifact(row) for row in case_rows]
 
     lines = [
-        "schema_version = 1",
+        f"schema_version = {arguments.schema_version}",
         f"campaign_id = {toml_string(arguments.campaign_id)}",
         f"archive_root = {toml_string(str(archive_root))}",
         f"source_input_manifest_sha256 = {toml_string(source_sha256)}",
@@ -168,20 +269,39 @@ def main() -> int:
         f"jutuldarcy_commit = {toml_string(jutuldarcy_commit)}",
         f"jutul_manifest_sha256 = "
         f"{toml_string(jutul_manifest_sha256)}",
-        "",
-        "[common]",
-        f"path = {toml_string(str(common_path))}",
-        f"sha256 = {toml_string(common_sha256)}",
-        f"bytes = {common_bytes}",
     ]
+    if arguments.schema_version == 2:
+        lines.extend(
+            [
+                f"ensemble_kind = {toml_string(ensemble_kind)}",
+                f"case_count = {len(case_rows)}",
+                f"case_order_sha256 = "
+                f"{toml_string(case_order_sha256(case_rows))}",
+                "",
+                "[workflow]",
+                f"physics_profile = {toml_string(physics_profile)}",
+                f"qoi_mode = {toml_string(arguments.qoi_mode)}",
+                "retain_years = [25, 50, 100, 1000]",
+                "rolling_checkpoints = 2",
+                f"archive_shard_size = {arguments.archive_shard_size}",
+                "archive_compact_atomic_rows = true",
+                "archive_remove_verified_scratch = true",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "[common]",
+            f"path = {toml_string(str(common_path))}",
+            f"sha256 = {toml_string(common_sha256)}",
+            f"bytes = {common_bytes}",
+        ]
+    )
     for task, (row, artifact) in enumerate(
         zip(case_rows, artifacts), start=1
     ):
         path, digest, byte_count = artifact
-        realization_text = row["realizationId"].strip()
-        realization = int(float(realization_text))
-        if float(realization_text) != realization:
-            raise ValueError(f"non-integral realization ID: {realization_text}")
+        realization = integral_realization(row)
         geology_hash = require_digest(
             row["geologyHash"], f"{row['caseKey']} geology hash"
         )

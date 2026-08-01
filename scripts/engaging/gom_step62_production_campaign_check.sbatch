@@ -64,7 +64,12 @@ printf '%s\n' \
     "job_id=$SLURM_JOB_ID" \
     "validated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     "manifest=$GOM_PRODUCTION_MANIFEST" \
-    "case_count=7" \
+    "schema_version=$GOM_PRODUCTION_SCHEMA_VERSION" \
+    "ensemble_kind=$GOM_PRODUCTION_ENSEMBLE_KIND" \
+    "case_count=$GOM_PRODUCTION_CASE_COUNT" \
+    "case_order_sha256=$GOM_PRODUCTION_CASE_ORDER_SHA256" \
+    "qoi_mode=$GOM_PRODUCTION_QOI_MODE" \
+    "archive_shard_size=$GOM_PRODUCTION_ARCHIVE_SHARD_SIZE" \
     "exact_paths=true" \
     "wildcards=false" \
     "all_input_sha256_verified=true" \
