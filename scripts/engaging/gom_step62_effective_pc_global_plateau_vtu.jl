@@ -8,20 +8,25 @@ using .GoMStep62EffectivePcGlobalPlateauContract
 include(joinpath(@__DIR__, "gom_step62_vtu_geology_indicators.jl"))
 using .GoMStep62VtuGeologyIndicators
 
-length(ARGS) == 7 || error(
+length(ARGS) in (7, 8) || error(
     "Usage: gom_step62_effective_pc_global_plateau_vtu.jl COMMON_MAT SPECIFIC_MAT " *
-    "RESTART_DIR VTU_DIR PREFIX SUMMARY_PATH CASE_ID"
+    "RESTART_DIR VTU_DIR PREFIX SUMMARY_PATH CASE_ID [EXPORT_MODE]"
 )
 common_path, specific_path, restart_dir, vtu_dir, prefix, summary_path,
-    case_id = ARGS
+    case_id = ARGS[1:7]
+export_mode = length(ARGS) == 8 ? ARGS[8] : "selected"
+export_mode in ("selected", "all_report_steps") || error(
+    "EXPORT_MODE must be selected or all_report_steps; got $export_mode."
+)
 
 const MRST_YEAR_SECONDS = 365.2425*24*60*60
-const SELECTED_STEPS = [78, 210]
+selected_steps =
+    export_mode == "selected" ? [78, 210] : collect(1:210)
 
 isfile(common_path) || error("Common MAT file does not exist: $common_path")
 isfile(specific_path) || error("Specific MAT file does not exist: $specific_path")
 isdir(restart_dir) || error("Restart directory does not exist: $restart_dir")
-for step in SELECTED_STEPS
+for step in selected_steps
     isfile(joinpath(restart_dir, "jutul_$step.jld2")) ||
         error("Missing restart state for report step $step.")
 end
@@ -112,7 +117,7 @@ state_specification = JutulDarcy.prepare_report_times_vtu_export(
     extra_cell_data = extra_cell_data
 )
 state_paths = String[]
-for step in SELECTED_STEPS
+for step in selected_steps
     state, _ = Jutul.read_restart(
         restart_dir,
         step;
@@ -136,11 +141,11 @@ end
 schedule_dt = Float64.(vec(mrst["schedule"]["step"]["val"]))
 length(schedule_dt) == 210 || error("Expected 210 schedule steps.")
 cumulative_years = cumsum(schedule_dt) ./ MRST_YEAR_SECONDS
-selected_years_raw = cumulative_years[SELECTED_STEPS]
-isapprox(selected_years_raw[1], 50.0; atol = 1.0e-10, rtol = 0) ||
+isapprox(cumulative_years[78], 50.0; atol = 1.0e-10, rtol = 0) ||
     error("Step 78 is not 50 years.")
-isapprox(selected_years_raw[2], 1000.0; atol = 1.0e-10, rtol = 0) ||
+isapprox(cumulative_years[210], 1000.0; atol = 1.0e-10, rtol = 0) ||
     error("Step 210 is not 1000 years.")
+selected_years_raw = cumulative_years[selected_steps]
 selected_years = round.(selected_years_raw; digits = 10)
 vtu_paths = vcat(initial_path, state_paths)
 pvd_times = vcat(0.0, selected_years)
@@ -221,7 +226,10 @@ open(summary_path, "w") do io
     println(io, "pvd_files=1")
     println(io, "pvd_time_unit=years")
     println(io, "initial_state=true")
-    println(io, "selected_steps=$(join(SELECTED_STEPS, ','))")
+    println(io, "export_mode=$export_mode")
+    selected_steps_text = export_mode == "all_report_steps" ?
+        "1:210" : join(selected_steps, ',')
+    println(io, "selected_steps=$selected_steps_text")
     println(io, "selected_times_years=$(join(selected_years, ','))")
     println(io, "parameter_set=standard_compact_plus_geology_indicators")
     println(io, "additional_parameters=geology_indicators_only")
