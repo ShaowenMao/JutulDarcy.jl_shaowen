@@ -129,6 +129,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pdf", type=Path, default=DEFAULT_PDF)
     parser.add_argument("--audit-csv", type=Path, default=DEFAULT_AUDIT_CSV)
     parser.add_argument(
+        "--no-svg",
+        action="store_true",
+        help="Skip SVG output (useful for dense temporal frame campaigns).",
+    )
+    parser.add_argument(
+        "--no-pdf",
+        action="store_true",
+        help="Skip PDF output while retaining the high-resolution PNG.",
+    )
+    parser.add_argument(
+        "--no-audit-csv",
+        action="store_true",
+        help="Skip the geological-domain audit CSV.",
+    )
+    parser.add_argument(
         "--pvd",
         type=Path,
         default=None,
@@ -760,9 +775,11 @@ def main() -> None:
     source = args.input.expanduser().resolve()
     preset = args.preset.expanduser().resolve()
     png_path = args.png.expanduser().resolve()
-    svg_path = args.svg.expanduser().resolve()
-    pdf_path = args.pdf.expanduser().resolve()
-    audit_csv_path = args.audit_csv.expanduser().resolve()
+    svg_path = None if args.no_svg else args.svg.expanduser().resolve()
+    pdf_path = None if args.no_pdf else args.pdf.expanduser().resolve()
+    audit_csv_path = (
+        None if args.no_audit_csv else args.audit_csv.expanduser().resolve()
+    )
 
     if not source.is_file():
         raise FileNotFoundError(source)
@@ -786,7 +803,11 @@ def main() -> None:
     if args.view_z_min >= args.view_z_max:
         raise ValueError("view-z-min must be smaller than view-z-max")
 
-    for path in (png_path, svg_path, pdf_path, audit_csv_path):
+    output_paths = [png_path]
+    output_paths.extend(
+        path for path in (svg_path, pdf_path, audit_csv_path) if path is not None
+    )
+    for path in output_paths:
         path.parent.mkdir(parents=True, exist_ok=True)
 
     configure_matplotlib()
@@ -891,7 +912,8 @@ def main() -> None:
                 displayed_domains += 1
         audit_rows.append(row)
 
-    write_domain_audit(audit_csv_path, audit_rows)
+    if audit_csv_path is not None:
+        write_domain_audit(audit_csv_path, audit_rows)
 
     fault_color = "#303030"
     for loop in fault_loops:
@@ -1012,25 +1034,27 @@ def main() -> None:
         ),
         "Author": f"Generated from {source.name}",
     }
-    figure.savefig(
-        pdf_path,
-        format="pdf",
-        metadata=metadata,
-        bbox_inches="tight",
-        bbox_extra_artists=tight_bbox_artists,
-        pad_inches=OUTPUT_PAD_INCHES,
-    )
-    figure.savefig(
-        svg_path,
-        format="svg",
-        metadata={
-            "Title": metadata["Title"],
-            "Description": metadata["Subject"],
-        },
-        bbox_inches="tight",
-        bbox_extra_artists=tight_bbox_artists,
-        pad_inches=OUTPUT_PAD_INCHES,
-    )
+    if pdf_path is not None:
+        figure.savefig(
+            pdf_path,
+            format="pdf",
+            metadata=metadata,
+            bbox_inches="tight",
+            bbox_extra_artists=tight_bbox_artists,
+            pad_inches=OUTPUT_PAD_INCHES,
+        )
+    if svg_path is not None:
+        figure.savefig(
+            svg_path,
+            format="svg",
+            metadata={
+                "Title": metadata["Title"],
+                "Description": metadata["Subject"],
+            },
+            bbox_inches="tight",
+            bbox_extra_artists=tight_bbox_artists,
+            pad_inches=OUTPUT_PAD_INCHES,
+        )
     figure.savefig(
         png_path,
         format="png",
@@ -1072,9 +1096,9 @@ def main() -> None:
     print(f"DISPLAYED_COMPONENTS={displayed_domains}")
     print(f"SMOOTH_LENGTH_M={args.smooth_length_m:g}")
     print(f"DISPLAY_CUTOFF={DISPLAY_CUTOFF:g}")
-    print(f"AUDIT_CSV={audit_csv_path}")
-    print(f"PDF={pdf_path}")
-    print(f"SVG={svg_path}")
+    print(f"AUDIT_CSV={audit_csv_path if audit_csv_path else 'SKIPPED'}")
+    print(f"PDF={pdf_path if pdf_path else 'SKIPPED'}")
+    print(f"SVG={svg_path if svg_path else 'SKIPPED'}")
     print(f"PNG={png_path}")
 
 

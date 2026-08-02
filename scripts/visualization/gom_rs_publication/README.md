@@ -78,6 +78,11 @@ documentation, and the required color preset are version controlled.
 For a movie, invoke the renderer once per VTU and provide unique `--png`,
 `--svg`, `--pdf`, and `--audit-csv` paths. Keep the slice, view limits,
 color limits, cutoff, smoothing length, and figure size fixed across frames.
+Use `--no-svg` and `--no-pdf` when only the high-resolution PNG is needed;
+the publication defaults still generate every format. The automated Cases
+5-7 campaign is implemented in
+`scripts/visualization/gom_movie_frames/README.md`. It writes 600-dpi PNGs at
+all 210 report times and vector PDFs only at 25, 50, 100, and 1,000 years.
 The renderer obtains each frame time from the PVD mapping, which keeps the
 annotation synchronized with physical simulation time rather than report-step
 number.

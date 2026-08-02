@@ -69,7 +69,20 @@ done < "$source_case/RESTART_MANIFEST.tsv"
 test "$(tail -n +2 "$source_case/RESTART_MANIFEST.tsv" | wc -l)" -eq 210
 
 export JUTULDARCY_COMBINED_REPO="$science_repo"
-export GOM_PRODUCTION_MANIFEST="$source_case/campaign.toml"
+# The archived case retains the original companion as
+# campaign.toml.sha256.original. The resolver intentionally requires the live
+# companion name campaign.toml.sha256, so reconstruct that pair node-locally
+# without mutating the checksum-verified archive.
+(
+    cd "$source_case"
+    sha256sum --check campaign.toml.sha256.original >/dev/null
+)
+manifest_workspace="${SLURM_TMPDIR:-/tmp}/gom-movie-manifest-${SLURM_JOB_ID}"
+mkdir -p -- "$manifest_workspace"
+cp -- "$source_case/campaign.toml" "$manifest_workspace/campaign.toml"
+cp -- "$source_case/campaign.toml.sha256.original" \
+    "$manifest_workspace/campaign.toml.sha256"
+export GOM_PRODUCTION_MANIFEST="$manifest_workspace/campaign.toml"
 export PRODUCTION_QOI_MODE=required
 source \
     "$science_repo/scripts/engaging/gom_step62_effective_pc_global_plateau_common.sh"
@@ -153,6 +166,10 @@ julia --startup-file=no --project=. "$script" \
     "$incoming_case/export_summary.txt" "$GOM_PRODUCTION_CASE_KEY" \
     all_report_steps \
     > "$incoming_case/export.out" 2> "$incoming_case/export.err"
+
+# Keep a sibling summary beside the PVD/VTUs so each visualization frame can
+# resolve its exact physical time without a command-line override.
+cp -- "$incoming_case/export_summary.txt" "$vtu_dir/export_summary.txt"
 
 grep -Fxq 'status=pass' "$incoming_case/export_summary.txt"
 grep -Fxq 'export_mode=all_report_steps' \
