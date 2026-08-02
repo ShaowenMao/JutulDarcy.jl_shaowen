@@ -6,11 +6,34 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from render_gom_movie_frames import (
+    absolute_path_preserving_symlinks,
     load_report_states,
     map_task,
     parse_pdf_years,
     resolve_pdf_steps,
 )
+
+
+class ExecutablePathTest(unittest.TestCase):
+    def test_virtual_environment_path_is_not_resolved(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            real_python = root / "system-python"
+            real_python.write_bytes(b"python")
+            venv_python = root / "venv" / "bin" / "python"
+            venv_python.parent.mkdir(parents=True)
+            try:
+                venv_python.symlink_to(real_python)
+            except OSError as error:
+                self.skipTest(f"File symlinks are unavailable: {error}")
+            self.assertEqual(
+                absolute_path_preserving_symlinks(venv_python),
+                venv_python.absolute(),
+            )
+            self.assertNotEqual(
+                absolute_path_preserving_symlinks(venv_python),
+                real_python.resolve(),
+            )
 
 
 class TaskMappingTest(unittest.TestCase):

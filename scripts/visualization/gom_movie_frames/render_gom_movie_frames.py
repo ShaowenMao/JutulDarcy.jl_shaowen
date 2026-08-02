@@ -61,6 +61,11 @@ def parse_pdf_years(value: str) -> tuple[float, ...]:
     return years
 
 
+def absolute_path_preserving_symlinks(path: Path) -> Path:
+    """Return a lexical absolute path without dereferencing a venv executable."""
+    return Path(os.path.abspath(os.fspath(path.expanduser())))
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--vtu-job-root", type=Path, required=True)
@@ -414,7 +419,7 @@ def main() -> None:
     vtu_job_root = args.vtu_job_root.expanduser().resolve()
     output_root = args.output_root.expanduser().resolve()
     repo_root = args.repo_root.expanduser().resolve()
-    python = args.python.expanduser().resolve()
+    python = absolute_path_preserving_symlinks(args.python)
     if not python.is_file():
         raise FileNotFoundError(python)
     if not (vtu_job_root / "PASS").is_file():
