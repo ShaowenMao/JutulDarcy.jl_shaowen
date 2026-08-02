@@ -71,4 +71,19 @@ using Test
         "JutulDarcy.PRODUCTION_QOI_SCHEMA_VERSION",
         effective_final
     )
+
+    # The specialized effective-Pc smoke workflow is also the acceptance
+    # launcher for task 1. Keep its interrupted-versus-uninterrupted control
+    # aligned with the documented task-1/task-5 production contract.
+    effective_smoke = read(
+        joinpath(
+            scripts_dir,
+            "gom_step62_effective_pc_global_plateau_smoke.sbatch"
+        ),
+        String
+    )
+    @test occursin(
+        r"(?s)SLURM_ARRAY_TASK_ID\" -eq 1.*SLURM_ARRAY_TASK_ID\" -eq 5",
+        effective_smoke
+    )
 end

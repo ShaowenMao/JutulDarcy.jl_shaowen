@@ -102,9 +102,12 @@ test "$(wc -l < "$summary_dir/leakage_case_summary.tsv")" -eq 2
 test ! -e "$summary_dir/PRODUCTION_OUTPUT_COMPLETE.tsv"
 test ! -e "$summary_dir/QOI_OUTPUT_COMPLETE.tsv"
 
-# Prove restart equivalence for the slowest historical member, task 5.
+# Prove restart equivalence for both the established task-1 cohort and the
+# slowest historical member, task 5. This matches the production-output
+# contract documented for the acceptance workflow.
 restart_equivalence=not_selected
-if [ "$SLURM_ARRAY_TASK_ID" -eq 5 ]; then
+if [ "$SLURM_ARRAY_TASK_ID" -eq 1 ] || \
+   [ "$SLURM_ARRAY_TASK_ID" -eq 5 ]; then
     control_tag="$(gom_effective_pc_case_tag smoke3_control)"
     control_dir="$result_root/$control_tag"
     control_restart_dir="$control_dir/restart"
