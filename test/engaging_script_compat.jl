@@ -178,4 +178,46 @@ using Test
     )
     @test occursin("SHARD_CONTROL_VALIDATION.tsv", production_finalize)
     @test occursin("sha256sums_sha256=", shard_archive)
+
+    # Schema-2 recovery is an orchestration-only layer around the manifest's
+    # original scientific checkout. It must audit the full affected shard,
+    # lock each source tree, regenerate the entire shard VTU set, and reuse
+    # the normal atomic archive/finalizer without claiming campaign coverage.
+    recovery_names = [
+        "gom_step62_production_schema2_recovery_common.sh",
+        "gom_step62_production_schema2_recovery_gate.sbatch",
+        "gom_step62_production_schema2_recovery_case.sbatch",
+        "gom_step62_production_schema2_recovery_vtu.sbatch",
+        "gom_step62_production_schema2_recovery_complete.sbatch",
+        "gom_step62_production_schema2_recovery_submit.sh",
+    ]
+    recovery_sources = Dict(
+        name => read(joinpath(scripts_dir, name), String)
+        for name in recovery_names
+    )
+    recovery_common = recovery_sources[recovery_names[1]]
+    recovery_gate = recovery_sources[recovery_names[2]]
+    recovery_case = recovery_sources[recovery_names[3]]
+    recovery_vtu = recovery_sources[recovery_names[4]]
+    recovery_complete = recovery_sources[recovery_names[5]]
+    recovery_submit = recovery_sources[recovery_names[6]]
+    @test occursin("rev-parse HEAD:src", recovery_common)
+    @test occursin("cmp -s \"\$recovery_workflow_repo/Manifest.toml\"", recovery_common)
+    @test occursin("Unselected task \$task is incomplete", recovery_gate)
+    @test occursin("flock -n", recovery_gate)
+    @test occursin("flock -n", recovery_case)
+    @test occursin("recovery_quarantine", recovery_case)
+    @test occursin(
+        "\$recovery_sim_repo/scripts/engaging/gom_sampling_cases.sbatch",
+        recovery_case
+    )
+    @test occursin(
+        "gom_step62_effective_pc_global_plateau_vtu.sbatch",
+        recovery_vtu
+    )
+    @test occursin("campaign_complete_created=false", recovery_complete)
+    @test occursin("gom_step62_production_shard_archive.sbatch", recovery_submit)
+    @test occursin("gom_step62_production_finalize.sbatch", recovery_submit)
+    @test occursin("afterok:\$case_job", recovery_submit)
+    @test occursin("afterok:\$vtu_job", recovery_submit)
 end

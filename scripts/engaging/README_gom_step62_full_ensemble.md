@@ -188,6 +188,71 @@ Receipts are written both below scratch `gom_grid/submissions` and durable
 unique task coverage across every atomically promoted shard. Only a complete
 `full_1620` selection can create `CAMPAIGN_COMPLETE`.
 
+## Checkpoint recovery for a schema-2 submission
+
+Use the schema-2 recovery launcher only after the original submission DAG has
+settled and before any affected shard has been promoted. It is intentionally a
+separate control-plane commit: the simulator, Julia environment, manifest,
+inputs, case paths, and physics remain pinned to the original campaign commit.
+At launch and again inside every job, the workflow proves that the recovery
+and simulation checkouts have identical `src`, `Project.toml`, and
+`Manifest.toml` content.
+
+The task selector lists cases that may need recovery. The immutable recovery
+plan expands this to the complete source archive shards. Before writing, the
+gate requires every unselected case in those shards to be complete and fully
+checksummed; consequently, every incomplete case in an affected shard must be
+listed explicitly. A selected case is then handled as one of:
+
+- verified complete: no simulation rerun;
+- 210 committed scalar and QoI rows: validation/finalization only;
+- recoverable partial: resume from the newest checkpoint backed by a
+  contiguous scalar row prefix and either committed or staged QoI data;
+- empty case: start from the immutable inputs; or
+- unsafe/inconsistent: stop without simulation or archive writes.
+
+The production-output engine validates the selected checkpoint against its
+state summary and hysteresis history. Corrupt or ineligible newer checkpoints
+are quarantined with hashes, and automatic fallback can select an older valid
+checkpoint. Recovery never copies a checkpoint into a new case identity.
+
+Prepare two clean immutable checkouts on Engaging: `SIM_REPO` at the commit in
+the campaign manifest and `WORKFLOW_REPO` at the later commit containing the
+generic recovery launcher. Then submit, for example:
+
+```bash
+export GOM_RECOVERY_WORKFLOW_REPO="$WORKFLOW_REPO"
+export GOM_RECOVERY_SIM_REPO="$SIM_REPO"
+export GOM_PRODUCTION_MANIFEST=/absolute/durable/path/campaign.toml
+export GOM_RECOVERY_SOURCE_RECEIPT=/absolute/durable/path/source_submission.txt
+# Optional when it is not the receipt's sibling `<name>_shards.tsv`:
+# export GOM_RECOVERY_SOURCE_SHARDS=/absolute/durable/path/source_shards.tsv
+export GOM_RECOVERY_TASKS='17,23-24'
+export GOM_RECOVERY_SUBMISSION_ID='recover_source_submission_001'
+export GOM_RECOVERY_MAX_CONCURRENT=64
+bash "$WORKFLOW_REPO/scripts/engaging/gom_step62_production_schema2_recovery_submit.sh"
+```
+
+The recovery dependency chain is:
+
+```text
+full affected-shard audit
+  -> selected case resume/no-op array
+  -> complete affected-shard VTU re-export array
+  -> normal checksum + atomic archive promotion (one job per shard)
+  -> normal shard finalizer (one job per shard)
+  -> recovery-only completion certificate
+```
+
+The launcher pins the source submission receipt and shard receipt by SHA-256,
+writes an immutable plan and submission receipt to both scratch and
+`gom_full_production/recovery_submissions`, and cancels a partially submitted
+DAG. The final certificate is `RECOVERY_COMPLETE` under that recovery ID. It
+records `campaign_complete_created=false`; only the later normal 1--1,620
+submission may certify `CAMPAIGN_COMPLETE`. Once recovered shards are safely
+promoted, the normal full launcher reuses them through its existing shard
+verification path, so recovered cases are not simulated again.
+
 ## Failure behavior
 
 - A setup or simulation failure blocks its correlated downstream task.
