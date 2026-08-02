@@ -86,4 +86,32 @@ using Test
         r"(?s)SLURM_ARRAY_TASK_ID\" -eq 1.*SLURM_ARRAY_TASK_ID\" -eq 5",
         effective_smoke
     )
+
+    # The effective-Pc acceptance launcher supports both its frozen legacy
+    # seven-case manifest and task positions from the schema-2 full ensemble.
+    # An unconditional seven-case assertion previously cancelled the entire
+    # acceptance DAG before preflight.
+    effective_campaign_check = read(
+        joinpath(
+            scripts_dir,
+            "gom_step62_effective_pc_global_plateau_campaign_check.sbatch"
+        ),
+        String
+    )
+    @test occursin(
+        "GOM_PRODUCTION_SCHEMA_VERSION\" -eq 1",
+        effective_campaign_check
+    )
+    @test occursin(
+        "GOM_PRODUCTION_ENSEMBLE_KIND\" = full_1620",
+        effective_campaign_check
+    )
+    @test occursin(
+        "GOM_PRODUCTION_CASE_COUNT\" -eq 1620",
+        effective_campaign_check
+    )
+    @test occursin(
+        "manifest_case_count=\$GOM_PRODUCTION_CASE_COUNT",
+        effective_campaign_check
+    )
 end

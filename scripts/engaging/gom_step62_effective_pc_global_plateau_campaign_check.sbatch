@@ -35,7 +35,7 @@ command -v "$production_python" >/dev/null
     validate --json > "$result_dir/validated_manifest.json"
 "$production_python" "$resolver" --manifest "$GOM_PRODUCTION_MANIFEST" validate \
     > "$result_dir/validation.txt"
-declare -A expected_case_keys=(
+declare -A legacy_expected_case_keys=(
     [1]=s05_c012_case01
     [5]=s03_c001_case04
     [6]=s03_c012_case08
@@ -51,8 +51,24 @@ while IFS= read -r task; do
     )"
     eval "$resolved_case"
     gom_effective_pc_validate_campaign
-    test "$GOM_PRODUCTION_CASE_COUNT" -eq 7
-    test "$GOM_PRODUCTION_CASE_KEY" = "${expected_case_keys[$task]}"
+    if [ "$GOM_PRODUCTION_SCHEMA_VERSION" -eq 1 ]; then
+        test "$GOM_PRODUCTION_CASE_COUNT" -eq 7
+        expected_case_key="${legacy_expected_case_keys[$task]}"
+    else
+        # Schema-2 acceptance tasks are positions in the canonical complete
+        # 6 x 27 x 10 ensemble, not positions in the legacy seven-case pilot.
+        test "$GOM_PRODUCTION_SCHEMA_VERSION" -eq 2
+        test "$GOM_PRODUCTION_ENSEMBLE_KIND" = full_1620
+        test "$GOM_PRODUCTION_CASE_COUNT" -eq 1620
+        zero_based_task=$((task - 1))
+        scenario=$((zero_based_task / 270 + 1))
+        within_scenario=$((zero_based_task % 270))
+        geology=$((within_scenario / 10 + 1))
+        realization=$((within_scenario % 10 + 1))
+        printf -v expected_case_key 's%02d_c%03d_case%02d' \
+            "$scenario" "$geology" "$realization"
+    fi
+    test "$GOM_PRODUCTION_CASE_KEY" = "$expected_case_key"
     archive_root="$(realpath -m "$GOM_PRODUCTION_ARCHIVE_ROOT")"
     for input_path in \
         "$GOM_PRODUCTION_COMMON_MAT" \
@@ -107,7 +123,7 @@ printf '%s\n' \
     "physics_profile=$GOM_EFFECTIVE_PC_PHYSICS_PROFILE" \
     "campaign_id=$GOM_PRODUCTION_CAMPAIGN_ID" \
     "campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256" \
-    "manifest_case_count=7" \
+    "manifest_case_count=$GOM_PRODUCTION_CASE_COUNT" \
     "selected_case_count=$selected_case_count" \
     "case_tasks=$task_set" \
     "durable_input_root=$durable_input_root" \
