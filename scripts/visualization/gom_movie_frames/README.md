@@ -68,3 +68,10 @@ The dependency-safe sequence is:
 Large inputs and outputs live below
 `/orcd/data/juanes/001/shaowen/gom_grid/movie_runs`. Scratch contains only
 small Slurm logs and node-local temporary/cache files.
+
+For restart-safe recovery, `gom_movie_render_submit.sh` accepts existing job
+IDs through `GOM_MOVIE_EXISTING_ENV_JOB_ID`,
+`GOM_MOVIE_EXISTING_VTU_JOB_ID`, and
+`GOM_MOVIE_EXISTING_VTU_FINALIZE_JOB_ID`. Reusing a running or completed VTU
+stage submits only the missing environment/render stages and records the reuse
+in the durable submission receipt.

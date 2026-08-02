@@ -55,23 +55,37 @@ else
             "$environment_script"
     )"
 fi
-archive_dependency=()
-if ! test -f "$archive_root/ARCHIVE_COMPLETE" || \
-    ! test -f "$archive_root/SOURCE_REMOVED.txt"
-then
-    archive_dependency=(--dependency="afterok:$GOM_MOVIE_ARCHIVE_JOB_ID")
+if test -n "${GOM_MOVIE_EXISTING_VTU_JOB_ID:-}"; then
+    [[ "$GOM_MOVIE_EXISTING_VTU_JOB_ID" =~ ^[0-9]+$ ]]
+    vtu_job="$GOM_MOVIE_EXISTING_VTU_JOB_ID"
+    vtu_reused=true
+else
+    archive_dependency=()
+    if ! test -f "$archive_root/ARCHIVE_COMPLETE" || \
+        ! test -f "$archive_root/SOURCE_REMOVED.txt"
+    then
+        archive_dependency=(--dependency="afterok:$GOM_MOVIE_ARCHIVE_JOB_ID")
+    fi
+    vtu_job="$(
+        sbatch --parsable "${archive_dependency[@]}" \
+            --export="ALL,GOM_MOVIE_ARCHIVE_ROOT=$archive_root,GOM_MOVIE_SOURCE_JOB_ID=$GOM_MOVIE_SOURCE_JOB_ID,GOM_MOVIE_SCIENCE_REPO=$science_repo,GOM_MOVIE_WORKFLOW_DIR=$engaging" \
+            "$vtu_script"
+    )"
+    vtu_reused=false
 fi
-vtu_job="$(
-    sbatch --parsable "${archive_dependency[@]}" \
-        --export="ALL,GOM_MOVIE_ARCHIVE_ROOT=$archive_root,GOM_MOVIE_SOURCE_JOB_ID=$GOM_MOVIE_SOURCE_JOB_ID,GOM_MOVIE_SCIENCE_REPO=$science_repo,GOM_MOVIE_WORKFLOW_DIR=$engaging" \
-        "$vtu_script"
-)"
 vtu_root="$render_parent/vtu_job${vtu_job}"
-vtu_finalize_job="$(
-    sbatch --parsable --dependency="afterok:$vtu_job" \
-        --export="ALL,GOM_MOVIE_ARCHIVE_ROOT=$archive_root,GOM_MOVIE_VTU_JOB_ID=$vtu_job" \
-        "$vtu_finalize_script"
-)"
+if test -n "${GOM_MOVIE_EXISTING_VTU_FINALIZE_JOB_ID:-}"; then
+    [[ "$GOM_MOVIE_EXISTING_VTU_FINALIZE_JOB_ID" =~ ^[0-9]+$ ]]
+    vtu_finalize_job="$GOM_MOVIE_EXISTING_VTU_FINALIZE_JOB_ID"
+    vtu_finalize_reused=true
+else
+    vtu_finalize_job="$(
+        sbatch --parsable --dependency="afterok:$vtu_job" \
+            --export="ALL,GOM_MOVIE_ARCHIVE_ROOT=$archive_root,GOM_MOVIE_VTU_JOB_ID=$vtu_job" \
+            "$vtu_finalize_script"
+    )"
+    vtu_finalize_reused=false
+fi
 smoke_job="$(
     sbatch --parsable --array=1-2 --time=04:00:00 \
         --dependency="afterok:$environment_job:$vtu_finalize_job" \
@@ -107,8 +121,10 @@ printf '%s\n' \
     "environment_job_id=$environment_job" \
     "environment_root=$environment_root" \
     "vtu_job_id=$vtu_job" \
+    "vtu_job_reused=$vtu_reused" \
     "vtu_root=$vtu_root" \
     "vtu_finalize_job_id=$vtu_finalize_job" \
+    "vtu_finalize_job_reused=$vtu_finalize_reused" \
     "smoke_job_id=$smoke_job" \
     "smoke_finalize_job_id=$smoke_finalize_job" \
     "full_render_job_id=$full_render_job" \

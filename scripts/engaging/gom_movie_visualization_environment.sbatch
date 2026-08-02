@@ -72,10 +72,12 @@ curl -fL --retry 10 --retry-delay 30 \
     https://tinytex.yihui.org/install-bin-unix.sh -o "$installer"
 installer_sha256="$(sha256sum "$installer" | awk '{print $1}')"
 mkdir -p -- "$incoming/tex"
+bundle_cache="$incoming/tinytex-bundles"
+mkdir -p -- "$bundle_cache"
 TINYTEX_VERSION=2026.05 \
 TINYTEX_INSTALLER=TinyTeX-1 \
 TINYTEX_DIR="$incoming/tex" \
-    sh "$installer" --no-path
+    sh "$installer" "$bundle_cache" --no-path
 tex_root="$incoming/tex/.TinyTeX"
 tex_bin="$(find "$tex_root/bin" -mindepth 1 -maxdepth 1 -type d | head -1)"
 test -n "$tex_bin"
