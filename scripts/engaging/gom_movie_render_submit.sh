@@ -45,13 +45,24 @@ done
 
 mkdir -p -- "$render_parent/submission_receipts"
 
-environment_job="$(
-    sbatch --parsable \
-        --export="ALL,GOM_MOVIE_ENV_ROOT=$environment_root,GOM_MOVIE_WORKFLOW_REPO=$workflow_repo" \
-        "$environment_script"
-)"
+if test -n "${GOM_MOVIE_EXISTING_ENV_JOB_ID:-}"; then
+    [[ "$GOM_MOVIE_EXISTING_ENV_JOB_ID" =~ ^[0-9]+$ ]]
+    environment_job="$GOM_MOVIE_EXISTING_ENV_JOB_ID"
+else
+    environment_job="$(
+        sbatch --parsable \
+            --export="ALL,GOM_MOVIE_ENV_ROOT=$environment_root,GOM_MOVIE_WORKFLOW_REPO=$workflow_repo" \
+            "$environment_script"
+    )"
+fi
+archive_dependency=()
+if ! test -f "$archive_root/ARCHIVE_COMPLETE" || \
+    ! test -f "$archive_root/SOURCE_REMOVED.txt"
+then
+    archive_dependency=(--dependency="afterok:$GOM_MOVIE_ARCHIVE_JOB_ID")
+fi
 vtu_job="$(
-    sbatch --parsable --dependency="afterok:$GOM_MOVIE_ARCHIVE_JOB_ID" \
+    sbatch --parsable "${archive_dependency[@]}" \
         --export="ALL,GOM_MOVIE_ARCHIVE_ROOT=$archive_root,GOM_MOVIE_SOURCE_JOB_ID=$GOM_MOVIE_SOURCE_JOB_ID,GOM_MOVIE_SCIENCE_REPO=$science_repo,GOM_MOVIE_WORKFLOW_DIR=$engaging" \
         "$vtu_script"
 )"
