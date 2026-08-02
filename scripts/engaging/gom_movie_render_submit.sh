@@ -86,9 +86,13 @@ else
     )"
     vtu_finalize_reused=false
 fi
+smoke_dependency="afterok:$environment_job"
+if ! test -f "$vtu_root/PASS"; then
+    smoke_dependency="$smoke_dependency:$vtu_finalize_job"
+fi
 smoke_job="$(
     sbatch --parsable --array=1-2 --time=04:00:00 \
-        --dependency="afterok:$environment_job:$vtu_finalize_job" \
+        --dependency="$smoke_dependency" \
         --export="ALL,GOM_MOVIE_VTU_ROOT=$vtu_root,GOM_MOVIE_RENDER_PARENT=$render_parent,GOM_MOVIE_ENV_ROOT=$environment_root,GOM_MOVIE_WORKFLOW_REPO=$workflow_repo,GOM_MOVIE_RENDER_MODE=smoke" \
         "$render_script"
 )"

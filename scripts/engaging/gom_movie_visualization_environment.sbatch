@@ -81,6 +81,7 @@ TINYTEX_DIR="$incoming/tex" \
 tex_root="$incoming/tex/.TinyTeX"
 tex_bin="$(find "$tex_root/bin" -mindepth 1 -maxdepth 1 -type d | head -1)"
 test -n "$tex_bin"
+PATH="$tex_bin:$PATH" tlmgr update --self
 PATH="$tex_bin:$PATH" tlmgr install dvipng type1cm cm-super
 test -x "$tex_bin/latex"
 test -x "$tex_bin/dvipng"
