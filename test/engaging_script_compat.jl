@@ -114,4 +114,31 @@ using Test
         "manifest_case_count=\$GOM_PRODUCTION_CASE_COUNT",
         effective_campaign_check
     )
+
+    # Strict metadata writing reads the locked physics environment. Every
+    # effective-Pc batch entry point that writes metadata must therefore load
+    # that environment after resolving its case and before the first write.
+    effective_batch_scripts = sort(filter(
+        path -> endswith(path, ".sbatch") && occursin(
+            "gom_step62_effective_pc_global_plateau_",
+            basename(path)
+        ),
+        readdir(scripts_dir; join = true)
+    ))
+    metadata_writers = 0
+    for path in effective_batch_scripts
+        source = read(path, String)
+        write_match = findfirst("gom_effective_pc_write_metadata", source)
+        isnothing(write_match) && continue
+        metadata_writers += 1
+        export_match = findfirst(
+            "gom_effective_pc_export_locked_physics",
+            source
+        )
+        @test !isnothing(export_match)
+        if !isnothing(export_match)
+            @test first(export_match) < first(write_match)
+        end
+    end
+    @test metadata_writers >= 6
 end

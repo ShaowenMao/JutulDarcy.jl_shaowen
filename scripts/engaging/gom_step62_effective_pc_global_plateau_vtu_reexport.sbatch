@@ -55,6 +55,7 @@ export JUTULDARCY_COMBINED_REPO="$simulation_repo"
 source \
     "$simulation_repo/scripts/engaging/gom_step62_effective_pc_global_plateau_common.sh"
 gom_effective_pc_resolve_task
+gom_effective_pc_export_locked_physics
 export PRODUCTION_QOI_MODE=required
 
 gom_root="${GOM_GRID_ROOT:-$HOME/orcd/scratch/gom_grid}"
