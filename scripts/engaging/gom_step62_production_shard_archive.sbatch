@@ -43,8 +43,10 @@ done
 
 gom_root="${GOM_GRID_ROOT:-$HOME/orcd/scratch/gom_grid}"
 resolver="$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_production_manifest.py"
+shard_verifier="$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_production_shard_verify.py"
 production_python="${GOM_PRODUCTION_PYTHON:-python3.12}"
 command -v "$production_python" >/dev/null
+test -f "$shard_verifier"
 
 summary="$($production_python "$resolver" \
     --manifest "$GOM_PRODUCTION_MANIFEST" summary --format shell)"
@@ -164,22 +166,19 @@ compact_atomic_rows() {
     done
 }
 
-verify_existing_shard() {
-    test -f "$final/SHARD_COMPLETE"
-    test -s "$final/SHA256SUMS"
-    grep -Fxq 'status=pass' "$final/SHARD_COMPLETE"
-    grep -Fxq "campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256" \
-        "$final/SHARD_COMPLETE"
-    grep -Fxq "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
-        "$final/SHARD_COMPLETE"
-    grep -Fxq "task_start=$start" "$final/SHARD_COMPLETE"
-    grep -Fxq "task_end=$end" "$final/SHARD_COMPLETE"
-    grep -Fxq "case_count=$shard_case_count" "$final/SHARD_COMPLETE"
+verify_shard_control() {
+    shard_path="$1"
+    output_path="$2"
+    "$production_python" "$shard_verifier" \
+        --manifest "$GOM_PRODUCTION_MANIFEST" \
+        --shard "$shard_path" --start "$start" --end "$end" --json \
+        > "$output_path"
 }
 
 archive_already_present=false
 if test -e "$final"; then
-    verify_existing_shard
+    verify_shard_control \
+        "$final" "$result_dir/existing_shard_control_verification.json"
     archive_already_present=true
 else
     test ! -e "$incoming"
@@ -304,6 +303,7 @@ else
         test -s SHA256SUMS
         sha256sum --check SHA256SUMS
     )
+    sha256sums_sha256="$(sha256sum "$incoming/SHA256SUMS" | awk '{print $1}')"
     printf '%s\n' \
         "status=pass" \
         "submission_id=$GOM_PRODUCTION_SUBMISSION_ID" \
@@ -314,10 +314,14 @@ else
         "task_end=$end" \
         "case_count=$shard_case_count" \
         "all_payload_sha256_verified_before_atomic_promote=true" \
+        "sha256sums_sha256=$sha256sums_sha256" \
         "promoted_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         > "$incoming/SHARD_COMPLETE"
+    verify_shard_control \
+        "$incoming" "$result_dir/staged_shard_control_verification.json"
     mv -- "$incoming" "$final"
-    verify_existing_shard
+    verify_shard_control \
+        "$final" "$result_dir/promoted_shard_control_verification.json"
 fi
 
 scratch_removed=false
@@ -364,6 +368,7 @@ printf '%s\n' \
     "archive_path=$final" \
     "archive_already_present=$archive_already_present" \
     "atomic_rows_compacted=$GOM_PRODUCTION_ARCHIVE_COMPACT_ATOMIC_ROWS" \
+    "sha256sums_sha256=$(sha256sum "$final/SHA256SUMS" | awk '{print $1}')" \
     "scratch_removed=$scratch_removed" \
     "completed_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     > "$result_dir/archive_summary.txt"

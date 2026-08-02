@@ -56,6 +56,11 @@ Run the gates in order. A failed gate stops the sequence.
    closure, archive checksums, and scratch usage.
 7. Only then authorize the complete 1,620-case submission.
 
+The successful 50-case canary is the official first production shard, not a
+disposable trial. When the later full selection covers tasks 1--1,620, the
+launcher recognizes and reuses the verified tasks 1--50 shard and submits
+only tasks 51--1,620.
+
 The full launcher requires the explicit acknowledgement
 `GOM_PRODUCTION_CONFIRM_FULL_1620=YES`. This is a safety interlock, not a
 substitute for the gates above.
@@ -128,6 +133,31 @@ for campaign inputs, checksums, diagnostics, overhead, and recovery margin.
 All-timestep JLD2 or VTU output is prohibited for the full ensemble and is
 reserved for a few designated movie cases.
 
+### Safe shard reuse
+
+Before skipping any simulation, the launcher requires the existing durable
+shard to match all of the following exactly:
+
+- campaign ID and campaign-manifest SHA-256;
+- locked physics profile and JutulDarcy commit;
+- task interval, case count, deterministic case-order SHA-256, and every row
+  of `CASE_INDEX.tsv`;
+- the SHA-256 of the complete `SHA256SUMS` inventory; and
+- fresh hashes of the small provenance/control files against that inventory.
+
+The complete payload is checksummed once before its initial atomic promotion.
+Later reuse rehashes the pinned control plane instead of rereading roughly
+75 GB for a 50-case shard. This relies on the promoted project-storage shard
+remaining immutable. An existing shard that fails any check aborts the
+submission; it is never overwritten or silently rerun under the same
+campaign identity.
+
+Submission receipts distinguish `new` and `reused` shards. The finalizer
+revalidates both classes, proves contiguous and unique task coverage, and
+records the origin of each shard. A full campaign may create
+`CAMPAIGN_COMPLETE` only after all 1,620 tasks are covered by that combined
+verified set.
+
 ## Submission
 
 For a canary or another contiguous subset, set the task limits and omit the
@@ -165,9 +195,8 @@ unique task coverage across every atomically promoted shard. Only a complete
   that archive, preventing uncontrolled scratch accumulation.
 - Two rolling checkpoints remain available during a running case, in
   addition to any milestone already reached.
-- A shard archive is idempotent: an existing shard is accepted only when its
-  campaign digest, physics profile, task interval, and completion marker all
-  match exactly.
+- A shard archive is idempotent: an existing shard is accepted only after the
+  full safe-reuse control-plane verification described above.
 - Generic restart recovery must use the same immutable manifest and code
   commit. Failed tasks are recovered before their shard is promoted; a new
   physics profile or input requires a new campaign rather than restart reuse.

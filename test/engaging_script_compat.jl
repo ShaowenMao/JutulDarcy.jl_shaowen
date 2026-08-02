@@ -141,4 +141,41 @@ using Test
         end
     end
     @test metadata_writers >= 6
+
+    # A successful canary is an official production shard. Preserve the
+    # no-rerun contract: the launcher must classify exact durable shards as
+    # reused, and the finalizer must independently validate every new and
+    # reused shard before certifying combined coverage.
+    ensemble_submit = read(
+        joinpath(
+            scripts_dir,
+            "gom_step62_production_ensemble_submit.sh"
+        ),
+        String
+    )
+    production_finalize = read(
+        joinpath(
+            scripts_dir,
+            "gom_step62_production_finalize.sbatch"
+        ),
+        String
+    )
+    shard_archive = read(
+        joinpath(
+            scripts_dir,
+            "gom_step62_production_shard_archive.sbatch"
+        ),
+        String
+    )
+    for source in (ensemble_submit, production_finalize, shard_archive)
+        @test occursin("gom_step62_production_shard_verify.py", source)
+    end
+    @test occursin("mode=reused", ensemble_submit)
+    @test occursin("GOM_PRODUCTION_REUSED_SHARD_RANGES", ensemble_submit)
+    @test occursin(
+        "all_shard_control_planes_validated=true",
+        production_finalize
+    )
+    @test occursin("SHARD_CONTROL_VALIDATION.tsv", production_finalize)
+    @test occursin("sha256sums_sha256=", shard_archive)
 end

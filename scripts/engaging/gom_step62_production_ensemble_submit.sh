@@ -14,7 +14,9 @@ command -v "$production_python" >/dev/null
 gom_root="${GOM_GRID_ROOT:-$HOME/orcd/scratch/gom_grid}"
 scripts="$JUTULDARCY_COMBINED_REPO/scripts/engaging"
 resolver="$scripts/gom_step62_production_manifest.py"
+shard_verifier="$scripts/gom_step62_production_shard_verify.py"
 mkdir -p "$gom_root/logs" "$gom_root/submissions"
+test -f "$shard_verifier"
 
 "$production_python" "$resolver" --manifest "$GOM_PRODUCTION_MANIFEST" \
     validate
@@ -114,6 +116,15 @@ submit_job() {
     submitted_job_id="$job_id"
 }
 
+join_colon_or_none() {
+    if test "$#" -eq 0; then
+        printf 'none'
+    else
+        local IFS=:
+        printf '%s' "$*"
+    fi
+}
+
 common_export="ALL,GOM_GRID_ROOT=$gom_root,JUTULDARCY_COMBINED_REPO=$JUTULDARCY_COMBINED_REPO,GOM_PRODUCTION_MANIFEST=$GOM_PRODUCTION_MANIFEST"
 submit_job --kill-on-invalid-dep=yes --export="$common_export" \
     "$scripts/gom_step62_production_campaign_check.sbatch"
@@ -121,13 +132,16 @@ check_job="$submitted_job_id"
 
 shard_receipt="$gom_root/submissions/${submission_id}_shards.tsv"
 temporary_shards="${shard_receipt}.tmp.$$"
-printf 'shard_index\ttask_start\ttask_end\tpreflight_job\tfull_job\tvtu_job\tarchive_job\twave_gate_archive_job\n' \
+printf 'shard_index\ttask_start\ttask_end\tmode\tpreflight_job\tfull_job\tvtu_job\tarchive_job\twave_gate_archive_job\tarchive_path\n' \
     > "$temporary_shards"
 
 preflight_jobs=()
 full_jobs=()
 vtu_jobs=()
 archive_jobs=()
+logical_archive_gates=()
+reused_shard_ranges=()
+campaign_root="$GOM_PRODUCTION_ARCHIVE_ROOT/campaigns/$GOM_PRODUCTION_CAMPAIGN_ID"
 cursor="$selection_start"
 shard_index=0
 while test "$cursor" -le "$selection_end"; do
@@ -143,58 +157,90 @@ while test "$cursor" -le "$selection_end"; do
     fi
     array_spec="${cursor}-${shard_end}%${shard_concurrent}"
 
+    shard_name="shard_$(printf '%04d' "$cursor")_$(printf '%04d' "$shard_end")"
+    durable_shard="$campaign_root/shards/$shard_name"
+
     dependency="afterok:$check_job"
     wave_gate=none
     if test "$shard_index" -gt "$shard_window"; then
         gate_index=$((shard_index - shard_window - 1))
-        wave_gate="${archive_jobs[$gate_index]}"
-        dependency="afterok:${check_job}:${wave_gate}"
+        wave_gate="${logical_archive_gates[$gate_index]}"
+        if test "$wave_gate" != none; then
+            dependency="afterok:${check_job}:${wave_gate}"
+        fi
     fi
 
-    submit_job --kill-on-invalid-dep=yes \
-        --dependency="$dependency" \
-        --array="$array_spec" \
-        --export="$common_export" \
-        "$preflight_script"
-    preflight_job="$submitted_job_id"
-    preflight_jobs+=("$preflight_job")
+    mode=new
+    preflight_job=none
+    full_job=none
+    vtu_job=none
+    archive_job=none
+    if test -e "$durable_shard"; then
+        # Never overwrite or silently trust a durable shard. Reuse is allowed
+        # only after the exact campaign, task order, and pinned control-plane
+        # checks succeed.
+        "$production_python" "$shard_verifier" \
+            --manifest "$GOM_PRODUCTION_MANIFEST" \
+            --shard "$durable_shard" --start "$cursor" --end "$shard_end"
+        mode=reused
+        reused_shard_ranges+=("${cursor}-${shard_end}")
+    else
+        submit_job --kill-on-invalid-dep=yes \
+            --dependency="$dependency" \
+            --array="$array_spec" \
+            --export="$common_export" \
+            "$preflight_script"
+        preflight_job="$submitted_job_id"
+        preflight_jobs+=("$preflight_job")
 
-    submit_job --kill-on-invalid-dep=yes \
-        --dependency="aftercorr:$preflight_job" \
-        --array="$array_spec" \
-        --time=4-00:00:00 \
-        --export="$common_export,GOM_PRODUCTION_PREFLIGHT_JOB_ID=$preflight_job" \
-        "$full_script"
-    full_job="$submitted_job_id"
-    full_jobs+=("$full_job")
+        submit_job --kill-on-invalid-dep=yes \
+            --dependency="aftercorr:$preflight_job" \
+            --array="$array_spec" \
+            --time=4-00:00:00 \
+            --export="$common_export,GOM_PRODUCTION_PREFLIGHT_JOB_ID=$preflight_job" \
+            "$full_script"
+        full_job="$submitted_job_id"
+        full_jobs+=("$full_job")
 
-    submit_job --kill-on-invalid-dep=yes \
-        --dependency="aftercorr:$full_job" \
-        --array="$array_spec" \
-        --export="$common_export,GOM_PRODUCTION_FULL_JOB_ID=$full_job" \
-        "$vtu_script"
-    vtu_job="$submitted_job_id"
-    vtu_jobs+=("$vtu_job")
+        submit_job --kill-on-invalid-dep=yes \
+            --dependency="aftercorr:$full_job" \
+            --array="$array_spec" \
+            --export="$common_export,GOM_PRODUCTION_FULL_JOB_ID=$full_job" \
+            "$vtu_script"
+        vtu_job="$submitted_job_id"
+        vtu_jobs+=("$vtu_job")
 
-    submit_job --kill-on-invalid-dep=yes \
-        --dependency="afterok:$vtu_job" \
-        --export="$common_export,GOM_PRODUCTION_CHECK_JOB_ID=$check_job,GOM_PRODUCTION_PREFLIGHT_JOB_ID=$preflight_job,GOM_PRODUCTION_FULL_JOB_ID=$full_job,GOM_PRODUCTION_VTU_JOB_ID=$vtu_job,GOM_PRODUCTION_TASK_START=$cursor,GOM_PRODUCTION_TASK_END=$shard_end,GOM_PRODUCTION_SUBMISSION_ID=$submission_id" \
-        "$scripts/gom_step62_production_shard_archive.sbatch"
-    archive_job="$submitted_job_id"
-    archive_jobs+=("$archive_job")
+        submit_job --kill-on-invalid-dep=yes \
+            --dependency="afterok:$vtu_job" \
+            --export="$common_export,GOM_PRODUCTION_CHECK_JOB_ID=$check_job,GOM_PRODUCTION_PREFLIGHT_JOB_ID=$preflight_job,GOM_PRODUCTION_FULL_JOB_ID=$full_job,GOM_PRODUCTION_VTU_JOB_ID=$vtu_job,GOM_PRODUCTION_TASK_START=$cursor,GOM_PRODUCTION_TASK_END=$shard_end,GOM_PRODUCTION_SUBMISSION_ID=$submission_id" \
+            "$scripts/gom_step62_production_shard_archive.sbatch"
+        archive_job="$submitted_job_id"
+        archive_jobs+=("$archive_job")
+    fi
+    logical_archive_gates+=("$archive_job")
 
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "$shard_index" "$cursor" "$shard_end" "$preflight_job" "$full_job" \
-        "$vtu_job" "$archive_job" "$wave_gate" >> "$temporary_shards"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$shard_index" "$cursor" "$shard_end" "$mode" \
+        "$preflight_job" "$full_job" "$vtu_job" "$archive_job" \
+        "$wave_gate" "$durable_shard" >> "$temporary_shards"
     cursor=$((shard_end + 1))
 done
 mv -- "$temporary_shards" "$shard_receipt"
 
-archive_dependency="afterok:$(IFS=:; echo "${archive_jobs[*]}")"
-archive_job_ids="$(IFS=:; echo "${archive_jobs[*]}")"
+logical_shard_count="${#logical_archive_gates[@]}"
+new_shard_count="${#archive_jobs[@]}"
+reused_shard_count="${#reused_shard_ranges[@]}"
+test "$((new_shard_count + reused_shard_count))" -eq "$logical_shard_count"
+archive_job_ids="$(join_colon_or_none "${archive_jobs[@]}")"
+reused_ranges="$(join_colon_or_none "${reused_shard_ranges[@]}")"
+if test "$new_shard_count" -eq 0; then
+    archive_dependency="afterok:$check_job"
+else
+    archive_dependency="afterok:$(join_colon_or_none "${archive_jobs[@]}")"
+fi
 submit_job --kill-on-invalid-dep=yes \
     --dependency="$archive_dependency" \
-    --export="$common_export,GOM_PRODUCTION_SELECTION_START=$selection_start,GOM_PRODUCTION_SELECTION_END=$selection_end,GOM_PRODUCTION_SUBMISSION_ID=$submission_id,GOM_PRODUCTION_ARCHIVE_JOB_IDS=$archive_job_ids" \
+    --export="$common_export,GOM_PRODUCTION_SELECTION_START=$selection_start,GOM_PRODUCTION_SELECTION_END=$selection_end,GOM_PRODUCTION_SUBMISSION_ID=$submission_id,GOM_PRODUCTION_ARCHIVE_JOB_IDS=$archive_job_ids,GOM_PRODUCTION_NEW_SHARD_COUNT=$new_shard_count,GOM_PRODUCTION_REUSED_SHARD_COUNT=$reused_shard_count,GOM_PRODUCTION_REUSED_SHARD_RANGES=$reused_ranges" \
     "$scripts/gom_step62_production_finalize.sbatch"
 finalize_job="$submitted_job_id"
 
@@ -213,15 +259,18 @@ printf '%s\n' \
     "selection_end=$selection_end" \
     "selection_count=$((selection_end - selection_start + 1))" \
     "archive_shard_size=$GOM_PRODUCTION_ARCHIVE_SHARD_SIZE" \
-    "shard_count=${#archive_jobs[@]}" \
+    "shard_count=$logical_shard_count" \
+    "new_shard_count=$new_shard_count" \
+    "reused_shard_count=$reused_shard_count" \
+    "reused_shard_ranges=$reused_ranges" \
     "shard_window=$shard_window" \
     "max_concurrent=$max_concurrent" \
     "qoi_mode=$GOM_PRODUCTION_QOI_MODE" \
     "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
     "campaign_check_job=$check_job" \
-    "preflight_array_jobs=$(IFS=:; echo "${preflight_jobs[*]}")" \
-    "full_array_jobs=$(IFS=:; echo "${full_jobs[*]}")" \
-    "vtu_array_jobs=$(IFS=:; echo "${vtu_jobs[*]}")" \
+    "preflight_array_jobs=$(join_colon_or_none "${preflight_jobs[@]}")" \
+    "full_array_jobs=$(join_colon_or_none "${full_jobs[@]}")" \
+    "vtu_array_jobs=$(join_colon_or_none "${vtu_jobs[@]}")" \
     "archive_jobs=$archive_job_ids" \
     "finalize_job=$finalize_job" \
     "shard_receipt=$shard_receipt" \

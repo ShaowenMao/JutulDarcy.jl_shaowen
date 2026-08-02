@@ -22,15 +22,22 @@ umask 027
 : "${GOM_PRODUCTION_SELECTION_END:?Set GOM_PRODUCTION_SELECTION_END.}"
 : "${GOM_PRODUCTION_SUBMISSION_ID:?Set GOM_PRODUCTION_SUBMISSION_ID.}"
 : "${GOM_PRODUCTION_ARCHIVE_JOB_IDS:?Set GOM_PRODUCTION_ARCHIVE_JOB_IDS.}"
+: "${GOM_PRODUCTION_NEW_SHARD_COUNT:?Set GOM_PRODUCTION_NEW_SHARD_COUNT.}"
+: "${GOM_PRODUCTION_REUSED_SHARD_COUNT:?Set GOM_PRODUCTION_REUSED_SHARD_COUNT.}"
+: "${GOM_PRODUCTION_REUSED_SHARD_RANGES:?Set GOM_PRODUCTION_REUSED_SHARD_RANGES.}"
 
 [[ "$GOM_PRODUCTION_SELECTION_START" =~ ^[0-9]+$ ]]
 [[ "$GOM_PRODUCTION_SELECTION_END" =~ ^[0-9]+$ ]]
 [[ "$GOM_PRODUCTION_SUBMISSION_ID" =~ ^[a-z0-9][a-z0-9_.-]*$ ]]
+[[ "$GOM_PRODUCTION_NEW_SHARD_COUNT" =~ ^[0-9]+$ ]]
+[[ "$GOM_PRODUCTION_REUSED_SHARD_COUNT" =~ ^[0-9]+$ ]]
 
 gom_root="${GOM_GRID_ROOT:-$HOME/orcd/scratch/gom_grid}"
 resolver="$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_production_manifest.py"
+shard_verifier="$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_production_shard_verify.py"
 production_python="${GOM_PRODUCTION_PYTHON:-python3.12}"
 command -v "$production_python" >/dev/null
+test -f "$shard_verifier"
 summary="$($production_python "$resolver" \
     --manifest "$GOM_PRODUCTION_MANIFEST" summary --format shell)"
 eval "$summary"
@@ -42,12 +49,33 @@ test "$end" -ge "$start"
 test "$end" -le "$GOM_PRODUCTION_CASE_COUNT"
 selection_count=$((end - start + 1))
 expected_shards=$(((selection_count + GOM_PRODUCTION_ARCHIVE_SHARD_SIZE - 1) / GOM_PRODUCTION_ARCHIVE_SHARD_SIZE))
+new_shard_count="$GOM_PRODUCTION_NEW_SHARD_COUNT"
+reused_shard_count="$GOM_PRODUCTION_REUSED_SHARD_COUNT"
+test "$((new_shard_count + reused_shard_count))" -eq "$expected_shards"
 
-IFS=':' read -r -a archive_job_ids <<< "$GOM_PRODUCTION_ARCHIVE_JOB_IDS"
-test "${#archive_job_ids[@]}" -eq "$expected_shards"
+archive_job_ids=()
+if test "$GOM_PRODUCTION_ARCHIVE_JOB_IDS" != none; then
+    IFS=':' read -r -a archive_job_ids <<< "$GOM_PRODUCTION_ARCHIVE_JOB_IDS"
+fi
+test "${#archive_job_ids[@]}" -eq "$new_shard_count"
 for job_id in "${archive_job_ids[@]}"; do
     [[ "$job_id" =~ ^[0-9]+$ ]]
 done
+
+declare -A reused_ranges=()
+if test "$reused_shard_count" -eq 0; then
+    test "$GOM_PRODUCTION_REUSED_SHARD_RANGES" = none
+else
+    test "$GOM_PRODUCTION_REUSED_SHARD_RANGES" != none
+    IFS=':' read -r -a reused_range_list \
+        <<< "$GOM_PRODUCTION_REUSED_SHARD_RANGES"
+    test "${#reused_range_list[@]}" -eq "$reused_shard_count"
+    for range in "${reused_range_list[@]}"; do
+        [[ "$range" =~ ^[0-9]+-[0-9]+$ ]]
+        test -z "${reused_ranges[$range]+present}"
+        reused_ranges["$range"]=true
+    done
+fi
 
 result_dir="$gom_root/results/gom_step62_production_finalize_job${SLURM_JOB_ID}"
 mkdir -p "$result_dir"
@@ -72,8 +100,12 @@ printf 'task\tcase_key\tgeology_id\trealization_id\n' \
     > "$incoming/CASE_INDEX.tsv"
 printf 'shard\ttask_start\ttask_end\tcase_count\tsha256sums_sha256\n' \
     > "$incoming/SHARD_INDEX.tsv"
+printf 'shard\torigin\tvalidation_sha256\n' \
+    > "$incoming/SHARD_CONTROL_VALIDATION.tsv"
+mkdir -p "$incoming/shard_control"
 
 cursor="$start"
+observed_reused=0
 while test "$cursor" -le "$end"; do
     shard_end=$((cursor + GOM_PRODUCTION_ARCHIVE_SHARD_SIZE - 1))
     if test "$shard_end" -gt "$end"; then
@@ -82,26 +114,28 @@ while test "$cursor" -le "$end"; do
     shard_case_count=$((shard_end - cursor + 1))
     shard_name="shard_$(printf '%04d' "$cursor")_$(printf '%04d' "$shard_end")"
     shard="$campaign_root/shards/$shard_name"
-    test -d "$shard"
-    test -s "$shard/SHA256SUMS"
-    test -s "$shard/CASE_INDEX.tsv"
-    grep -Fxq 'status=pass' "$shard/SHARD_COMPLETE"
-    grep -Fxq "campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256" \
-        "$shard/SHARD_COMPLETE"
-    grep -Fxq "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
-        "$shard/SHARD_COMPLETE"
-    grep -Fxq "task_start=$cursor" "$shard/SHARD_COMPLETE"
-    grep -Fxq "task_end=$shard_end" "$shard/SHARD_COMPLETE"
-    grep -Fxq "case_count=$shard_case_count" "$shard/SHARD_COMPLETE"
-    test "$(( $(wc -l < "$shard/CASE_INDEX.tsv") - 1 ))" \
-        -eq "$shard_case_count"
+    shard_range="${cursor}-${shard_end}"
+    origin=new
+    if test -n "${reused_ranges[$shard_range]+present}"; then
+        origin=reused
+        observed_reused=$((observed_reused + 1))
+    fi
+    validation="$incoming/shard_control/${shard_name}.json"
+    "$production_python" "$shard_verifier" \
+        --manifest "$GOM_PRODUCTION_MANIFEST" --shard "$shard" \
+        --start "$cursor" --end "$shard_end" --json > "$validation"
     tail -n +2 "$shard/CASE_INDEX.tsv" >> "$incoming/CASE_INDEX.tsv"
     printf '%s\t%s\t%s\t%s\t%s\n' \
         "$shard_name" "$cursor" "$shard_end" "$shard_case_count" \
         "$(sha256sum "$shard/SHA256SUMS" | awk '{print $1}')" \
         >> "$incoming/SHARD_INDEX.tsv"
+    printf '%s\t%s\t%s\n' \
+        "$shard_name" "$origin" \
+        "$(sha256sum "$validation" | awk '{print $1}')" \
+        >> "$incoming/SHARD_CONTROL_VALIDATION.tsv"
     cursor=$((shard_end + 1))
 done
+test "$observed_reused" -eq "$reused_shard_count"
 
 test "$(( $(wc -l < "$incoming/CASE_INDEX.tsv") - 1 ))" \
     -eq "$selection_count"
@@ -131,15 +165,19 @@ printf '%s\n' \
     "selection_end=$end" \
     "case_count=$selection_count" \
     "shard_count=$expected_shards" \
+    "new_shard_count=$new_shard_count" \
+    "reused_shard_count=$reused_shard_count" \
+    "reused_shard_ranges=$GOM_PRODUCTION_REUSED_SHARD_RANGES" \
     "archive_job_ids=$GOM_PRODUCTION_ARCHIVE_JOB_IDS" \
-    "all_shard_markers_validated=true" \
+    "all_shard_control_planes_validated=true" \
     "all_case_tasks_contiguous_and_unique=true" \
     "completed_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     > "$incoming/SUBMISSION_COMPLETE"
 (
     cd "$incoming"
     sha256sum campaign.toml CASE_INDEX.tsv SHARD_INDEX.tsv \
-        SUBMISSION_COMPLETE > RECEIPT_SHA256SUMS
+        SHARD_CONTROL_VALIDATION.tsv SUBMISSION_COMPLETE \
+        > RECEIPT_SHA256SUMS
     sha256sum --check RECEIPT_SHA256SUMS
 )
 mv -- "$incoming" "$final"
@@ -159,6 +197,9 @@ if test "$start" -eq 1 && \
         "case_order_sha256=$GOM_PRODUCTION_CASE_ORDER_SHA256" \
         "case_count=$GOM_PRODUCTION_CASE_COUNT" \
         "shard_count=$expected_shards" \
+        "new_shard_count=$new_shard_count" \
+        "reused_shard_count=$reused_shard_count" \
+        "reused_shard_ranges=$GOM_PRODUCTION_REUSED_SHARD_RANGES" \
         "submission_receipt=$final" \
         "completed_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         > "$temporary"
@@ -176,6 +217,9 @@ printf '%s\n' \
     "selection_end=$end" \
     "case_count=$selection_count" \
     "shard_count=$expected_shards" \
+    "new_shard_count=$new_shard_count" \
+    "reused_shard_count=$reused_shard_count" \
+    "reused_shard_ranges=$GOM_PRODUCTION_REUSED_SHARD_RANGES" \
     "submission_receipt=$final" \
     "campaign_complete=$campaign_complete" \
     > "$result_dir/finalize_summary.txt"
