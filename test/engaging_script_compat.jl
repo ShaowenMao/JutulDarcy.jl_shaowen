@@ -179,6 +179,38 @@ using Test
     @test occursin("SHARD_CONTROL_VALIDATION.tsv", production_finalize)
     @test occursin("sha256sums_sha256=", shard_archive)
 
+    # Engaging counts pending array elements against a per-user QOS ceiling.
+    # The rolling control plane must keep the scientific checkout pinned,
+    # bound each wave to two shards, and finish with the normal full-selection
+    # finalizer rather than inventing a second campaign-completion path.
+    rolling_submit = read(
+        joinpath(
+            scripts_dir,
+            "gom_step62_production_rolling_submit.sh"
+        ),
+        String
+    )
+    rolling_step = read(
+        joinpath(
+            scripts_dir,
+            "gom_step62_production_rolling_step.sh"
+        ),
+        String
+    )
+    rolling_controller = read(
+        joinpath(
+            scripts_dir,
+            "gom_step62_production_rolling_controller.sbatch"
+        ),
+        String
+    )
+    @test occursin("GOM_PRODUCTION_ROLLING_SOURCE_RECEIPT", rolling_submit)
+    @test occursin("test \"\$wave_cases\" -le 100", rolling_step)
+    @test occursin("test \"\$shard_window\" -le 2", rolling_step)
+    @test occursin("GOM_PRODUCTION_CONFIRM_FULL_1620=YES", rolling_step)
+    @test occursin("CAMPAIGN_COMPLETE", rolling_step)
+    @test occursin("gom_step62_production_rolling_step.sh", rolling_controller)
+
     # Schema-2 recovery is an orchestration-only layer around the manifest's
     # original scientific checkout. It must audit the full affected shard,
     # lock each source tree, regenerate the entire shard VTU set, and reuse

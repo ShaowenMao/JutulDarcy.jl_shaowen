@@ -115,6 +115,15 @@ simulation limit. With 8 CPUs per task, the Advanced QoS CPU ceiling permits
 at most 64 concurrent simulations; the launcher therefore accepts at most
 64 as its concurrency setting.
 
+The Advanced QoS also counts pending array elements against a per-user
+submitted-job ceiling. Dependencies limit execution but do not remove those
+pending elements, so placing all 33 shard DAGs in Slurm at once can exceed
+that ceiling. The rolling controller therefore submits no more than two new
+50-case shards (100 cases) at a time. The next controller is released only
+after the preceding wave finalizer has verified and promoted both shards.
+This keeps the submitted-job count, CPU usage, memory use, and scratch use
+bounded independently.
+
 At completion, atomic per-step `rows`, `retention`, and `qoi/rows` directories
 are preserved inside verified `tar.gz` files. Consolidated QoI TSVs remain
 directly readable. Scratch deletion occurs only after the entire staged shard
@@ -174,19 +183,50 @@ export GOM_PRODUCTION_SHARD_WINDOW=2
 bash "$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_production_ensemble_submit.sh"
 ```
 
-For the complete campaign, remove the subset variables and add the explicit
-acknowledgement only after the gates pass:
+For the complete campaign on Engaging, use the scheduler-safe rolling
+controller from a separate clean workflow checkout. The simulation checkout
+must remain at the commit pinned by the campaign manifest. A new chain starts
+at task 1:
 
 ```bash
-unset GOM_PRODUCTION_SELECTION_START GOM_PRODUCTION_SELECTION_END
-export GOM_PRODUCTION_CONFIRM_FULL_1620=YES
-bash "$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_production_ensemble_submit.sh"
+export GOM_PRODUCTION_ROLLING_WORKFLOW_REPO=/absolute/clean/workflow/checkout
+export GOM_PRODUCTION_SIM_REPO=/absolute/immutable/simulation/checkout
+export GOM_PRODUCTION_MANIFEST=/absolute/durable/path/campaign.toml
+export GOM_GRID_ROOT="$HOME/orcd/scratch/gom_grid"
+export GOM_PRODUCTION_ROLLING_ID=full1620_rolling_v1
+export GOM_PRODUCTION_ROLLING_START=1
+export GOM_PRODUCTION_ROLLING_WAVE_CASES=100
+export GOM_PRODUCTION_MAX_CONCURRENT=64
+export GOM_PRODUCTION_SHARD_WINDOW=2
+bash "$GOM_PRODUCTION_ROLLING_WORKFLOW_REPO/scripts/engaging/gom_step62_production_rolling_submit.sh"
 ```
 
-Receipts are written both below scratch `gom_grid/submissions` and durable
-`gom_full_production/submission_receipts`. The finalizer verifies contiguous,
-unique task coverage across every atomically promoted shard. Only a complete
-`full_1620` selection can create `CAMPAIGN_COMPLETE`.
+To attach the controller after a manually submitted, contiguous initial
+wave, provide that wave's durable receipt and start at the following shard
+boundary:
+
+```bash
+export GOM_PRODUCTION_ROLLING_START=151
+export GOM_PRODUCTION_ROLLING_SOURCE_RECEIPT=/absolute/durable/path/initial_wave.txt
+bash "$GOM_PRODUCTION_ROLLING_WORKFLOW_REPO/scripts/engaging/gom_step62_production_rolling_submit.sh"
+```
+
+The attachment receipt must cover tasks 1 through `start-1`, match the exact
+campaign manifest, and identify a numeric finalizer. The first controller is
+dependency-gated on that finalizer. Each later controller validates the
+manifest and both clean pinned checkouts, submits one bounded wave, copies its
+receipt to durable rolling state, and schedules exactly one successor.
+
+After the last wave, the controller performs a full 1--1,620 reconciliation.
+All completed shards are revalidated and reused, so cases are not rerun. The
+normal full finalizer then proves contiguous, unique coverage and creates
+`CAMPAIGN_COMPLETE`; a final controller writes `ROLLING_COMPLETE`. If any
+wave or finalizer fails, the dependency chain stops and the existing schema-2
+recovery workflow is used before continuation.
+
+Per-wave receipts are written both below scratch `gom_grid/submissions` and
+durable `gom_full_production/submission_receipts`. Rolling control records are
+kept under `gom_full_production/rolling_submissions/<campaign>/<rolling-id>`.
 
 ## Checkpoint recovery for a schema-2 submission
 
