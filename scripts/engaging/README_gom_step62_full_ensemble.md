@@ -118,11 +118,12 @@ at most 64 concurrent simulations; the launcher therefore accepts at most
 The Advanced QoS also counts pending array elements against a per-user
 submitted-job ceiling. Dependencies limit execution but do not remove those
 pending elements, so placing all 33 shard DAGs in Slurm at once can exceed
-that ceiling. The rolling controller therefore submits no more than two new
-50-case shards (100 cases) at a time. The next controller is released only
-after the preceding wave finalizer has verified and promoted both shards.
-This keeps the submitted-job count, CPU usage, memory use, and scratch use
-bounded independently.
+that ceiling. The recommended sliding controller therefore maintains two
+independent 50-case lanes. When either shard is verified, promoted, and
+removed from scratch, that lane alone releases one successor shard. A slow
+case can delay only its own lane instead of leaving the other lane idle. This
+keeps the submitted-job count, CPU usage, memory use, and scratch use bounded
+without waiting for both shards in a 100-case wave.
 
 At completion, atomic per-step `rows`, `retention`, and `qoi/rows` directories
 are preserved inside verified `tar.gz` files. Consolidated QoI TSVs remain
@@ -183,50 +184,66 @@ export GOM_PRODUCTION_SHARD_WINDOW=2
 bash "$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_production_ensemble_submit.sh"
 ```
 
-For the complete campaign on Engaging, use the scheduler-safe rolling
+For the complete campaign on Engaging, use the scheduler-safe sliding
 controller from a separate clean workflow checkout. The simulation checkout
-must remain at the commit pinned by the campaign manifest. A new chain starts
-at task 1:
+must remain at the commit pinned by the campaign manifest. A new campaign
+starts at task 1 with two independent lanes:
 
 ```bash
-export GOM_PRODUCTION_ROLLING_WORKFLOW_REPO=/absolute/clean/workflow/checkout
+export GOM_PRODUCTION_SLIDING_WORKFLOW_REPO=/absolute/clean/workflow/checkout
 export GOM_PRODUCTION_SIM_REPO=/absolute/immutable/simulation/checkout
 export GOM_PRODUCTION_MANIFEST=/absolute/durable/path/campaign.toml
 export GOM_GRID_ROOT="$HOME/orcd/scratch/gom_grid"
-export GOM_PRODUCTION_ROLLING_ID=full1620_rolling_v1
-export GOM_PRODUCTION_ROLLING_START=1
-export GOM_PRODUCTION_ROLLING_WAVE_CASES=100
+export GOM_PRODUCTION_SLIDING_ID=full1620_sliding_v1
+export GOM_PRODUCTION_SLIDING_START=1
+export GOM_PRODUCTION_SLIDING_LANES=2
+export GOM_PRODUCTION_SLIDING_SEED_DEPENDENCIES=none,none
 export GOM_PRODUCTION_MAX_CONCURRENT=64
-export GOM_PRODUCTION_SHARD_WINDOW=2
-bash "$GOM_PRODUCTION_ROLLING_WORKFLOW_REPO/scripts/engaging/gom_step62_production_rolling_submit.sh"
+bash "$GOM_PRODUCTION_SLIDING_WORKFLOW_REPO/scripts/engaging/gom_step62_production_sliding_submit.sh"
 ```
 
-To attach the controller after a manually submitted, contiguous initial
-wave, provide that wave's durable receipt and start at the following shard
-boundary:
+The submitter validates both clean, pinned checkouts; verifies every earlier
+durable shard; atomically allocates the next shard under a project-storage
+lock; and records each controller event, shard claim, submission receipt, and
+successor dependency. A requeued controller event is idempotent. Each lane
+schedules its successor only after its own shard finalizer succeeds. After
+the last shard, the surviving lane revalidates all 33 durable shards and runs
+the normal full-campaign reconciliation without rerunning cases.
+
+To attach after an earlier contiguous submission, provide its durable receipt
+and start at the next shard boundary. If one earlier shard is still being
+recovered, declare that exact shard as open and dependency-gate one seed lane
+on the recovery finalizer. The other seed lane may release immediately:
 
 ```bash
-export GOM_PRODUCTION_ROLLING_START=151
-export GOM_PRODUCTION_ROLLING_SOURCE_RECEIPT=/absolute/durable/path/initial_wave.txt
-bash "$GOM_PRODUCTION_ROLLING_WORKFLOW_REPO/scripts/engaging/gom_step62_production_rolling_submit.sh"
+export GOM_PRODUCTION_SLIDING_START=351
+export GOM_PRODUCTION_SLIDING_SOURCE_RECEIPT=/absolute/durable/path/wave_0251_0350.txt
+export GOM_PRODUCTION_SLIDING_OPEN_SHARDS=251-300
+export GOM_PRODUCTION_SLIDING_SEED_DEPENDENCIES=none,12345678
+export GOM_PRODUCTION_SLIDING_SUPERSEDED_CONTROLLER_JOB=12345679
+bash "$GOM_PRODUCTION_SLIDING_WORKFLOW_REPO/scripts/engaging/gom_step62_production_sliding_submit.sh"
 ```
 
-The attachment receipt must cover tasks 1 through `start-1`, match the exact
-campaign manifest, and identify a numeric finalizer. The first controller is
-dependency-gated on that finalizer. Each later controller validates the
-manifest and both clean pinned checkouts, submits one bounded wave, copies its
-receipt to durable rolling state, and schedules exactly one successor.
+The source receipt must end at `start-1` and match the exact campaign
+manifest. Every earlier shard must either pass the checksum verifier or be
+the explicitly declared open shard. The number of dependency-gated seed
+lanes must equal the number of open shards; currently at most one earlier
+open shard is accepted. `GOM_PRODUCTION_SLIDING_SUPERSEDED_CONTROLLER_JOB` is
+provenance only: inspect and cancel the old pending controller separately,
+before starting the sliding controller, so cancellation is an explicit and
+auditable operator action.
 
-After the last wave, the controller performs a full 1--1,620 reconciliation.
-All completed shards are revalidated and reused, so cases are not rerun. The
-normal full finalizer then proves contiguous, unique coverage and creates
-`CAMPAIGN_COMPLETE`; a final controller writes `ROLLING_COMPLETE`. If any
-wave or finalizer fails, the dependency chain stops and the existing schema-2
-recovery workflow is used before continuation.
+If a simulation, VTU, archive, or finalizer job fails, only that lane stops;
+the other lane keeps advancing. Use the schema-2 recovery workflow for the
+affected shard, then submit a replacement release controller for the stopped
+lane only after the recovered shard is durable. Do not edit `NEXT_START` or
+the controller records by hand.
 
-Per-wave receipts are written both below scratch `gom_grid/submissions` and
-durable `gom_full_production/submission_receipts`. Rolling control records are
-kept under `gom_full_production/rolling_submissions/<campaign>/<rolling-id>`.
+Per-shard receipts are written below scratch `gom_grid/submissions` and copied
+into durable sliding state. Sliding control records are kept under
+`gom_full_production/sliding_submissions/<campaign>/<sliding-id>`. The legacy
+100-case rolling controller remains available for reproducing an existing
+rolling campaign, but it should not be used to start a new full campaign.
 
 ## Checkpoint recovery for a schema-2 submission
 
