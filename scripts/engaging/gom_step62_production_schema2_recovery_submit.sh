@@ -62,6 +62,7 @@ manifest_tool="$simulation_scripts/gom_step62_production_manifest.py"
 for required in \
     "$plan_tool" \
     "$workflow_scripts/gom_step62_production_schema2_recovery_gate.sbatch" \
+    "$workflow_scripts/gom_step62_production_schema2_recovery_verify_campaign_check.sh" \
     "$workflow_scripts/gom_step62_production_schema2_recovery_case.sbatch" \
     "$workflow_scripts/gom_step62_production_schema2_recovery_vtu.sbatch" \
     "$workflow_scripts/gom_step62_production_schema2_recovery_complete.sbatch" \

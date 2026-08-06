@@ -253,7 +253,9 @@ separate control-plane commit: the simulator, Julia environment, manifest,
 inputs, case paths, and physics remain pinned to the original campaign commit.
 At launch and again inside every job, the workflow proves that the recovery
 and simulation checkouts have identical `src`, `Project.toml`, and
-`Manifest.toml` content.
+`Manifest.toml` content. The gate verifies the source campaign check against
+its preserved `campaign.toml` bytes and SHA-256, including campaign checks
+created before the digest was written to `campaign_check_summary.txt`.
 
 The task selector lists cases that may need recovery. The immutable recovery
 plan expands this to the complete source archive shards. Before writing, the

@@ -30,14 +30,11 @@ record_exit_status() {
 trap record_exit_status EXIT
 
 check_root="$gom_root/results/gom_step62_production_campaign_check_job${GOM_RECOVERY_SOURCE_CHECK_JOB}"
-test -f "$check_root/PASS"
-test -s "$check_root/campaign_check_summary.txt"
-grep -Fxq 'status=pass' "$check_root/campaign_check_summary.txt"
-grep -Fxq \
-    "campaign_manifest_sha256=$GOM_RECOVERY_CAMPAIGN_MANIFEST_SHA256" \
-    "$check_root/campaign_check_summary.txt"
-grep -Fxq 'physics_profile=sandpc_effective_globalplateau_v1' \
-    "$check_root/campaign_check_summary.txt"
+campaign_check_verifier="$GOM_RECOVERY_WORKFLOW_REPO/scripts/engaging/gom_step62_production_schema2_recovery_verify_campaign_check.sh"
+bash "$campaign_check_verifier" \
+    "$check_root" "$GOM_RECOVERY_CAMPAIGN_MANIFEST" \
+    "$GOM_RECOVERY_CAMPAIGN_MANIFEST_SHA256" \
+    sandpc_effective_globalplateau_v1
 
 declare -A source_jobs_checked=()
 require_source_job_settled() {

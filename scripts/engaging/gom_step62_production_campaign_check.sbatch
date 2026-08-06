@@ -64,6 +64,7 @@ printf '%s\n' \
     "job_id=$SLURM_JOB_ID" \
     "validated_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     "manifest=$GOM_PRODUCTION_MANIFEST" \
+    "campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256" \
     "schema_version=$GOM_PRODUCTION_SCHEMA_VERSION" \
     "ensemble_kind=$GOM_PRODUCTION_ENSEMBLE_KIND" \
     "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
