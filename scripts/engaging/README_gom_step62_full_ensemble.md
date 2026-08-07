@@ -312,6 +312,12 @@ submission may certify `CAMPAIGN_COMPLETE`. Once recovered shards are safely
 promoted, the normal full launcher reuses them through its existing shard
 verification path, so recovered cases are not simulated again.
 
+The recovery completion certificate is committed only after its control
+checksum inventory is generated outside the durable directory and read back
+successfully. If an attempt stops before `RECOVERY_COMPLETE`, a later attempt
+replaces only incomplete completion artifacts while retaining the immutable
+launch plan and source-submission records.
+
 ## Failure behavior
 
 - A setup or simulation failure blocks its correlated downstream task.

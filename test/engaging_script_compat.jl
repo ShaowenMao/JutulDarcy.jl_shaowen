@@ -252,6 +252,18 @@ using Test
         recovery_vtu
     )
     @test occursin("campaign_complete_created=false", recovery_complete)
+    @test occursin(
+        "checksum_tmp=\"\$result_dir/RECOVERY_CONTROL_SHA256SUMS.tmp\"",
+        recovery_complete,
+    )
+    @test occursin(
+        "rm -rf -- \"\$durable_control\"",
+        recovery_complete,
+    )
+    @test !occursin(
+        "> RECOVERY_CONTROL_SHA256SUMS.tmp.\$SLURM_JOB_ID",
+        recovery_complete,
+    )
     @test occursin("gom_step62_production_shard_archive.sbatch", recovery_submit)
     @test occursin("gom_step62_production_finalize.sbatch", recovery_submit)
     @test occursin("afterok:\$case_job", recovery_submit)

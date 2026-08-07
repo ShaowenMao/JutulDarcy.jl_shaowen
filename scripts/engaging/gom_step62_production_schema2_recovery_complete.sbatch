@@ -201,21 +201,33 @@ printf '%s\n' \
     > "$result_dir/recovery_complete_summary.txt"
 
 durable_control="$GOM_RECOVERY_DURABLE_DIR/shard_control"
-test ! -e "$durable_control"
+# RECOVERY_COMPLETE is the commit marker for this control plane. If it is
+# absent, exact completion artifacts left by a failed prior attempt are safe
+# to replace. Keep the immutable launch receipt, recovery plan, and source
+# submission records untouched.
+rm -rf -- "$durable_control"
+rm -f -- \
+    "$GOM_RECOVERY_DURABLE_DIR/recovered_shards.tsv" \
+    "$GOM_RECOVERY_DURABLE_DIR/recovery_complete_summary.txt" \
+    "$GOM_RECOVERY_DURABLE_DIR/RECOVERY_CONTROL_SHA256SUMS"
+find "$GOM_RECOVERY_DURABLE_DIR" -maxdepth 1 -type f \
+    \( -name 'RECOVERY_CONTROL_SHA256SUMS.tmp.*' \
+       -o -name 'RECOVERY_COMPLETE.tmp.*' \) -delete
 cp -a -- "$result_dir/shard_control" "$durable_control"
 cp -- "$result_dir/recovered_shards.tsv" \
     "$GOM_RECOVERY_DURABLE_DIR/recovered_shards.tsv"
 cp -- "$result_dir/recovery_complete_summary.txt" \
     "$GOM_RECOVERY_DURABLE_DIR/recovery_complete_summary.txt"
+checksum_tmp="$result_dir/RECOVERY_CONTROL_SHA256SUMS.tmp"
 (
     cd "$GOM_RECOVERY_DURABLE_DIR"
     find . -type f \
         ! -name RECOVERY_CONTROL_SHA256SUMS \
         ! -name RECOVERY_COMPLETE -print0 |
         LC_ALL=C sort -z | xargs -0 sha256sum \
-        > RECOVERY_CONTROL_SHA256SUMS.tmp.$SLURM_JOB_ID
-    mv -- RECOVERY_CONTROL_SHA256SUMS.tmp.$SLURM_JOB_ID \
-        RECOVERY_CONTROL_SHA256SUMS
+        > "$checksum_tmp"
+    test -s "$checksum_tmp"
+    mv -- "$checksum_tmp" RECOVERY_CONTROL_SHA256SUMS
     sha256sum --check RECOVERY_CONTROL_SHA256SUMS
 )
 marker_tmp="$GOM_RECOVERY_DURABLE_DIR/RECOVERY_COMPLETE.tmp.$SLURM_JOB_ID"
