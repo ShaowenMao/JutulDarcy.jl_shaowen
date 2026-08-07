@@ -27,9 +27,27 @@ gom_recovery_set_case_paths \
 
 gom_root="${GOM_GRID_ROOT:-$HOME/orcd/scratch/gom_grid}"
 recovery_case_dir="$gom_root/results/gom_step62_schema2_recovery_case_job${GOM_RECOVERY_CASE_JOB_ID}/$GOM_RECOVERY_CASE_KEY"
-test -f "$recovery_case_dir/PASS"
-grep -Fxq "recovery_plan_sha256=$GOM_RECOVERY_PLAN_SHA256" \
-    "$recovery_case_dir/recovery_summary.txt"
+case "$GOM_RECOVERY_TASK_SELECTED" in
+    true)
+        # Selected tasks were handled by the recovery-case array. Require its
+        # plan-bound provenance marker before exporting the repaired source
+        # tree.
+        test -f "$recovery_case_dir/PASS"
+        grep -Fxq "recovery_plan_sha256=$GOM_RECOVERY_PLAN_SHA256" \
+            "$recovery_case_dir/recovery_summary.txt"
+        ;;
+    false)
+        # Complete source cases are intentionally absent from the recovery-
+        # case array. Their original result trees were already validated by
+        # the full-coverage gate, so requiring a recovery attempt here would
+        # reject every unchanged case in a mixed recovery shard.
+        test ! -e "$recovery_case_dir"
+        ;;
+    *)
+        echo "Invalid GOM_RECOVERY_TASK_SELECTED value: $GOM_RECOVERY_TASK_SELECTED" >&2
+        exit 1
+        ;;
+esac
 gom_recovery_validate_complete_case \
     "$GOM_RECOVERY_CASE_DIR" "$GOM_RECOVERY_CASE_KEY"
 

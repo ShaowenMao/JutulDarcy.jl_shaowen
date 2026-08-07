@@ -190,6 +190,14 @@ recoverable. The current full-run script independently requires the new
 four-checkpoint profile, so a new run cannot silently fall back to the legacy
 contract.
 
+For schema-2 shard recovery, the VTU array covers the complete affected shard
+but the recovery-case array contains only explicitly selected incomplete
+tasks. Selected tasks must carry a recovery-attempt `PASS` marker bound to the
+recovery-plan SHA-256 before VTU export. Unselected tasks must have no recovery
+attempt directory and are exported directly from their gate-validated original
+result trees. This distinction prevents complete unchanged cases from being
+rejected during mixed-shard postprocessing.
+
 After successful report step 210, each current-profile case contains:
 
 - exactly 210 per-step summary rows;

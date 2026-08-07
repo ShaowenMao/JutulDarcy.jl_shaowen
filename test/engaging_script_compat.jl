@@ -247,6 +247,10 @@ using Test
         "gom_step62_effective_pc_global_plateau_vtu.sbatch",
         recovery_vtu
     )
+    @test occursin(
+        r"(?s)case \"\$GOM_RECOVERY_TASK_SELECTED\" in.*true\).*recovery_case_dir/PASS.*false\).*test ! -e \"\$recovery_case_dir\"",
+        recovery_vtu
+    )
     @test occursin("campaign_complete_created=false", recovery_complete)
     @test occursin("gom_step62_production_shard_archive.sbatch", recovery_submit)
     @test occursin("gom_step62_production_finalize.sbatch", recovery_submit)
