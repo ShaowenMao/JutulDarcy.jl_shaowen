@@ -35,6 +35,21 @@ done
 source \
     "$GOM_RECOVERY_WORKFLOW_REPO/scripts/engaging/gom_step62_production_schema2_recovery_common.sh"
 
+completion_script_path="$(realpath "${BASH_SOURCE[0]}")"
+completion_script_repo="$(
+    git -C "$(dirname "$completion_script_path")" rev-parse --show-toplevel
+)"
+completion_script_commit="$(git -C "$completion_script_repo" rev-parse HEAD)"
+expected_completion_script_commit="${GOM_RECOVERY_COMPLETION_SCRIPT_COMMIT:-$GOM_RECOVERY_WORKFLOW_COMMIT}"
+[[ "$expected_completion_script_commit" =~ ^[0-9a-f]{40}$ ]]
+test -z "$(git -C "$completion_script_repo" status --porcelain)"
+test "$completion_script_commit" = "$expected_completion_script_commit"
+completion_script_hotfix=false
+if test "$completion_script_commit" != "$GOM_RECOVERY_WORKFLOW_COMMIT"; then
+    test -n "${GOM_RECOVERY_COMPLETION_SCRIPT_COMMIT:-}"
+    completion_script_hotfix=true
+fi
+
 IFS=: read -r -a archive_jobs <<< "$GOM_RECOVERY_ARCHIVE_JOB_IDS"
 IFS=: read -r -a finalizer_jobs <<< "$GOM_RECOVERY_FINALIZER_JOB_IDS"
 IFS=: read -r -a shard_submission_ids \
@@ -181,6 +196,8 @@ printf '%s\n' \
     "recovery_id=$GOM_RECOVERY_ID" \
     "recovery_plan_sha256=$GOM_RECOVERY_PLAN_SHA256" \
     "recovery_workflow_commit=$GOM_RECOVERY_WORKFLOW_COMMIT" \
+    "completion_script_commit=$completion_script_commit" \
+    "completion_script_hotfix=$completion_script_hotfix" \
     "simulation_commit=$GOM_RECOVERY_SIMULATION_COMMIT" \
     "campaign_id=$GOM_RECOVERY_CAMPAIGN_ID" \
     "campaign_manifest_sha256=$GOM_RECOVERY_CAMPAIGN_MANIFEST_SHA256" \
@@ -236,6 +253,9 @@ printf '%s\n' \
     "recovery_id=$GOM_RECOVERY_ID" \
     "recovery_plan_sha256=$GOM_RECOVERY_PLAN_SHA256" \
     "campaign_manifest_sha256=$GOM_RECOVERY_CAMPAIGN_MANIFEST_SHA256" \
+    "recovery_workflow_commit=$GOM_RECOVERY_WORKFLOW_COMMIT" \
+    "completion_script_commit=$completion_script_commit" \
+    "completion_script_hotfix=$completion_script_hotfix" \
     "affected_shard_count=$GOM_RECOVERY_AFFECTED_SHARD_COUNT" \
     "control_sha256sums_sha256=$(sha256sum "$GOM_RECOVERY_DURABLE_DIR/RECOVERY_CONTROL_SHA256SUMS" | awk '{print $1}')" \
     'campaign_complete_created=false' \

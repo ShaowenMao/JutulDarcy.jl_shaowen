@@ -260,6 +260,14 @@ using Test
         "rm -rf -- \"\$durable_control\"",
         recovery_complete,
     )
+    @test occursin(
+        "GOM_RECOVERY_COMPLETION_SCRIPT_COMMIT:-\$GOM_RECOVERY_WORKFLOW_COMMIT",
+        recovery_complete,
+    )
+    @test occursin(
+        "completion_script_commit=\$completion_script_commit",
+        recovery_complete,
+    )
     @test !occursin(
         "> RECOVERY_CONTROL_SHA256SUMS.tmp.\$SLURM_JOB_ID",
         recovery_complete,
