@@ -35,10 +35,11 @@ done
 source \
     "$GOM_RECOVERY_WORKFLOW_REPO/scripts/engaging/gom_step62_production_schema2_recovery_common.sh"
 
-completion_script_path="$(realpath "${BASH_SOURCE[0]}")"
-completion_script_repo="$(
-    git -C "$(dirname "$completion_script_path")" rev-parse --show-toplevel
-)"
+completion_script_repo="$(realpath \
+    "${GOM_RECOVERY_COMPLETION_SCRIPT_REPO:-$GOM_RECOVERY_WORKFLOW_REPO}")"
+completion_script_path="$completion_script_repo/scripts/engaging/gom_step62_production_schema2_recovery_complete.sbatch"
+test -f "$completion_script_path"
+cmp -s "${BASH_SOURCE[0]}" "$completion_script_path"
 completion_script_commit="$(git -C "$completion_script_repo" rev-parse HEAD)"
 expected_completion_script_commit="${GOM_RECOVERY_COMPLETION_SCRIPT_COMMIT:-$GOM_RECOVERY_WORKFLOW_COMMIT}"
 [[ "$expected_completion_script_commit" =~ ^[0-9a-f]{40}$ ]]
@@ -47,6 +48,7 @@ test "$completion_script_commit" = "$expected_completion_script_commit"
 completion_script_hotfix=false
 if test "$completion_script_commit" != "$GOM_RECOVERY_WORKFLOW_COMMIT"; then
     test -n "${GOM_RECOVERY_COMPLETION_SCRIPT_COMMIT:-}"
+    test -n "${GOM_RECOVERY_COMPLETION_SCRIPT_REPO:-}"
     completion_script_hotfix=true
 fi
 

@@ -265,6 +265,14 @@ using Test
         recovery_complete,
     )
     @test occursin(
+        "GOM_RECOVERY_COMPLETION_SCRIPT_REPO:-\$GOM_RECOVERY_WORKFLOW_REPO",
+        recovery_complete,
+    )
+    @test occursin(
+        "cmp -s \"\${BASH_SOURCE[0]}\" \"\$completion_script_path\"",
+        recovery_complete,
+    )
+    @test occursin(
         "completion_script_commit=\$completion_script_commit",
         recovery_complete,
     )

@@ -320,7 +320,10 @@ launch plan and source-submission records.
 The completion script commit normally must equal the workflow commit pinned by
 the plan. An audit-only code repair may differ only when its full commit is
 explicitly pinned with `GOM_RECOVERY_COMPLETION_SCRIPT_COMMIT`; both commits
-and the hotfix status are then recorded in the summary and certificate.
+and the hotfix status are then recorded in the summary and certificate. The
+matching immutable checkout is pinned with
+`GOM_RECOVERY_COMPLETION_SCRIPT_REPO`, and the Slurm spool copy is byte-checked
+against its committed completion script before the audit proceeds.
 
 ## Failure behavior
 
