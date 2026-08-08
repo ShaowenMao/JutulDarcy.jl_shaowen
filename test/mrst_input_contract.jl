@@ -161,6 +161,7 @@ function downstream_contract_fixture()
     )
     geology_link = merge(copy(identity), Dict{String, Any}(
         "schema" => "gom_geology_pairing_v1",
+        "source_link_schema" => "1.0",
         "stratigraphy_file" => "geology_stratigraphy_s05_c012.mat",
         "fault_schema" => "1.5",
         "stratigraphy_schema" => "1.0"
@@ -274,6 +275,23 @@ end
     @test report["shared_fault_footprint_count"] == 1
     @test report["max_relative_permeability_transform_error"] <= 5e-12
     @test report["common_max_relative_permeability_transform_error"] <= 5e-12
+
+    manifest_backed = deepcopy(specific)
+    manifest_backed["geology_link"]["schema"] = "gom_geology_pairing_v2"
+    manifest_backed["geology_link"]["source_link_schema"] =
+        "gom_step62_1620_input_manifest_v1"
+    manifest_backed["geology_link"]["authority"] =
+        "validated_immutable_input_manifest"
+    manifest_report = JutulDarcy.validate_mrst_combined_specific_identity(
+        common, manifest_backed
+    )
+    @test manifest_report["passed"]
+
+    wrong_manifest_authority = deepcopy(manifest_backed)
+    wrong_manifest_authority["geology_link"]["authority"] = "unvalidated"
+    @test_throws ErrorException JutulDarcy.validate_mrst_combined_specific_identity(
+        common, wrong_manifest_authority
+    )
 
     wrong_common_rotation = deepcopy(common)
     wrong_common_rotation["rock"]["perm"][:, 5] .*= -1

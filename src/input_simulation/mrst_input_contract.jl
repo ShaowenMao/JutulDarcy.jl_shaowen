@@ -400,10 +400,29 @@ function mrst_validate_geology_pairing(specific)
     link = specific["geology_link"]
     mrst_contract_require(link, (
         "schema", "geology_id", "geology_hash_algorithm", "geology_hash",
-        "pairing_key", "stratigraphy_file", "fault_schema", "stratigraphy_schema"
+        "pairing_key", "stratigraphy_file", "fault_schema", "stratigraphy_schema",
+        "source_link_schema"
     ), "geology_link")
-    mrst_contract_string(link["schema"], "geology_link.schema") ==
-        "gom_geology_pairing_v1" || error("Unsupported geology_link schema.")
+    link_schema = mrst_contract_string(link["schema"], "geology_link.schema")
+    link_schema in ("gom_geology_pairing_v1", "gom_geology_pairing_v2") ||
+        error("Unsupported geology_link schema.")
+    source_link_schema = mrst_contract_string(
+        link["source_link_schema"], "geology_link.source_link_schema"
+    )
+    if link_schema == "gom_geology_pairing_v2"
+        mrst_contract_require(link, ("authority",), "manifest-backed geology_link")
+        source_link_schema == "gom_step62_1620_input_manifest_v1" || error(
+            "Manifest-backed geology_link has an unsupported source schema."
+        )
+        mrst_contract_string(link["authority"], "geology_link.authority") ==
+            "validated_immutable_input_manifest" || error(
+            "Manifest-backed geology_link has an invalid authority."
+        )
+    else
+        isempty(source_link_schema) && error(
+            "Embedded geology_link source schema must be nonempty."
+        )
+    end
     isempty(mrst_contract_string(
         link["stratigraphy_file"], "geology_link.stratigraphy_file"
     )) && error("geology_link.stratigraphy_file must be nonempty.")
