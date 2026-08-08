@@ -32,6 +32,10 @@ end
     include("mrst_split.jl")
 end
 
+@testitem "MRST downstream input contract" begin
+    include("mrst_input_contract.jl")
+end
+
 @testitem "Production output" begin
     include("production_output.jl")
 end

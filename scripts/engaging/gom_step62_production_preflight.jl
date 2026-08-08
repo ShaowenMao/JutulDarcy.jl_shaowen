@@ -57,8 +57,9 @@ expected_case_key ==
     error("Case key does not match geology and realization identity.")
 
 specific = MAT.matread(specific_path)
-get(specific, "schema", "") == "gom_jutul_split_specific_v3" ||
-    error("Expected combined geology-specific schema v3.")
+get(specific, "schema", "") in
+    ("gom_jutul_split_specific_v3", "gom_jutul_split_specific_v4") ||
+    error("Expected combined geology-specific schema v3 or v4.")
 expected_common_name = first(splitext(basename(common_path)))
 get(specific, "common_name", "") == expected_common_name ||
     error(

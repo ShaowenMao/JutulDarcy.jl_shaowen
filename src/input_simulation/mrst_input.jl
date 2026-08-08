@@ -246,31 +246,6 @@ function mrst_assign_split_permeability!(target, cells, source, label)
     return nothing
 end
 
-function validate_mrst_combined_specific_identity(common, specific)
-    schema = haskey(specific, "schema") ? String(specific["schema"]) : ""
-    schema == "gom_jutul_split_specific_v3" || return nothing
-    for key in ("common_name", "geology_id", "geology_hash",
-            "geology_hash_algorithm", "pairing_key", "fault", "stratigraphy")
-        haskey(specific, key) ||
-            error("Combined geology-specific file is missing top-level $key.")
-    end
-    if haskey(common, "name")
-        String(specific["common_name"]) == String(common["name"]) || error(
-            "Combined specific common_name does not match common.name."
-        )
-    end
-    geology_id = String(specific["geology_id"])
-    geology_hash = lowercase(String(specific["geology_hash"]))
-    pairing_key = String(specific["pairing_key"])
-    pairing_key == "$geology_id:$geology_hash" || error(
-        "Combined specific pairing_key is inconsistent with geology_id and geology_hash."
-    )
-    length(geology_hash) == 64 &&
-        all(c -> isdigit(c) || c in 'a':'f', geology_hash) ||
-        error("Combined specific geology_hash is not a SHA-256 hexadecimal value.")
-    return nothing
-end
-
 function apply_mrst_stratigraphy_data!(assembled, specific)
     haskey(specific, "stratigraphy") || return nothing
     stratigraphy = specific["stratigraphy"]
@@ -1254,8 +1229,11 @@ function assemble_mrst_split_case(common, specific;
         explicit_fault_hysteresis_mode = "disable"
     )
     haskey(specific, "fault") || error("Specific MRST split file must contain a top-level fault block.")
-    validate_mrst_combined_specific_identity(common, specific)
+    contract_validation = validate_mrst_combined_specific_identity(common, specific)
     assembled = deepcopy(common)
+    if !isnothing(contract_validation)
+        assembled["downstream_contract_validation"] = contract_validation
+    end
     apply_mrst_stratigraphy_data!(assembled, specific)
     fault = specific["fault"]
     rock = assembled["rock"]
