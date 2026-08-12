@@ -8,6 +8,8 @@ import Jutul
     cell_tag = ForwardDiff.Tag(Jutul.simulate, Jutul.Cells)
     well_value = ForwardDiff.Dual{well_tag}(2.5, 1.0)
     cell_value = ForwardDiff.Dual{cell_tag}(3.5, 1.0, 2.0)
+    @test JutulDarcy.production_qoi_primal_float(well_value) == 2.5
+    @test JutulDarcy.production_qoi_primal_float(cell_value) == 3.5
     @test JutulDarcy.production_qoi_schema4_primal(well_value) == 2.5
     @test JutulDarcy.production_qoi_schema4_primal(cell_value) == 3.5
 end

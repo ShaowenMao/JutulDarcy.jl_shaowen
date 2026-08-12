@@ -6,6 +6,8 @@ const PRODUCTION_QOI_FLUX_METHOD =
 const PRODUCTION_QOI_MOBILITY_METHOD =
     "cell_local_active_krg_zero_mobility_endpoint_branch_partition_v2"
 
+@inline production_qoi_primal_float(value) = Float64(Jutul.value(value))
+
 """
 One immutable accounting region. `atomic_codes` refers to the disjoint
 cell-level partition in `ProductionQoIContext.atomic_code`. Aggregate regions
@@ -2404,10 +2406,10 @@ function production_qoi_face_co2_flux(
         liquid_potential
     )
     gas_reference_density = reference_densities(sys)[vapor]
-    free = Float64(
+    free = production_qoi_primal_float(
         gas_reference_density*vapor_mobility*vapor_potential
     )
-    dissolved = Float64(
+    dissolved = production_qoi_primal_float(
         gas_reference_density*rs*liquid_mobility*liquid_potential
     )
     total = free + dissolved

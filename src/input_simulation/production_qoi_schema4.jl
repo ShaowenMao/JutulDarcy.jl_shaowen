@@ -697,7 +697,8 @@ function production_qoi_schema4_requested_control(forces, well::Symbol)
     return haskey(controls, well) ? controls[well] : nothing
 end
 
-@inline production_qoi_schema4_primal(value) = Float64(Jutul.value(value))
+@inline production_qoi_schema4_primal(value) =
+    production_qoi_primal_float(value)
 
 function production_qoi_schema4_surface_mixture(control, well_state)
     if control isa InjectorControl
