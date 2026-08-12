@@ -697,6 +697,29 @@ function production_qoi_schema4_requested_control(forces, well::Symbol)
     return haskey(controls, well) ? controls[well] : nothing
 end
 
+@inline production_qoi_schema4_primal(value) = Float64(Jutul.value(value))
+
+function production_qoi_schema4_surface_mixture(control, well_state)
+    if control isa InjectorControl
+        return production_qoi_schema4_primal.(control.injection_mixture)
+    elseif haskey(well_state, :MassFractions)
+        mixture = production_qoi_schema4_primal.(well_state[:MassFractions])
+    else
+        masses = production_qoi_schema4_primal.(
+            @view well_state[:TotalMasses][:, well_top_node()]
+        )
+        total = sum(masses)
+        isfinite(total) && total > 0.0 || error(
+            "Schema-4 producer surface mixture has invalid total mass $total."
+        )
+        mixture = masses./total
+    end
+    all(value -> isfinite(value) && value >= 0.0, mixture) || error(
+        "Schema-4 well surface mixture is non-finite or negative."
+    )
+    return mixture
+end
+
 function production_qoi_schema4_well_accounting(
         context,
         states,
@@ -726,21 +749,35 @@ function production_qoi_schema4_well_accounting(
     well_model = model.models[well]
     facility_state = states[:Facility]
     well_state = states[well]
-    total_rate, mixture = cross_term_total_surface_mass_rate_and_mixture(
-        facility_model,
-        well_model,
-        facility_state,
-        well_state,
-        well
+    # The accepted nonlinear state can still carry separate reservoir and well
+    # AD tags. Equation-assembly cross terms deliberately combine those tags,
+    # so diagnostics must instead read the facility rate directly and retain
+    # only its converged primal value.
+    total_rate = production_qoi_schema4_primal(
+        facility_surface_mass_rate_for_well(
+            facility_model,
+            well,
+            facility_state;
+            effective = true
+        )
     )
+    active_control =
+        facility_state[:WellGroupConfiguration].operating_controls[well]
     gas = phase_indices(well_model.system).v
-    co2_rate = Float64(total_rate*mixture[gas])
-    active_control = facility_state[:WellGroupConfiguration].operating_controls[well]
+    if iszero(total_rate)
+        co2_rate = 0.0
+    else
+        mixture = production_qoi_schema4_surface_mixture(
+            active_control,
+            well_state
+        )
+        co2_rate = total_rate*mixture[gas]
+    end
     requested_control = production_qoi_schema4_requested_control(forces, well)
     return (
         actual_co2_rate_kg_s = co2_rate,
-        total_mass_rate_kg_s = Float64(total_rate),
-        bhp_pa = Float64(well_state[:Pressure][1]),
+        total_mass_rate_kg_s = total_rate,
+        bhp_pa = production_qoi_schema4_primal(well_state[:Pressure][1]),
         requested = production_qoi_schema4_control_descriptor(
             requested_control,
             well_model
@@ -764,7 +801,7 @@ function production_qoi_schema4_boundary_rate(rmodel, state, forces)
     gas_rate = 0.0
     for condition in conditions
         qtotal = compute_bc_total_flux(condition, mapping, state)
-        component_rate = zeros(Float64, component_count)
+        component_rate = fill(zero(qtotal), component_count)
         apply_flow_bc!(
             component_rate,
             qtotal,
@@ -773,7 +810,7 @@ function production_qoi_schema4_boundary_rate(rmodel, state, forces)
             state,
             NaN
         )
-        gas_rate += component_rate[gas]
+        gas_rate += production_qoi_schema4_primal(component_rate[gas])
     end
     isfinite(gas_rate) || error("Schema-4 boundary CO2 rate is non-finite.")
     return gas_rate
@@ -794,9 +831,9 @@ function production_qoi_schema4_interface_rates(context, extension, state, rmode
             state,
             rmodel
         )
-        rates[slot, 1] = free
-        rates[slot, 2] = dissolved
-        rates[slot, 3] = total
+        rates[slot, 1] = production_qoi_schema4_primal(free)
+        rates[slot, 2] = production_qoi_schema4_primal(dissolved)
+        rates[slot, 3] = production_qoi_schema4_primal(total)
     end
     output = zeros(Float64, length(extension.interfaces), 3, 2)
     for (interface_index, interface) in enumerate(extension.interfaces)

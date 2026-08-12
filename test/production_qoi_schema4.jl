@@ -1,5 +1,16 @@
 using Test
 using JutulDarcy
+using ForwardDiff
+import Jutul
+
+@testset "schema-4 accepted-state primal extraction" begin
+    well_tag = ForwardDiff.Tag(Jutul.simulate, JutulDarcy.Wells)
+    cell_tag = ForwardDiff.Tag(Jutul.simulate, Jutul.Cells)
+    well_value = ForwardDiff.Dual{well_tag}(2.5, 1.0)
+    cell_value = ForwardDiff.Dual{cell_tag}(3.5, 1.0, 2.0)
+    @test JutulDarcy.production_qoi_schema4_primal(well_value) == 2.5
+    @test JutulDarcy.production_qoi_schema4_primal(cell_value) == 3.5
+end
 
 function schema4_spatial_fixture()
     nw = JutulDarcy.PRODUCTION_QOI_SCHEMA4_WINDOWS
