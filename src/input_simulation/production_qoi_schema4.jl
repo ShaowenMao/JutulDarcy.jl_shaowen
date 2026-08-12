@@ -792,6 +792,7 @@ end
 function production_qoi_schema4_boundary_rate(rmodel, state, forces)
     haskey(forces, :Reservoir) || return 0.0
     reservoir_forces = forces[:Reservoir]
+    isnothing(reservoir_forces) && return 0.0
     haskey(reservoir_forces, :bc) || return 0.0
     conditions = reservoir_forces[:bc]
     isnothing(conditions) && return 0.0

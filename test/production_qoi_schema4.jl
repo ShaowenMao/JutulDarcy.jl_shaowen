@@ -147,6 +147,12 @@ end
 end
 
 @testset "schema-4 accepted-ministep accounting arithmetic" begin
+    @test JutulDarcy.production_qoi_schema4_boundary_rate(
+        nothing,
+        nothing,
+        Dict{Any, Any}(:Reservoir => nothing)
+    ) == 0.0
+
     rates = zeros(Float64, 2, 3, 2)
     rates[1, :, 1] .= (1.0, 2.0, 3.0)
     rates[1, :, 2] .= (0.25, 0.5, 0.75)
