@@ -65,6 +65,17 @@ if test "${PRODUCTION_QOI_MODE:-off}" != "off"; then
     test -s "$summary_dir/qoi/rows/step_000001.tsv"
     test -s "$summary_dir/qoi/rows/step_000002.tsv"
 fi
+if test "${PRODUCTION_QOI_SCHEMA4_MODE:-off}" != "off"; then
+    schema4_dir="$summary_dir/qoi_schema4"
+    test "$(find "$schema4_dir/rows" -maxdepth 1 -type f \
+        -name 'step_*.tsv' | wc -l)" -eq 2
+    test "$(find "$schema4_dir/spatial_rows" -maxdepth 1 -type f \
+        -name 'step_*.bin' | wc -l)" -eq 2
+    test -s "$schema4_dir/rows/step_000001.tsv"
+    test -s "$schema4_dir/rows/step_000002.tsv"
+    test -s "$schema4_dir/spatial_rows/step_000001.bin"
+    test -s "$schema4_dir/spatial_rows/step_000002.bin"
+fi
 
 export RESTART_RUN=true
 export STOP_AFTER_REPORT_STEP=3
@@ -120,6 +131,22 @@ if test "${PRODUCTION_QOI_MODE:-off}" != "off"; then
     ' "$summary_dir/leakage_global_steps.tsv"
     qoi_validation=pass
 fi
+schema4_validation=disabled
+if test "${PRODUCTION_QOI_SCHEMA4_MODE:-off}" != "off"; then
+    schema4_dir="$summary_dir/qoi_schema4"
+    test "$(find "$schema4_dir/rows" -maxdepth 1 -type f \
+        -name 'step_*.tsv' | wc -l)" -eq 3
+    test "$(find "$schema4_dir/spatial_rows" -maxdepth 1 -type f \
+        -name 'step_*.bin' | wc -l)" -eq 3
+    test -s "$schema4_dir/rows/step_000003.tsv"
+    test -s "$schema4_dir/spatial_rows/step_000003.bin"
+    test -s "$schema4_dir/qoi_schema4_steps.tsv"
+    test -s "$schema4_dir/spatial_history_index.tsv"
+    test "$(wc -l < "$schema4_dir/qoi_schema4_steps.tsv")" -eq 4
+    test "$(wc -l < "$schema4_dir/spatial_history_index.tsv")" -eq 4
+    test ! -e "$schema4_dir/QOI_SCHEMA4_COMPLETE.tsv"
+    schema4_validation=pass
+fi
 
 # One established case and one newly added case also receive an independent,
 # uninterrupted three-step control. Array tasks 1 and 5 therefore prove that
@@ -148,6 +175,10 @@ if [ "$SLURM_ARRAY_TASK_ID" -eq 1 ] || \
         "$case_dir/restart_equivalence_summary.txt"
     grep -Fxq 'status=pass' \
         "$case_dir/restart_equivalence_summary.txt"
+    if test "${PRODUCTION_QOI_SCHEMA4_MODE:-off}" != "off"; then
+        grep -Fxq 'schema4_compared=true' \
+            "$case_dir/restart_equivalence_summary.txt"
+    fi
     restart_equivalence=pass
 fi
 
@@ -161,6 +192,8 @@ printf '%s\n' \
     "restart_equivalence=$restart_equivalence" \
     "production_output_mode=true" \
     "production_qoi_mode=${PRODUCTION_QOI_MODE:-off}" \
+    "production_qoi_schema4_mode=${PRODUCTION_QOI_SCHEMA4_MODE:-off}" \
     "qoi_validation=$qoi_validation" \
+    "schema4_validation=$schema4_validation" \
     > "$case_dir/smoke_summary.txt"
 printf 'PASS\n' > "$case_dir/PASS"

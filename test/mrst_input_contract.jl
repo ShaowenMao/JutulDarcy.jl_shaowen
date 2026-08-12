@@ -276,6 +276,23 @@ end
     @test report["max_relative_permeability_transform_error"] <= 5e-12
     @test report["common_max_relative_permeability_transform_error"] <= 5e-12
 
+    assembled = Dict{String, Any}()
+    JutulDarcy.preserve_mrst_qoi_case_metadata!(
+        assembled,
+        specific,
+        report
+    )
+    @test haskey(assembled, "qoi_case_metadata")
+    case_metadata = assembled["qoi_case_metadata"]
+    @test case_metadata["geology_id"] == specific["geology_id"]
+    @test case_metadata["geology_hash"] == specific["geology_hash"]
+    @test case_metadata["contract_validation"]["passed"]
+    @test case_metadata["window_slice"]["selected_sample_index"] ==
+        specific["window_slice"]["selected_sample_index"]
+    @test case_metadata["window_slice"]["exact_replay_seed"] ==
+        specific["window_slice"]["exact_replay_seed"]
+    @test !haskey(case_metadata["window_slice"], "local_perm_m2")
+
     manifest_backed = deepcopy(specific)
     manifest_backed["geology_link"]["schema"] = "gom_geology_pairing_v2"
     manifest_backed["geology_link"]["source_link_schema"] =

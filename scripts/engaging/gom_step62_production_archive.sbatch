@@ -124,6 +124,12 @@ for task in "${archive_tasks[@]}"; do
     grep -Fxq 'status=pass' "$vtu_case/export_summary.txt"
     grep -Fxq 'retained_restart_steps=51,78,110,210' \
         "$full_case/production_summary.txt"
+    if test "$GOM_PRODUCTION_QOI_MODE" = required; then
+        grep -Fxq 'production_qoi_schema4_mode=required' \
+            "$full_case/production_summary.txt"
+        grep -Fxq 'qoi_schema4_validated=true' \
+            "$full_case/final_state_summary.txt"
+    fi
     (
         cd "$full_case"
         sha256sum --check RETAINED_RESTART_SHA256.txt

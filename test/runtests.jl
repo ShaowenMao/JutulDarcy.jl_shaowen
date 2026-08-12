@@ -44,6 +44,10 @@ end
     include("production_qoi.jl")
 end
 
+@testitem "Production QoI schema 4" begin
+    include("production_qoi_schema4.jl")
+end
+
 @testitem "Engaging script compatibility" begin
     include("engaging_script_compat.jl")
 end

@@ -136,11 +136,18 @@ compact_atomic_rows() {
     production_dir="$1"
     inventory="$production_dir/ATOMIC_ROW_ARCHIVES.tsv"
     printf 'source_directory\tfile_count\tarchive\tarchive_bytes\n' > "$inventory"
-    for relative in rows retention qoi/rows; do
+    for specification in \
+            rows:tsv \
+            retention:tsv \
+            qoi/rows:tsv \
+            qoi_schema4/rows:tsv \
+            qoi_schema4/spatial_rows:bin; do
+        relative="${specification%:*}"
+        extension="${specification##*:}"
         source_dir="$production_dir/$relative"
         test -d "$source_dir" || continue
         file_count="$(find "$source_dir" -maxdepth 1 -type f \
-            -name 'step_*.tsv' | wc -l)"
+            -name "step_*.$extension" | wc -l)"
         test "$file_count" -eq 210
         archive_name="${relative//\//_}.tar.gz"
         archive_path="$production_dir/$archive_name"
@@ -148,7 +155,7 @@ compact_atomic_rows() {
         base="$(basename -- "$source_dir")"
         tar -czf "$archive_path" -C "$parent" "$base"
         archived_count="$(tar -tzf "$archive_path" | \
-            grep -c '/step_[0-9][0-9]*\.tsv$')"
+            grep -c "/step_[0-9][0-9]*\\.$extension$")"
         test "$archived_count" -eq "$file_count"
         printf '%s\t%s\t%s\t%s\n' \
             "$relative" "$file_count" "$archive_name" \
@@ -218,6 +225,12 @@ else
             "$full_case/production_summary.txt"
         grep -Fxq "production_qoi_mode=$GOM_PRODUCTION_QOI_MODE" \
             "$full_case/production_summary.txt"
+        if test "$GOM_PRODUCTION_QOI_MODE" = required; then
+            grep -Fxq 'production_qoi_schema4_mode=required' \
+                "$full_case/production_summary.txt"
+            grep -Fxq 'qoi_schema4_validated=true' \
+                "$full_case/final_state_summary.txt"
+        fi
         case "$GOM_PRODUCTION_PHYSICS_PROFILE" in
             legacy_fault_plateau_npctheta30)
                 grep -Fxq 'fault_pc_entry_treatment=plateau' \

@@ -393,6 +393,71 @@ function preserve_mrst_fault_qoi_metadata!(assembled, fault, cells)
     return qoi_fault
 end
 
+"""
+Preserve the compact provenance needed to reproduce and audit one production
+case without retaining duplicate full-grid property arrays in simulator memory.
+The strict downstream contract has already validated these values before this
+function is called.
+"""
+function preserve_mrst_qoi_case_metadata!(
+        assembled,
+        specific,
+        contract_validation
+    )
+    function compact_copy(value; maximum_elements = 2048)
+        if value isa AbstractDict
+            copied = Dict{String, Any}()
+            for (key, child) in pairs(value)
+                child_copy = compact_copy(
+                    child;
+                    maximum_elements = maximum_elements
+                )
+                !isnothing(child_copy) &&
+                    (copied[String(key)] = child_copy)
+            end
+            return copied
+        elseif value isa Union{AbstractString, Symbol, Real, Bool}
+            return deepcopy(value)
+        elseif value isa AbstractArray && length(value) <= maximum_elements &&
+                all(item -> item isa Union{AbstractString, Symbol, Real, Bool}, value)
+            return deepcopy(value)
+        end
+        return nothing
+    end
+
+    metadata = Dict{String, Any}()
+    for key in (
+            "schema", "common_name", "geology_id", "geology_hash",
+            "geology_hash_algorithm", "pairing_key"
+        )
+        haskey(specific, key) && (metadata[key] = deepcopy(specific[key]))
+    end
+    !isnothing(contract_validation) &&
+        (metadata["contract_validation"] = deepcopy(contract_validation))
+
+    for block_name in ("metadata", "geology_link", "downstream_contract")
+        haskey(specific, block_name) || continue
+        block = specific[block_name]
+        block isa AbstractDict || continue
+        metadata[block_name] = compact_copy(block)
+    end
+
+    if haskey(specific, "window_slice")
+        window_slice = specific["window_slice"]
+        compact = Dict{String, Any}()
+        for key in (
+                "dimension_order", "window_names", "window_unit_ids",
+                "slice_indices", "selected_sample_index", "exact_replay_seed"
+            )
+            haskey(window_slice, key) &&
+                (compact[key] = deepcopy(window_slice[key]))
+        end
+        metadata["window_slice"] = compact
+    end
+    assembled["qoi_case_metadata"] = metadata
+    return metadata
+end
+
 function restore_mrst_split_fault_tables!(assembled, fault)
     if !haskey(fault, "fluid_tables")
         return assembled
@@ -1234,6 +1299,11 @@ function assemble_mrst_split_case(common, specific;
     if !isnothing(contract_validation)
         assembled["downstream_contract_validation"] = contract_validation
     end
+    preserve_mrst_qoi_case_metadata!(
+        assembled,
+        specific,
+        contract_validation
+    )
     apply_mrst_stratigraphy_data!(assembled, specific)
     fault = specific["fault"]
     rock = assembled["rock"]
@@ -3729,6 +3799,17 @@ function simulate_mrst_case(fn;
                         ) == length(schedule_dt),
                     final_schedule_step = length(schedule_dt)
                 )
+                production_qoi_schema4_active(cfg.policy.qoi.schema4) &&
+                    production_consolidate_qoi_schema4!(
+                        cfg.policy.qoi;
+                        require_complete =
+                            completed_report_steps(
+                                states,
+                                reports,
+                                output_path
+                            ) == length(schedule_dt),
+                        final_schedule_step = length(schedule_dt)
+                    )
             end
         end
 

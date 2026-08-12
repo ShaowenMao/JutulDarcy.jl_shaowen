@@ -464,7 +464,7 @@ function production_config_values(policy::ProductionOutputPolicy)
     )
     if production_qoi_active(policy.qoi)
         qoi = policy.qoi
-        return merge(
+        values = merge(
             base,
             (
                 qoi_schema_version = PRODUCTION_QOI_SCHEMA_VERSION,
@@ -478,6 +478,24 @@ function production_config_values(policy::ProductionOutputPolicy)
                     qoi.interface_manifest_sha256
             )
         )
+        if production_qoi_schema4_active(qoi.schema4)
+            extension = qoi.schema4
+            values = merge(
+                values,
+                (
+                    qoi_schema4_version = PRODUCTION_QOI_SCHEMA4_VERSION,
+                    qoi_schema4_mode = extension.mode,
+                    qoi_schema4_mapping_sha256 = extension.mapping_sha256,
+                    qoi_schema4_provenance_manifest_sha256 =
+                        extension.provenance_manifest_sha256,
+                    qoi_schema4_realization_manifest_sha256 =
+                        extension.realization_manifest_sha256,
+                    qoi_schema4_spatial_bytes_per_step =
+                        production_qoi_schema4_expected_binary_bytes()
+                )
+            )
+        end
+        return values
     end
     return base
 end
@@ -772,6 +790,9 @@ function production_report_step!(
     production_write_named_row(production_row_path(policy, step), row)
     production_qoi_active(policy.qoi) &&
         production_commit_qoi_bundle!(policy.qoi, step)
+    production_qoi_active(policy.qoi) &&
+        production_qoi_schema4_active(policy.qoi.schema4) &&
+        production_commit_qoi_schema4!(policy.qoi, step)
     kept, deleted = production_delete_obsolete_restarts!(policy, step)
     production_write_retention_row!(policy, step, kept, deleted)
     policy.pending_row = nothing
@@ -780,6 +801,13 @@ function production_report_step!(
         production_consolidate_summary!(policy; require_complete = true)
         production_qoi_active(policy.qoi) &&
             production_consolidate_qoi!(
+                policy.qoi;
+                require_complete = true,
+                final_schedule_step = policy.final_schedule_step
+            )
+        production_qoi_active(policy.qoi) &&
+            production_qoi_schema4_active(policy.qoi.schema4) &&
+            production_consolidate_qoi_schema4!(
                 policy.qoi;
                 require_complete = true,
                 final_schedule_step = policy.final_schedule_step
@@ -817,6 +845,14 @@ function Jutul.store_output!(
     end
     production_qoi_active(policy.qoi) &&
         production_stage_qoi_bundle!(
+            policy.qoi,
+            step,
+            policy.cumulative_seconds[step],
+            sim
+        )
+    production_qoi_active(policy.qoi) &&
+        production_qoi_schema4_active(policy.qoi.schema4) &&
+        production_stage_qoi_schema4!(
             policy.qoi,
             step,
             policy.cumulative_seconds[step],
@@ -933,6 +969,10 @@ function setup_production_output(
     if production_qoi_active(qoi)
         previous_step = restart === false ? 0 : Int(restart) - 1
         production_reconcile_qoi!(qoi, policy, previous_step)
+        if production_qoi_schema4_active(qoi.schema4)
+            production_reconcile_qoi_schema4!(qoi, policy, previous_step)
+            production_qoi_schema4_install_hook!(config, qoi)
+        end
     end
 
     if has_output_function

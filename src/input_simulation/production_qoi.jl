@@ -83,6 +83,7 @@ mutable struct ProductionQoIContext
     region_manifest_sha256::String
     interface_manifest_sha256::String
     injector_name::String
+    schema4::Any
 end
 
 production_qoi_active(::Nothing) = false
@@ -1363,12 +1364,14 @@ function setup_production_qoi(
         compiled.primary_label_sha256,
         production_qoi_file_sha256(region_manifest_path),
         production_qoi_file_sha256(interface_manifest_path),
-        production_qoi_injector_name(mrst_data)
+        production_qoi_injector_name(mrst_data),
+        nothing
     )
     context.initial_total_co2_mass_kg =
         production_qoi_domain_total_mass(initial_state)
     context.initial_atomic_total_co2_mass_kg .=
         production_qoi_atomic_inventory(context, initial_state).total
+    context.schema4 = setup_production_qoi_schema4(context, mrst_data, sim)
     return context
 end
 

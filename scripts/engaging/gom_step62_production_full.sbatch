@@ -73,6 +73,21 @@ if test "${PRODUCTION_QOI_MODE:-off}" != "off"; then
     test -s "$summary_dir/leakage_case_summary.tsv"
     test -s "$summary_dir/QOI_OUTPUT_COMPLETE.tsv"
 fi
+if test "${PRODUCTION_QOI_SCHEMA4_MODE:-off}" != "off"; then
+    schema4_dir="$summary_dir/qoi_schema4"
+    test -s "$schema4_dir/schema4_definition.tsv"
+    test -s "$schema4_dir/case_uq_manifest.tsv"
+    test -s "$schema4_dir/realization_manifest.tsv"
+    test -s "$schema4_dir/fault_group_manifest.tsv"
+    test -s "$schema4_dir/cumulative_interface_manifest.tsv"
+    test "$(find "$schema4_dir/rows" -maxdepth 1 -type f \
+        -name 'step_*.tsv' | wc -l)" -eq 210
+    test "$(find "$schema4_dir/spatial_rows" -maxdepth 1 -type f \
+        -name 'step_*.bin' | wc -l)" -eq 210
+    test -s "$schema4_dir/qoi_schema4_steps.tsv"
+    test -s "$schema4_dir/spatial_history_index.tsv"
+    test -s "$schema4_dir/QOI_SCHEMA4_COMPLETE.tsv"
+fi
 
 module purge
 module load community-modules
@@ -88,6 +103,11 @@ if test "${PRODUCTION_QOI_MODE:-off}" != "off"; then
     grep -Fxq 'qoi_mass_partition_validated=true' \
         "$case_dir/final_state_summary.txt"
     grep -Fxq 'qoi_atomic_partition_validated=true' \
+        "$case_dir/final_state_summary.txt"
+fi
+if test "${PRODUCTION_QOI_SCHEMA4_MODE:-off}" != "off"; then
+    grep -Fxq 'qoi_schema4_version=4' "$case_dir/final_state_summary.txt"
+    grep -Fxq 'qoi_schema4_validated=true' \
         "$case_dir/final_state_summary.txt"
 fi
 
@@ -108,6 +128,18 @@ fi
             restart/production_output/interface_flux_steps.tsv \
             restart/production_output/leakage_case_summary.tsv \
             restart/production_output/QOI_OUTPUT_COMPLETE.tsv \
+            >> PRODUCTION_SUMMARY_SHA256.txt
+    fi
+    if test "${PRODUCTION_QOI_SCHEMA4_MODE:-off}" != "off"; then
+        sha256sum \
+            restart/production_output/qoi_schema4/schema4_definition.tsv \
+            restart/production_output/qoi_schema4/case_uq_manifest.tsv \
+            restart/production_output/qoi_schema4/realization_manifest.tsv \
+            restart/production_output/qoi_schema4/fault_group_manifest.tsv \
+            restart/production_output/qoi_schema4/cumulative_interface_manifest.tsv \
+            restart/production_output/qoi_schema4/qoi_schema4_steps.tsv \
+            restart/production_output/qoi_schema4/spatial_history_index.tsv \
+            restart/production_output/qoi_schema4/QOI_SCHEMA4_COMPLETE.tsv \
             >> PRODUCTION_SUMMARY_SHA256.txt
     fi
     sha256sum --check RETAINED_RESTART_SHA256.txt
@@ -141,6 +173,7 @@ printf '%s\n' \
     "transmissibility_source=JutulDarcy_grid_and_rock" \
     "production_output_mode=true" \
     "production_qoi_mode=$PRODUCTION_QOI_MODE" \
+    "production_qoi_schema4_mode=$PRODUCTION_QOI_SCHEMA4_MODE" \
     "result_dir=$case_dir" \
     > "$case_dir/production_summary.txt"
 printf 'PASS\n' > "$case_dir/PASS"

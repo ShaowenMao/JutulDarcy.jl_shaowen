@@ -61,6 +61,272 @@ function parse_csv_values(::Type{T}, value, label) where T
     end
 end
 
+function validate_schema4_output(config, rows, expected_case_key)
+    haskey(config, "qoi_schema4_version") || return nothing
+    schema = parse(Int, config["qoi_schema4_version"])
+    schema == JutulDarcy.PRODUCTION_QOI_SCHEMA4_VERSION || error(
+        "Unsupported schema-4 extension version $schema."
+    )
+    config["qoi_schema4_mode"] == "required" || error(
+        "Production schema 4 must run in required mode."
+    )
+
+    root = joinpath(summary_dir, "qoi_schema4")
+    isdir(root) || error("Schema-4 output directory does not exist: $root")
+    required_manifests = (
+        "schema4_definition.tsv",
+        "case_uq_manifest.tsv",
+        "realization_manifest.tsv",
+        "fault_group_manifest.tsv",
+        "cumulative_interface_manifest.tsv"
+    )
+    for name in required_manifests
+        isfile(joinpath(root, name)) || error(
+            "Schema-4 output is missing $name."
+        )
+    end
+
+    definition, _ = read_named_row(joinpath(root, "schema4_definition.tsv"))
+    parse(Int, definition["schema_version"]) == schema || error(
+        "Schema-4 definition has the wrong schema version."
+    )
+    definition["case_key"] == expected_case_key || error(
+        "Schema-4 definition has the wrong case key."
+    )
+    parse(Int, definition["window_count"]) == 6 || error(
+        "Schema-4 definition does not contain six windows."
+    )
+    parse(Int, definition["slice_count"]) == 87 || error(
+        "Schema-4 definition does not contain 87 slices."
+    )
+    mapping_sha256 = config["qoi_schema4_mapping_sha256"]
+    definition["mapping_sha256"] == mapping_sha256 || error(
+        "Schema-4 definition/configuration mapping hashes differ."
+    )
+
+    provenance_path = joinpath(root, "case_uq_manifest.tsv")
+    realization_path = joinpath(root, "realization_manifest.tsv")
+    JutulDarcy.production_qoi_file_sha256(provenance_path) ==
+        config["qoi_schema4_provenance_manifest_sha256"] || error(
+        "Schema-4 provenance manifest hash differs from configuration."
+    )
+    JutulDarcy.production_qoi_file_sha256(realization_path) ==
+        config["qoi_schema4_realization_manifest_sha256"] || error(
+        "Schema-4 realization manifest hash differs from configuration."
+    )
+
+    _, realizations = read_table(realization_path)
+    length(realizations) == 6*87 || error(
+        "Schema-4 realization manifest must contain 522 rows."
+    )
+    realization_keys = Set{Tuple{Int, Int}}()
+    for realization in realizations
+        window = parse(Int, realization["window"])
+        slice = parse(Int, realization["slice"])
+        1 <= window <= 6 && 1 <= slice <= 87 || error(
+            "Schema-4 realization manifest has an invalid window/slice."
+        )
+        push!(realization_keys, (window, slice))
+        parse(Int, realization["selected_realization_index"]) > 0 || error(
+            "Schema-4 realization manifest has a nonpositive realization index."
+        )
+        parse(Int64, realization["exact_replay_seed"])
+    end
+    length(realization_keys) == 6*87 || error(
+        "Schema-4 realization manifest has duplicate window/slice rows."
+    )
+
+    _, fault_groups = read_table(joinpath(root, "fault_group_manifest.tsv"))
+    length(fault_groups) == 6*87 || error(
+        "Schema-4 fault-group manifest must contain 522 rows."
+    )
+    _, interfaces = read_table(
+        joinpath(root, "cumulative_interface_manifest.tsv")
+    )
+    length(interfaces) == 4 || error(
+        "Schema-4 cumulative interface manifest must contain four interfaces."
+    )
+
+    completion, _ = read_named_row(
+        joinpath(root, "QOI_SCHEMA4_COMPLETE.tsv")
+    )
+    completion["status"] == "complete" || error(
+        "Schema-4 completion marker does not say complete."
+    )
+    parse(Int, completion["schema_version"]) == schema || error(
+        "Schema-4 completion marker has the wrong schema."
+    )
+    completion["case_key"] == expected_case_key || error(
+        "Schema-4 completion marker has the wrong case key."
+    )
+    parse(Int, completion["schedule_steps"]) == EXPECTED_STEPS || error(
+        "Schema-4 completion marker has the wrong schedule length."
+    )
+    completion["mapping_sha256"] == mapping_sha256 || error(
+        "Schema-4 completion marker has the wrong mapping hash."
+    )
+    completion["storage_budget_passed"] == "true" || error(
+        "Schema-4 completion marker does not pass its storage budget."
+    )
+    parse(Int, completion["payload_bytes_before_completion_marker"]) <=
+        parse(Int, completion["storage_budget_bytes"]) || error(
+        "Schema-4 completion payload exceeds its storage budget."
+    )
+
+    _, scalar_rows = read_table(joinpath(root, "qoi_schema4_steps.tsv"))
+    _, spatial_index = read_table(joinpath(root, "spatial_history_index.tsv"))
+    length(scalar_rows) == EXPECTED_STEPS || error(
+        "Schema-4 scalar history does not contain 210 report rows."
+    )
+    length(spatial_index) == EXPECTED_STEPS || error(
+        "Schema-4 spatial index does not contain 210 report rows."
+    )
+    expected_bytes = parse(Int, config["qoi_schema4_spatial_bytes_per_step"])
+    expected_bytes == JutulDarcy.production_qoi_schema4_expected_binary_bytes() ||
+        error("Schema-4 configured spatial-record byte count is invalid.")
+
+    cumulative_fields = (
+        "cumulative_injected_co2_kg",
+        "cumulative_produced_co2_kg",
+        "cumulative_boundary_out_co2_kg",
+        "cumulative_boundary_in_co2_kg"
+    )
+    previous_cumulative = fill(-Inf, length(cumulative_fields))
+    previous_ministeps = -1
+    interface_ids = Tuple(interface["interface_id"] for interface in interfaces)
+    previous_interface = Dict{String, Float64}()
+    total_spatial_bytes = 0
+    root_real = realpath(root)
+    for step in 1:EXPECTED_STEPS
+        row = scalar_rows[step]
+        index = spatial_index[step]
+        parse(Int, row["schema_version"]) == schema || error(
+            "Schema-4 scalar row $step has the wrong schema."
+        )
+        parse(Int, row["step"]) == step || error(
+            "Schema-4 scalar row $step has the wrong step index."
+        )
+        parse(Int, index["step"]) == step || error(
+            "Schema-4 spatial index row $step has the wrong step index."
+        )
+        row["case_key"] == expected_case_key || error(
+            "Schema-4 scalar row $step has the wrong case key."
+        )
+        row["mapping_sha256"] == mapping_sha256 || error(
+            "Schema-4 scalar row $step has the wrong mapping hash."
+        )
+        require_close(
+            parse(Float64, row["time_seconds"]),
+            parse(Float64, rows[step]["time_seconds"]),
+            "Schema-4/report time at step $step";
+            rtol = 0.0,
+            atol = 1.0e-8
+        )
+        require_close(
+            parse(Float64, index["time_seconds"]),
+            parse(Float64, row["time_seconds"]),
+            "Schema-4 scalar/spatial time at step $step";
+            rtol = 0.0,
+            atol = 1.0e-8
+        )
+
+        relative = index["relative_path"]
+        spatial_path = normpath(joinpath(root, relative))
+        isfile(spatial_path) || error(
+            "Schema-4 spatial record $step does not exist."
+        )
+        resolved_spatial = realpath(spatial_path)
+        relative_to_root = relpath(resolved_spatial, root_real)
+        relative_parts = splitpath(relative_to_root)
+        (!isabspath(relative_to_root) &&
+            !isempty(relative_parts) && first(relative_parts) != "..") ||
+            error("Schema-4 spatial record $step escapes its output directory.")
+        bytes = filesize(spatial_path)
+        bytes == expected_bytes || error(
+            "Schema-4 spatial record $step has $bytes bytes, expected $expected_bytes."
+        )
+        parse(Int, index["bytes"]) == bytes || error(
+            "Schema-4 spatial index has the wrong byte count at step $step."
+        )
+        digest = JutulDarcy.production_qoi_file_sha256(spatial_path)
+        index["sha256"] == digest || error(
+            "Schema-4 spatial index has the wrong hash at step $step."
+        )
+        row["spatial_binary_sha256"] == digest || error(
+            "Schema-4 scalar row has the wrong spatial hash at step $step."
+        )
+        parsed = JutulDarcy.production_qoi_schema4_read_binary(spatial_path)
+        parsed.step == step || error(
+            "Schema-4 spatial record contains the wrong step at $step."
+        )
+        size(parsed.fault) == (6*87, 7) || error(
+            "Schema-4 fault history has the wrong dimensions at step $step."
+        )
+        size(parsed.leakage) == (2, 87, 3) || error(
+            "Schema-4 leakage history has the wrong dimensions at step $step."
+        )
+        total_spatial_bytes += bytes
+
+        for (field_index, field) in enumerate(cumulative_fields)
+            value = parse(Float64, row[field])
+            isfinite(value) && value >= previous_cumulative[field_index] ||
+                error("Schema-4 cumulative $field decreases at step $step.")
+            previous_cumulative[field_index] = value
+        end
+        accepted = parse(Int, row["accepted_ministep_count"])
+        accepted >= previous_ministeps || error(
+            "Schema-4 accepted-ministep count decreases at step $step."
+        )
+        previous_ministeps = accepted
+        for field in (
+                "actual_co2_rate_kg_s",
+                "domain_co2_mass_kg",
+                "expected_domain_co2_mass_kg",
+                "mass_balance_residual_kg",
+                "mass_balance_relative_residual",
+                "ministep_accounting_seconds",
+                "spatial_evaluation_seconds"
+            )
+            value = parse(Float64, row[field])
+            isfinite(value) || error(
+                "Schema-4 scalar $field is non-finite at step $step."
+            )
+        end
+        for interface_id in interface_ids
+            for component in ("free", "dissolved", "total")
+                prefix = "cumulative_$(interface_id)_$(component)"
+                forward = parse(Float64, row[prefix * "_forward_kg"])
+                reverse = parse(Float64, row[prefix * "_reverse_kg"])
+                net = parse(Float64, row[prefix * "_net_kg"])
+                forward >= get(previous_interface, prefix * "_forward", -Inf) ||
+                    error("Schema-4 interface forward mass decreases at step $step.")
+                reverse >= get(previous_interface, prefix * "_reverse", -Inf) ||
+                    error("Schema-4 interface reverse mass decreases at step $step.")
+                require_close(
+                    net,
+                    forward - reverse,
+                    "Schema-4 interface net mass at step $step";
+                    rtol = 1.0e-12,
+                    atol = 1.0e-6
+                )
+                previous_interface[prefix * "_forward"] = forward
+                previous_interface[prefix * "_reverse"] = reverse
+            end
+        end
+    end
+    parse(Int, completion["total_spatial_bytes"]) == total_spatial_bytes ||
+        error("Schema-4 completion marker has the wrong spatial byte total.")
+    return (
+        schema = schema,
+        spatial_bytes = total_spatial_bytes,
+        accepted_ministeps = previous_ministeps,
+        accounting_seconds = parse(
+            Float64,
+            scalar_rows[end]["ministep_accounting_seconds"]
+        )
+    )
+end
+
 function validate_state(step)
     state, _ = Jutul.read_restart(
         restart_dir,
@@ -631,6 +897,8 @@ if qoi_schema > 0
     end
 end
 
+schema4_summary = validate_schema4_output(config, rows, expected_case_key)
+
 retained_states = Dict(step => validate_state(step) for step in expected_restarts)
 injection_end = retained_states[78]
 final_state = retained_states[210]
@@ -693,6 +961,21 @@ open(output_path, "w") do io
         )
         println(io, "qoi_mass_partition_validated=true")
         println(io, "qoi_atomic_partition_validated=true")
+    end
+    if !isnothing(schema4_summary)
+        println(io, "qoi_schema4_version=$(schema4_summary.schema)")
+        println(io, "qoi_schema4_validated=true")
+        println(io, "qoi_schema4_spatial_bytes=$(schema4_summary.spatial_bytes)")
+        println(
+            io,
+            "qoi_schema4_accepted_ministeps=" *
+            string(schema4_summary.accepted_ministeps)
+        )
+        println(
+            io,
+            "qoi_schema4_accounting_seconds=" *
+            string(schema4_summary.accounting_seconds)
+        )
     end
     println(io, "production_output_mode=true")
 end

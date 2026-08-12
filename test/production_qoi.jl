@@ -87,7 +87,8 @@ function two_cell_qoi_context()
         "",
         "",
         "",
-        ""
+        "",
+        nothing
     )
 end
 

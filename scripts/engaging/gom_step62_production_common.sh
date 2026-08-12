@@ -131,6 +131,11 @@ gom_production_export_locked_physics() {
     # 1 manifests resolve to their legacy defaults; schema 2 locks them
     # explicitly and full_1620 requires QoI mode "required".
     export PRODUCTION_QOI_MODE="$GOM_PRODUCTION_QOI_MODE"
+    if test "$PRODUCTION_QOI_MODE" = required; then
+        export PRODUCTION_QOI_SCHEMA4_MODE=required
+    else
+        export PRODUCTION_QOI_SCHEMA4_MODE=off
+    fi
     export PRODUCTION_RETAIN_YEARS="$GOM_PRODUCTION_RETAIN_YEARS"
     export PRODUCTION_ROLLING_CHECKPOINTS="$GOM_PRODUCTION_ROLLING_CHECKPOINTS"
     export PRODUCTION_CASE_KEY="$GOM_PRODUCTION_CASE_KEY"
@@ -195,6 +200,7 @@ gom_production_write_metadata() {
         "well_volume_fraction=1e-3" \
         "production_output_mode=true" \
         "production_qoi_mode=$PRODUCTION_QOI_MODE" \
+        "production_qoi_schema4_mode=$PRODUCTION_QOI_SCHEMA4_MODE" \
         "production_retain_years=$PRODUCTION_RETAIN_YEARS" \
         "production_rolling_checkpoints=$PRODUCTION_ROLLING_CHECKPOINTS" \
         "memory=${SLURM_MEM_PER_NODE:-unknown}" \

@@ -215,7 +215,10 @@ export PRODUCTION_QOI_MODE=required
 ```
 
 The input-label schema `gom_qoi_semantics_v1` is independent of the tabular
-QoI output schema version; the current output format is schema 3.
+QoI output schema version. The original leakage-risk tables remain unchanged
+at schema 3. New production campaigns additionally require the schema-4
+extension described below; this keeps existing campaigns restartable and
+their archived outputs byte-compatible.
 
 `required` fails before simulation if the common input lacks the exact
 primary-UCID partition or the paired specific input lacks Al/Ar
@@ -301,6 +304,56 @@ residual and overburden inventories. Schema 1 and 2 outputs remain valid
 historical artifacts, but an older report prefix cannot be resumed with
 schema-3 code; the immutable production configuration deliberately rejects
 mixed schemas.
+
+### Production QoI schema-4 extension
+
+When `PRODUCTION_QOI_MODE=required`, the production launcher also sets
+`PRODUCTION_QOI_SCHEMA4_MODE=required`. The extension writes to the separate
+`production_output/qoi_schema4/` directory and does not change any schema-3
+file. It fails before simulation unless the strict v4 reservoir input carries
+complete, validated 6-window by 87-slice realization metadata.
+
+Schema 4 retains only compact quantities that are costly or impossible to
+reconstruct after the nonlinear simulation:
+
+- actual and requested injector controls, active-control switches, injector
+  BHP, actual CO2 rate, and cumulative injected/produced CO2 mass;
+- accepted-ministep cumulative boundary transfer and a domain CO2
+  mass-balance residual;
+- accepted-ministep forward, reverse, and net free, dissolved, and total CO2
+  transfer across storage-to-fault, storage-to-top-seal,
+  fault-to-top-seal, and non-overburden-to-overburden interfaces;
+- report-endpoint pressure, capillary pressure, gas saturation, historical
+  maximum gas saturation, dissolved-gas ratio, and free/dissolved CO2 mass
+  for all 6 by 87 fault reporting regions;
+- free/dissolved CO2 mass and maximum gas saturation for top-seal and
+  overburden regions mapped to each of the 87 along-strike slices; and
+- migration-front elevations and fault-window/stratigraphic identifiers at
+  gas-saturation thresholds `1e-4`, `1e-3`, and `1e-2`.
+
+The per-report spatial record is a fixed 33,444-byte little-endian Float64
+binary. Its dimension and field order are pinned in `schema4_definition.tsv`;
+`spatial_history_index.tsv` records every file's report time, byte count, and
+SHA-256. At 210 report boundaries the binary history is about 7.02 MB per
+case, with no additional full-grid state files or per-face histories.
+
+Case provenance is explicit and checksum-pinned in `case_uq_manifest.tsv` and
+`realization_manifest.tsv`, including geology/case identity, available UQ
+phase and replicate metadata, all 522 selected PREDICT realization indices,
+and exact replay seeds. Frozen fault groups, leakage-slice mappings, and
+semantic interfaces are recorded in dedicated manifests and protected by a
+mapping SHA-256.
+
+Schema-4 scalar and binary records use the same restart transaction as the
+Jutul checkpoint: failed ministeps never modify cumulative values, and a
+report is committed only after its restart file closes. Continuation restores
+all cumulative values from the last committed report and quarantines anything
+newer than the selected checkpoint. A full case is accepted only after the
+final checker validates all 210 scalar/binary pairs, dimensions, hashes,
+cumulative monotonicity, interface net identities, and the
+`QOI_SCHEMA4_COMPLETE.tsv` marker. The shard archive combines atomic scalar
+and binary records into per-case tar files to avoid a large-file-count burden
+while retaining the consolidated tables and manifests for immediate review.
 
 Each smoke job stops first at report step 2 and resumes to report step 3. It
 requires three atomic summary rows and exactly rolling restart checkpoints 2
