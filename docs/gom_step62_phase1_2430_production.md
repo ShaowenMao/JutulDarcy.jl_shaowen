@@ -42,9 +42,11 @@ contract-test outputs, and writes `PASS` only after every test succeeds.
 2. Build and checksum the immutable source manifest.
 3. Generate the common MAT, 2,430 specific MATs, and the derived MRST
    manifest from a clean pinned MRST checkout.
-4. Build production manifest schema 3 from the derived manifest and pin the
-   MRST commit, JutulDarcy commit, Julia manifest SHA-256, source-manifest
-   SHA-256, case order, and every input MAT SHA-256.
+4. Run `gom_step62_phase1_2430_build_campaign.sbatch` to build production
+   manifest schema 3 atomically from the completed MAT and contract-test
+   packages. The manifest pins the MRST commit, JutulDarcy commit, Julia
+   manifest SHA-256, source-manifest SHA-256, case order, and every input MAT
+   SHA-256.
 5. Pass local tests, Engaging script compatibility, campaign validation,
    preflight, and restart smoke tests.
 6. Run a bounded official canary and validate its durable shard.
