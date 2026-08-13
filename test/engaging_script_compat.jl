@@ -190,6 +190,10 @@ using Test
         joinpath(scripts_dir, "gom_step62_phase1_2430_acceptance_finalize.sbatch"),
         String
     )
+    canary_release = read(
+        joinpath(scripts_dir, "gom_step62_phase1_2430_canary_release.sh"),
+        String
+    )
     @test occursin("selection_uses_reservoir_outcomes=false", acceptance_selector)
     @test occursin("length(selected) == 24", acceptance_selector)
     @test occursin("--array=\"\$array_spec%24\"", acceptance_submit)
@@ -200,6 +204,11 @@ using Test
     @test occursin("flock -n 9", acceptance_submit)
     @test occursin("acceptance_results_count_as_production=false", acceptance_finalize)
     @test !occursin("gom_step62_production_shard_archive.sbatch", acceptance_submit)
+    @test occursin("GOM_ACCEPTANCE_MANUAL_REVIEW", canary_release)
+    @test occursin("GOM_PRODUCTION_SELECTION_START=1", canary_release)
+    @test occursin("GOM_PRODUCTION_SELECTION_END=50", canary_release)
+    @test occursin("GOM_PRODUCTION_SHARD_WINDOW=1", canary_release)
+    @test occursin("gom_step62_production_ensemble_submit.sh", canary_release)
 
     # Engaging counts pending array elements against a per-user QOS ceiling.
     # The rolling control plane must keep the scientific checkout pinned,
