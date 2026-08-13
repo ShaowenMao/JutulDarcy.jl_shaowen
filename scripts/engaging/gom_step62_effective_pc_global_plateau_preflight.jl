@@ -112,6 +112,32 @@ setup = simulate_mrst_case(
 diagnostics =
     GoMStep62EffectivePcGlobalPlateauContract.validate_assembled_case(setup)
 
+# This campaign starts from an all-brine hydrostatic state. The common MAT
+# pressure is liquid pressure, which is also the Jutul reference pressure for
+# the liquid-vapor model. Re-read the immutable common file so this check also
+# detects accidental mutation of the assembled MRST input during import.
+raw_liquid_pressure = MAT.matopen(common_path) do file
+    state0 = read(file, "state0")
+    Float64.(vec(state0["pressure"]))
+end
+initial_reservoir_state = setup.case.state0[:Reservoir]
+initial_reference_pressure = Float64.(vec(initial_reservoir_state[:Pressure]))
+length(initial_reference_pressure) == length(raw_liquid_pressure) ||
+    error("Imported and common-MAT initial pressure lengths differ.")
+initial_pressure_max_abs_difference_pa = maximum(abs.(
+    initial_reference_pressure .- raw_liquid_pressure
+))
+initial_pressure_max_abs_difference_pa <= 1.0e-6 || error(
+    "Imported initial liquid-reference pressure differs from the common MAT " *
+    "by up to $initial_pressure_max_abs_difference_pa Pa."
+)
+reservoir_model = setup.case.model.models[:Reservoir]
+phase_indices = JutulDarcy.phase_indices(reservoir_model.system)
+reference_phase = JutulDarcy.get_reference_phase_index(reservoir_model.system)
+reference_phase == phase_indices.l || error(
+    "The production model must use liquid pressure as its reference variable."
+)
+
 # Validate every symmetric permeability tensor, not only the modified
 # non-PREDICT Younger band.
 perm = diagnostics.perm
@@ -219,6 +245,13 @@ open(summary_path, "w") do io
         string(GoMStep62EffectivePcGlobalPlateauContract.EXPECTED_HYSTERESIS_S_MIN)
     )
     println(io, "fault_hysteresis=drainage_equivalent")
+    println(io, "initial_pressure_convention=liquid_reference")
+    println(io, "initial_pressure_reference_phase=$reference_phase")
+    println(
+        io,
+        "initial_pressure_max_abs_difference_from_common_pa=" *
+        string(initial_pressure_max_abs_difference_pa)
+    )
     println(
         io,
         "pc_mapping_schema=" *
