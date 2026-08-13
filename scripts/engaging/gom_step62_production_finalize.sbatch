@@ -160,6 +160,7 @@ printf '%s\n' \
     "campaign_id=$GOM_PRODUCTION_CAMPAIGN_ID" \
     "campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256" \
     "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
+    "qoi_schema_version=$GOM_PRODUCTION_QOI_SCHEMA_VERSION" \
     "case_order_sha256=$GOM_PRODUCTION_CASE_ORDER_SHA256" \
     "selection_start=$start" \
     "selection_end=$end" \
@@ -185,7 +186,7 @@ mv -- "$incoming" "$final"
 campaign_complete=false
 if test "$start" -eq 1 && \
    test "$end" -eq "$GOM_PRODUCTION_CASE_COUNT" && \
-   test "$GOM_PRODUCTION_ENSEMBLE_KIND" = full_1620; then
+   [[ "$GOM_PRODUCTION_ENSEMBLE_KIND" =~ ^(full_1620|phase1_2430)$ ]]; then
     campaign_marker="$campaign_root/CAMPAIGN_COMPLETE"
     test ! -e "$campaign_marker"
     temporary="${campaign_marker}.tmp.${SLURM_JOB_ID}"
@@ -194,6 +195,7 @@ if test "$start" -eq 1 && \
         "campaign_id=$GOM_PRODUCTION_CAMPAIGN_ID" \
         "campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256" \
         "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
+        "qoi_schema_version=$GOM_PRODUCTION_QOI_SCHEMA_VERSION" \
         "case_order_sha256=$GOM_PRODUCTION_CASE_ORDER_SHA256" \
         "case_count=$GOM_PRODUCTION_CASE_COUNT" \
         "shard_count=$expected_shards" \
@@ -213,6 +215,7 @@ printf '%s\n' \
     "campaign_id=$GOM_PRODUCTION_CAMPAIGN_ID" \
     "campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256" \
     "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
+    "qoi_schema_version=$GOM_PRODUCTION_QOI_SCHEMA_VERSION" \
     "selection_start=$start" \
     "selection_end=$end" \
     "case_count=$selection_count" \

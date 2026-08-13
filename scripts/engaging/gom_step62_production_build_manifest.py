@@ -28,6 +28,13 @@ FULL_ENSEMBLE_CASE_KEYS = tuple(
     for geology in range(1, 28)
     for realization in range(1, 11)
 )
+PHASE1_CASE_IDS = tuple(range(1, 13)) + (101, 102, 103)
+PHASE1_ENSEMBLE_CASE_KEYS = tuple(
+    f"s{scenario:02d}_c{geology:03d}_case{realization:02d}"
+    for scenario in range(1, 7)
+    for geology in range(1, 28)
+    for realization in PHASE1_CASE_IDS
+)
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 GEOLOGY_ID_RE = re.compile(r"^s(?P<scenario>\d{2})_c(?P<geology>\d{3})$")
@@ -86,10 +93,12 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--mrst-prepare-commit", required=True)
     parser.add_argument("--source-input-manifest-sha256", required=True)
     parser.add_argument("--output", required=True)
-    parser.add_argument("--schema-version", type=int, choices=(1, 2), default=1)
+    parser.add_argument(
+        "--schema-version", type=int, choices=(1, 2, 3), default=1
+    )
     parser.add_argument(
         "--ensemble-kind",
-        choices=("pilot_7", "subset", "full_1620"),
+        choices=("pilot_7", "subset", "full_1620", "phase1_2430"),
     )
     parser.add_argument(
         "--qoi-mode", choices=("off", "auto", "required"), default="required"
@@ -113,7 +122,9 @@ def integral_realization(row: dict[str, str]) -> int:
     return realization
 
 
-def validate_case_identity(row: dict[str, str]) -> tuple[int, int, int]:
+def validate_case_identity(
+    row: dict[str, str], ensemble_kind: str
+) -> tuple[int, int, int]:
     geology_id = row["geologyId"].strip()
     match = GEOLOGY_ID_RE.fullmatch(geology_id)
     if match is None:
@@ -121,9 +132,13 @@ def validate_case_identity(row: dict[str, str]) -> tuple[int, int, int]:
     scenario = int(match.group("scenario"))
     geology = int(match.group("geology"))
     realization = integral_realization(row)
-    if not 1 <= realization <= 10:
+    allowed_ids = PHASE1_CASE_IDS if ensemble_kind == "phase1_2430" else range(1, 11)
+    if realization not in allowed_ids:
+        allowed_text = (
+            "1:12,101:103" if ensemble_kind == "phase1_2430" else "1:10"
+        )
         raise ValueError(
-            f"{row['caseKey']} realization ID must be in 1:10"
+            f"{row['caseKey']} realization ID must be in {allowed_text}"
         )
     expected_key = f"{geology_id}_case{realization:02d}"
     if row["caseKey"] != expected_key:
@@ -201,12 +216,23 @@ def main() -> int:
         ):
             raise ValueError("schema 1 supports only the legacy physics profile")
         physics_profile = "legacy_fault_plateau_npctheta30"
-    else:
+    elif arguments.schema_version == 2:
         if arguments.ensemble_kind is None:
             raise ValueError("schema 2 requires --ensemble-kind")
         ensemble_kind = arguments.ensemble_kind
         if arguments.physics_profile is None:
             raise ValueError("schema 2 requires --physics-profile")
+        physics_profile = arguments.physics_profile
+    else:
+        if arguments.ensemble_kind != "phase1_2430":
+            raise ValueError("schema 3 requires --ensemble-kind phase1_2430")
+        ensemble_kind = arguments.ensemble_kind
+        if arguments.physics_profile != "sandpc_effective_globalplateau_v1":
+            raise ValueError(
+                "schema 3 requires sandpc_effective_globalplateau_v1"
+            )
+        if arguments.qoi_mode != "required":
+            raise ValueError("schema 3 requires --qoi-mode required")
         physics_profile = arguments.physics_profile
 
     case_keys = [row["caseKey"] for row in case_rows]
@@ -216,7 +242,9 @@ def main() -> int:
                 "derived manifest case order/identity is not the canonical pilot"
             )
     else:
-        order_keys = [validate_case_identity(row) for row in case_rows]
+        order_keys = [
+            validate_case_identity(row, ensemble_kind) for row in case_rows
+        ]
         if len(set(case_keys)) != len(case_keys):
             raise ValueError("derived manifest contains duplicate case keys")
         if order_keys != sorted(order_keys):
@@ -230,6 +258,13 @@ def main() -> int:
             raise ValueError(
                 "full_1620 must contain exactly s01..s06, c001..c027, "
                 "and case01..case10 in canonical order"
+            )
+        if ensemble_kind == "phase1_2430" and tuple(case_keys) != (
+            PHASE1_ENSEMBLE_CASE_KEYS
+        ):
+            raise ValueError(
+                "phase1_2430 must contain exactly s01..s06, c001..c027, "
+                "and case01..case12,case101..case103 in canonical order"
             )
     if not case_rows:
         raise ValueError("derived manifest contains no geology-specific rows")
@@ -270,7 +305,7 @@ def main() -> int:
         f"jutul_manifest_sha256 = "
         f"{toml_string(jutul_manifest_sha256)}",
     ]
-    if arguments.schema_version == 2:
+    if arguments.schema_version >= 2:
         lines.extend(
             [
                 f"ensemble_kind = {toml_string(ensemble_kind)}",
@@ -281,6 +316,11 @@ def main() -> int:
                 "[workflow]",
                 f"physics_profile = {toml_string(physics_profile)}",
                 f"qoi_mode = {toml_string(arguments.qoi_mode)}",
+                *(
+                    ["qoi_schema_version = 4"]
+                    if arguments.schema_version == 3
+                    else []
+                ),
                 "retain_years = [25, 50, 100, 1000]",
                 "rolling_checkpoints = 2",
                 f"archive_shard_size = {arguments.archive_shard_size}",

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Submit a schema-2 Step62 campaign as dependency-gated durable shards.
+# Submit a schema-2/3 Step62 campaign as dependency-gated durable shards.
 
 set -euo pipefail
 umask 027
@@ -23,10 +23,13 @@ test -f "$shard_verifier"
 manifest_summary="$($production_python "$resolver" \
     --manifest "$GOM_PRODUCTION_MANIFEST" summary --format shell)"
 eval "$manifest_summary"
-test "$GOM_PRODUCTION_SCHEMA_VERSION" -eq 2 || {
-    echo "The ensemble submitter requires manifest schema 2." >&2
-    exit 1
-}
+case "$GOM_PRODUCTION_SCHEMA_VERSION" in
+    2|3) ;;
+    *)
+        echo "The ensemble submitter requires manifest schema 2 or 3." >&2
+        exit 1
+        ;;
+esac
 case "$GOM_PRODUCTION_PHYSICS_PROFILE" in
     legacy_fault_plateau_npctheta30)
         preflight_script="$scripts/gom_step62_production_preflight.sbatch"
@@ -67,12 +70,21 @@ test "$max_concurrent" -le 64 || {
 test "$shard_window" -ge 1
 
 if test "$selection_start" -eq 1 && \
-   test "$selection_end" -eq "$GOM_PRODUCTION_CASE_COUNT" && \
-   test "$GOM_PRODUCTION_ENSEMBLE_KIND" = full_1620; then
-    test "${GOM_PRODUCTION_CONFIRM_FULL_1620:-}" = YES || {
-        echo "Set GOM_PRODUCTION_CONFIRM_FULL_1620=YES only after the acceptance and canary gates pass." >&2
-        exit 1
-    }
+   test "$selection_end" -eq "$GOM_PRODUCTION_CASE_COUNT"; then
+    case "$GOM_PRODUCTION_ENSEMBLE_KIND" in
+        full_1620)
+            test "${GOM_PRODUCTION_CONFIRM_FULL_1620:-}" = YES || {
+                echo "Set GOM_PRODUCTION_CONFIRM_FULL_1620=YES only after the acceptance and canary gates pass." >&2
+                exit 1
+            }
+            ;;
+        phase1_2430)
+            test "${GOM_PRODUCTION_CONFIRM_PHASE1_2430:-}" = YES || {
+                echo "Set GOM_PRODUCTION_CONFIRM_PHASE1_2430=YES only after the acceptance and canary gates pass." >&2
+                exit 1
+            }
+            ;;
+    esac
 fi
 
 observed_commit="$(git -C "$JUTULDARCY_COMBINED_REPO" rev-parse HEAD)"
@@ -266,6 +278,7 @@ printf '%s\n' \
     "shard_window=$shard_window" \
     "max_concurrent=$max_concurrent" \
     "qoi_mode=$GOM_PRODUCTION_QOI_MODE" \
+    "qoi_schema_version=$GOM_PRODUCTION_QOI_SCHEMA_VERSION" \
     "physics_profile=$GOM_PRODUCTION_PHYSICS_PROFILE" \
     "campaign_check_job=$check_job" \
     "preflight_array_jobs=$(join_colon_or_none "${preflight_jobs[@]}")" \

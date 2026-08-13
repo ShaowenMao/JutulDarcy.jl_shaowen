@@ -29,6 +29,17 @@ PILOT_CASES = (
     ("s03_c012_case08", "s03_c012", 8),
     ("s04_c024_case03", "s04_c024", 3),
 )
+PHASE1_CASE_IDS = tuple(range(1, 13)) + (101, 102, 103)
+PHASE1_CASES = tuple(
+    (
+        f"s{scenario:02d}_c{geology:03d}_case{realization:02d}",
+        f"s{scenario:02d}_c{geology:03d}",
+        realization,
+    )
+    for scenario in range(1, 7)
+    for geology in range(1, 28)
+    for realization in PHASE1_CASE_IDS
+)
 
 
 def digest(path: Path) -> str:
@@ -232,6 +243,65 @@ class ProductionManifestTest(unittest.TestCase):
             expect=1,
         )
         self.assertIn("full_1620 must contain exactly", result.stderr)
+
+    def test_schema3_phase1_2430_exact_contract(self) -> None:
+        derived = self.write_derived(PHASE1_CASES)
+        manifest = self.root / "phase1.toml"
+        self.build(
+            derived,
+            manifest,
+            "--schema-version",
+            "3",
+            "--ensemble-kind",
+            "phase1_2430",
+            "--physics-profile",
+            "sandpc_effective_globalplateau_v1",
+            "--archive-root",
+            "/orcd/data/juanes/001/shaowen/gom_full_production/tests",
+        )
+        summary = self.run_command(
+            str(RESOLVER),
+            "--manifest",
+            str(manifest),
+            "summary",
+            "--format",
+            "json",
+        )
+        values = json.loads(summary.stdout)
+        self.assertEqual(values["GOM_PRODUCTION_SCHEMA_VERSION"], 3)
+        self.assertEqual(values["GOM_PRODUCTION_ENSEMBLE_KIND"], "phase1_2430")
+        self.assertEqual(values["GOM_PRODUCTION_CASE_COUNT"], 2430)
+        self.assertEqual(values["GOM_PRODUCTION_QOI_SCHEMA_VERSION"], 4)
+        resolved = self.run_command(
+            str(RESOLVER),
+            "--manifest",
+            str(manifest),
+            "resolve",
+            "--task",
+            "2430",
+            "--format",
+            "json",
+        )
+        self.assertEqual(
+            json.loads(resolved.stdout)["case_key"], "s06_c027_case103"
+        )
+
+    def test_schema3_rejects_incomplete_phase1_identity_set(self) -> None:
+        derived = self.write_derived(PHASE1_CASES[:-1])
+        result = self.build(
+            derived,
+            self.root / "incomplete_phase1.toml",
+            "--schema-version",
+            "3",
+            "--ensemble-kind",
+            "phase1_2430",
+            "--physics-profile",
+            "sandpc_effective_globalplateau_v1",
+            "--archive-root",
+            "/orcd/data/juanes/001/shaowen/gom_full_production/tests",
+            expect=1,
+        )
+        self.assertIn("phase1_2430 must contain exactly", result.stderr)
 
     def test_manifest_companion_detects_tampering(self) -> None:
         derived = self.write_derived(PILOT_CASES)

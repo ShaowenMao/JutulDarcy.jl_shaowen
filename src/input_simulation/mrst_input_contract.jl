@@ -411,7 +411,10 @@ function mrst_validate_geology_pairing(specific)
     )
     if link_schema == "gom_geology_pairing_v2"
         mrst_contract_require(link, ("authority",), "manifest-backed geology_link")
-        source_link_schema == "gom_step62_1620_input_manifest_v1" || error(
+        source_link_schema in (
+            "gom_step62_1620_input_manifest_v1",
+            "gom_step62_phase1_2430_input_manifest_v1",
+        ) || error(
             "Manifest-backed geology_link has an unsupported source schema."
         )
         mrst_contract_string(link["authority"], "geology_link.authority") ==

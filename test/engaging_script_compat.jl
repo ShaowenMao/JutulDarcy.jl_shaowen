@@ -88,7 +88,8 @@ using Test
     )
 
     # The effective-Pc acceptance launcher supports both its frozen legacy
-    # seven-case manifest and task positions from the schema-2 full ensemble.
+    # seven-case manifest and task positions from either immutable full
+    # production ensemble.
     # An unconditional seven-case assertion previously cancelled the entire
     # acceptance DAG before preflight.
     effective_campaign_check = read(
@@ -102,14 +103,8 @@ using Test
         "GOM_PRODUCTION_SCHEMA_VERSION\" -eq 1",
         effective_campaign_check
     )
-    @test occursin(
-        "GOM_PRODUCTION_ENSEMBLE_KIND\" = full_1620",
-        effective_campaign_check
-    )
-    @test occursin(
-        "GOM_PRODUCTION_CASE_COUNT\" -eq 1620",
-        effective_campaign_check
-    )
+    @test occursin("2:full_1620:1620", effective_campaign_check)
+    @test occursin("3:phase1_2430:2430", effective_campaign_check)
     @test occursin(
         "manifest_case_count=\$GOM_PRODUCTION_CASE_COUNT",
         effective_campaign_check

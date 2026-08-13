@@ -304,6 +304,15 @@ end
     )
     @test manifest_report["passed"]
 
+    phase1_manifest_backed = deepcopy(manifest_backed)
+    phase1_manifest_backed["geology_link"]["source_link_schema"] =
+        "gom_step62_phase1_2430_input_manifest_v1"
+    phase1_manifest_report =
+        JutulDarcy.validate_mrst_combined_specific_identity(
+            common, phase1_manifest_backed
+        )
+    @test phase1_manifest_report["passed"]
+
     wrong_manifest_authority = deepcopy(manifest_backed)
     wrong_manifest_authority["geology_link"]["authority"] = "unvalidated"
     @test_throws ErrorException JutulDarcy.validate_mrst_combined_specific_identity(

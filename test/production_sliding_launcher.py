@@ -32,6 +32,10 @@ def shell_path(path: Path | str) -> str:
 
 
 class ProductionSlidingLauncherTest(unittest.TestCase):
+    schema_version = 2
+    ensemble_kind = "full_1620"
+    case_count = 1620
+
     @classmethod
     def setUpClass(cls) -> None:
         for command in ("bash", "git", "python3"):
@@ -129,9 +133,9 @@ class ProductionSlidingLauncherTest(unittest.TestCase):
             "commit=subprocess.check_output(['git','-C',str(repo),'rev-parse','HEAD'],text=True).strip()\n"
             "sha=hashlib.sha256(manifest.read_bytes()).hexdigest()\n"
             "values={\n"
-            "'GOM_PRODUCTION_SCHEMA_VERSION':'2',\n"
-            "'GOM_PRODUCTION_ENSEMBLE_KIND':'full_1620',\n"
-            "'GOM_PRODUCTION_CASE_COUNT':'1620',\n"
+            f"'GOM_PRODUCTION_SCHEMA_VERSION':'{self.schema_version}',\n"
+            f"'GOM_PRODUCTION_ENSEMBLE_KIND':'{self.ensemble_kind}',\n"
+            f"'GOM_PRODUCTION_CASE_COUNT':'{self.case_count}',\n"
             "'GOM_PRODUCTION_ARCHIVE_SHARD_SIZE':'50',\n"
             "'GOM_PRODUCTION_JUTULDARCY_COMMIT':commit,\n"
             f"'GOM_PRODUCTION_ARCHIVE_ROOT':{shell_path(self.archive)!r},\n"
@@ -156,7 +160,7 @@ class ProductionSlidingLauncherTest(unittest.TestCase):
             "set -euo pipefail\n"
             "mkdir -p \"$GOM_GRID_ROOT/submissions\"\n"
             "start=${GOM_PRODUCTION_SELECTION_START:-1}\n"
-            "end=${GOM_PRODUCTION_SELECTION_END:-1620}\n"
+            f"end=${{GOM_PRODUCTION_SELECTION_END:-{self.case_count}}}\n"
             "finalizer=$((900000 + end))\n"
             "receipt=\"$GOM_GRID_ROOT/submissions/${GOM_PRODUCTION_SUBMISSION_ID}.txt\"\n"
             "printf '%s\\n' \\\n"
@@ -363,6 +367,14 @@ class ProductionSlidingLauncherTest(unittest.TestCase):
         )
         self.assertIn("requires one dependency-gated seed lane", result.stderr)
         self.assertEqual(self.read_sbatch_calls(), [])
+
+
+class ProductionSlidingPhase1LauncherTest(ProductionSlidingLauncherTest):
+    """Run the same restart/idempotence checks for the 2,430-case contract."""
+
+    schema_version = 3
+    ensemble_kind = "phase1_2430"
+    case_count = 2430
 
 
 if __name__ == "__main__":

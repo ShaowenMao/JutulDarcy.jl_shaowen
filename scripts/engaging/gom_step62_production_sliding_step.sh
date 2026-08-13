@@ -7,7 +7,7 @@ umask 027
 : "${GOM_PRODUCTION_SLIDING_WORKFLOW_REPO:?Set the workflow checkout.}"
 : "${GOM_PRODUCTION_SLIDING_WORKFLOW_COMMIT:?Set the workflow commit.}"
 : "${GOM_PRODUCTION_SIM_REPO:?Set the immutable simulation checkout.}"
-: "${GOM_PRODUCTION_MANIFEST:?Set the schema-2 campaign manifest.}"
+: "${GOM_PRODUCTION_MANIFEST:?Set the schema-2/3 campaign manifest.}"
 : "${GOM_PRODUCTION_SLIDING_ID:?Set the sliding campaign ID.}"
 : "${GOM_PRODUCTION_SLIDING_LANE_ID:?Set the lane ID.}"
 
@@ -65,9 +65,15 @@ done
 manifest_summary="$($production_python "$resolver" \
     --manifest "$campaign_manifest" summary --format shell)"
 eval "$manifest_summary"
-test "$GOM_PRODUCTION_SCHEMA_VERSION" -eq 2
-test "$GOM_PRODUCTION_ENSEMBLE_KIND" = full_1620
-test "$GOM_PRODUCTION_CASE_COUNT" -eq 1620
+campaign_identity="$GOM_PRODUCTION_SCHEMA_VERSION:$GOM_PRODUCTION_ENSEMBLE_KIND:$GOM_PRODUCTION_CASE_COUNT"
+case "$campaign_identity" in
+    2:full_1620:1620|3:phase1_2430:2430) ;;
+    *)
+        echo "Sliding production supports only full_1620/schema-2 or" \
+            "phase1_2430/schema-3." >&2
+        exit 1
+        ;;
+esac
 test "$GOM_PRODUCTION_ARCHIVE_SHARD_SIZE" -eq 50
 test "$GOM_PRODUCTION_JUTULDARCY_COMMIT" = \
     "$(git -C "$simulation_repo" rev-parse HEAD)"
@@ -199,11 +205,21 @@ run_ensemble_launcher() {
     if test "$selection_start" -eq 1 && \
        test "$selection_end" -eq "$GOM_PRODUCTION_CASE_COUNT"; then
         unset GOM_PRODUCTION_SELECTION_START GOM_PRODUCTION_SELECTION_END
-        export GOM_PRODUCTION_CONFIRM_FULL_1620=YES
+        case "$GOM_PRODUCTION_ENSEMBLE_KIND" in
+            full_1620)
+                export GOM_PRODUCTION_CONFIRM_FULL_1620=YES
+                unset GOM_PRODUCTION_CONFIRM_PHASE1_2430
+                ;;
+            phase1_2430)
+                export GOM_PRODUCTION_CONFIRM_PHASE1_2430=YES
+                unset GOM_PRODUCTION_CONFIRM_FULL_1620
+                ;;
+        esac
     else
         export GOM_PRODUCTION_SELECTION_START="$selection_start"
         export GOM_PRODUCTION_SELECTION_END="$selection_end"
         unset GOM_PRODUCTION_CONFIRM_FULL_1620
+        unset GOM_PRODUCTION_CONFIRM_PHASE1_2430
     fi
     bash "$launcher"
 }

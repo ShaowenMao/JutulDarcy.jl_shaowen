@@ -15,7 +15,7 @@ import tomllib
 from typing import Any
 
 
-SUPPORTED_SCHEMA_VERSIONS = (1, 2)
+SUPPORTED_SCHEMA_VERSIONS = (1, 2, 3)
 CANONICAL_CASES = (
     ("s05_c012_case01", "s05_c012", 1),
     ("s05_c012_case03", "s05_c012", 3),
@@ -32,6 +32,14 @@ FULL_ENSEMBLE_CASE_KEYS = tuple(
     for geology in range(1, 28)
     for realization in range(1, 11)
 )
+PHASE1_CASE_IDS = tuple(range(1, 13)) + (101, 102, 103)
+PHASE1_ENSEMBLE_CASE_KEYS = tuple(
+    f"s{scenario:02d}_c{geology:03d}_case{realization:02d}"
+    for scenario in range(1, 7)
+    for geology in range(1, 28)
+    for realization in PHASE1_CASE_IDS
+)
+FULL_CAMPAIGN_ENSEMBLES = ("full_1620", "phase1_2430")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 GIT_COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 GEOLOGY_ID_RE = re.compile(r"^s(?P<scenario>\d{2})_c(?P<geology>\d{3})$")
@@ -154,7 +162,7 @@ def validate_archive_root(value: str, ensemble_kind: str, schema: int) -> str:
     allowed_roots = (LEGACY_ARCHIVE_ROOT, PRODUCTION_ARCHIVE_ROOT)
     if schema == 1:
         allowed_roots = (LEGACY_ARCHIVE_ROOT,)
-    if ensemble_kind == "full_1620":
+    if ensemble_kind in FULL_CAMPAIGN_ENSEMBLES:
         allowed_roots = (PRODUCTION_ARCHIVE_ROOT,)
     if not any(
         archive_root == root or root in archive_root.parents
@@ -165,14 +173,23 @@ def validate_archive_root(value: str, ensemble_kind: str, schema: int) -> str:
     return str(archive_root)
 
 
-def validate_schema2_case_identity(
-    case_key: str, geology_id: str, realization_id: int
+def validate_case_identity(
+    case_key: str,
+    geology_id: str,
+    realization_id: int,
+    ensemble_kind: str,
 ) -> tuple[int, int, int]:
     match = GEOLOGY_ID_RE.fullmatch(geology_id)
     if match is None:
         raise ManifestError(f"invalid geology_id: {geology_id!r}")
-    if not 1 <= realization_id <= 10:
-        raise ManifestError(f"{case_key} realization_id must be in 1:10")
+    allowed_ids = PHASE1_CASE_IDS if ensemble_kind == "phase1_2430" else range(1, 11)
+    if realization_id not in allowed_ids:
+        allowed_text = (
+            "1:12,101:103" if ensemble_kind == "phase1_2430" else "1:10"
+        )
+        raise ManifestError(
+            f"{case_key} realization_id must be in {allowed_text}"
+        )
     expected_key = f"{geology_id}_case{realization_id:02d}"
     if case_key != expected_key:
         raise ManifestError(
@@ -192,6 +209,7 @@ def normalize_workflow(
         return {
             "physics_profile": "legacy_fault_plateau_npctheta30",
             "qoi_mode": "off",
+            "qoi_schema_version": 3,
             "retain_years": [25, 50, 100, 1000],
             "rolling_checkpoints": 2,
             "archive_shard_size": case_count,
@@ -200,24 +218,35 @@ def normalize_workflow(
         }
     workflow = data.get("workflow")
     if not isinstance(workflow, dict):
-        raise ManifestError("[workflow] table is required for schema 2")
+        raise ManifestError("[workflow] table is required for schema 2 or 3")
     physics_profile = require_string(workflow, "physics_profile")
     if physics_profile not in (
         "legacy_fault_plateau_npctheta30",
         "sandpc_effective_globalplateau_v1",
     ):
         raise ManifestError("workflow.physics_profile is not supported")
-    if ensemble_kind == "full_1620" and physics_profile != (
+    if ensemble_kind in FULL_CAMPAIGN_ENSEMBLES and physics_profile != (
         "sandpc_effective_globalplateau_v1"
     ):
         raise ManifestError(
-            "full_1620 requires sandpc_effective_globalplateau_v1"
+            f"{ensemble_kind} requires sandpc_effective_globalplateau_v1"
         )
     qoi_mode = require_string(workflow, "qoi_mode")
     if qoi_mode not in ("off", "auto", "required"):
         raise ManifestError("workflow.qoi_mode must be off, auto, or required")
-    if ensemble_kind == "full_1620" and qoi_mode != "required":
-        raise ManifestError("full_1620 requires workflow.qoi_mode='required'")
+    if ensemble_kind in FULL_CAMPAIGN_ENSEMBLES and qoi_mode != "required":
+        raise ManifestError(
+            f"{ensemble_kind} requires workflow.qoi_mode='required'"
+        )
+    qoi_schema_version = workflow.get(
+        "qoi_schema_version", 4 if qoi_mode == "required" else 3
+    )
+    if not isinstance(qoi_schema_version, int) or isinstance(
+        qoi_schema_version, bool
+    ):
+        raise ManifestError("workflow.qoi_schema_version must be an integer")
+    if schema == 3 and qoi_schema_version != 4:
+        raise ManifestError("schema 3 requires workflow.qoi_schema_version=4")
     retain_years = workflow.get("retain_years")
     if retain_years != [25, 50, 100, 1000]:
         raise ManifestError(
@@ -235,13 +264,14 @@ def normalize_workflow(
         )
     compact = require_boolean(workflow, "archive_compact_atomic_rows")
     remove = require_boolean(workflow, "archive_remove_verified_scratch")
-    if ensemble_kind == "full_1620" and (not compact or not remove):
+    if ensemble_kind in FULL_CAMPAIGN_ENSEMBLES and (not compact or not remove):
         raise ManifestError(
-            "full_1620 requires row compaction and verified scratch removal"
+            f"{ensemble_kind} requires row compaction and verified scratch removal"
         )
     return {
         "physics_profile": physics_profile,
         "qoi_mode": qoi_mode,
+        "qoi_schema_version": qoi_schema_version,
         "retain_years": retain_years,
         "rolling_checkpoints": rolling_checkpoints,
         "archive_shard_size": shard_size,
@@ -280,11 +310,17 @@ def load_and_validate(
     ensemble_kind = "pilot_7"
     declared_case_count: int | None = None
     declared_order_sha256: str | None = None
-    if schema == 2:
+    if schema >= 2:
         ensemble_kind = require_string(data, "ensemble_kind")
-        if ensemble_kind not in ("pilot_7", "subset", "full_1620"):
+        supported_ensembles = (
+            ("phase1_2430",)
+            if schema == 3
+            else ("pilot_7", "subset", "full_1620")
+        )
+        if ensemble_kind not in supported_ensembles:
             raise ManifestError(
-                "ensemble_kind must be pilot_7, subset, or full_1620"
+                f"schema {schema} ensemble_kind must be one of "
+                f"{supported_ensembles}"
             )
         declared_case_count = require_positive_int(data, "case_count")
         declared_order_sha256 = require_sha256(data, "case_order_sha256")
@@ -346,8 +382,8 @@ def load_and_validate(
                 )
         else:
             identity_order.append(
-                validate_schema2_case_identity(
-                    case_key, geology_id, realization_id
+                validate_case_identity(
+                    case_key, geology_id, realization_id, ensemble_kind
                 )
             )
         specific_path = require_exact_file(
@@ -384,7 +420,7 @@ def load_and_validate(
         raise ManifestError("case keys are not unique")
     if schema == 1 and tuple(observed_keys) != CANONICAL_CASE_KEYS:
         raise ManifestError("case keys/order do not match the canonical pilot")
-    if schema == 2:
+    if schema >= 2:
         if ensemble_kind == "pilot_7" and tuple(observed_keys) != (
             CANONICAL_CASE_KEYS
         ):
@@ -398,6 +434,12 @@ def load_and_validate(
         ):
             raise ManifestError(
                 "full_1620 does not contain the exact canonical 1,620 cases"
+            )
+        if ensemble_kind == "phase1_2430" and tuple(observed_keys) != (
+            PHASE1_ENSEMBLE_CASE_KEYS
+        ):
+            raise ManifestError(
+                "phase1_2430 does not contain the exact canonical 2,430 cases"
             )
         observed_order_sha256 = case_order_sha256(observed_keys)
         if observed_order_sha256 != declared_order_sha256:
@@ -487,6 +529,7 @@ def base_shell_values(manifest: dict[str, Any]) -> dict[str, Any]:
         "GOM_PRODUCTION_CASE_COUNT": case_count,
         "GOM_PRODUCTION_PHYSICS_PROFILE": workflow["physics_profile"],
         "GOM_PRODUCTION_QOI_MODE": workflow["qoi_mode"],
+        "GOM_PRODUCTION_QOI_SCHEMA_VERSION": workflow["qoi_schema_version"],
         "GOM_PRODUCTION_RETAIN_YEARS": ",".join(
             str(year) for year in workflow["retain_years"]
         ),

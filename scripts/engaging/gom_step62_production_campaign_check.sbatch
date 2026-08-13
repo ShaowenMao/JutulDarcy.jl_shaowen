@@ -70,6 +70,7 @@ printf '%s\n' \
     "case_count=$GOM_PRODUCTION_CASE_COUNT" \
     "case_order_sha256=$GOM_PRODUCTION_CASE_ORDER_SHA256" \
     "qoi_mode=$GOM_PRODUCTION_QOI_MODE" \
+    "qoi_schema_version=$GOM_PRODUCTION_QOI_SCHEMA_VERSION" \
     "archive_shard_size=$GOM_PRODUCTION_ARCHIVE_SHARD_SIZE" \
     "exact_paths=true" \
     "wildcards=false" \

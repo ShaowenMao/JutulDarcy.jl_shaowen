@@ -32,6 +32,7 @@ gom_production_resolve_task() {
     export GOM_PRODUCTION_CASE_COUNT
     export GOM_PRODUCTION_PHYSICS_PROFILE
     export GOM_PRODUCTION_QOI_MODE
+    export GOM_PRODUCTION_QOI_SCHEMA_VERSION
     export GOM_PRODUCTION_RETAIN_YEARS
     export GOM_PRODUCTION_ROLLING_CHECKPOINTS
     export GOM_PRODUCTION_ARCHIVE_SHARD_SIZE
@@ -128,12 +129,22 @@ gom_production_export_locked_physics() {
 
     export PRODUCTION_OUTPUT_MODE=true
     # These settings come from the checksum-pinned campaign manifest. Schema
-    # 1 manifests resolve to their legacy defaults; schema 2 locks them
-    # explicitly and full_1620 requires QoI mode "required".
+    # Schema 1 manifests resolve to legacy defaults, schema 2 preserves the
+    # original production contract, and schema 3 explicitly requires the QoI
+    # schema-4 extension for the phase1_2430 campaign.
     export PRODUCTION_QOI_MODE="$GOM_PRODUCTION_QOI_MODE"
-    if test "$PRODUCTION_QOI_MODE" = required; then
+    if test "$GOM_PRODUCTION_QOI_SCHEMA_VERSION" -eq 4; then
+        test "$PRODUCTION_QOI_MODE" = required || {
+            echo "QoI schema 4 requires production QoI mode required." >&2
+            return 1
+        }
         export PRODUCTION_QOI_SCHEMA4_MODE=required
     else
+        test "$GOM_PRODUCTION_QOI_SCHEMA_VERSION" -eq 3 || {
+            echo "Unsupported effective QoI schema:" \
+                "$GOM_PRODUCTION_QOI_SCHEMA_VERSION" >&2
+            return 1
+        }
         export PRODUCTION_QOI_SCHEMA4_MODE=off
     fi
     export PRODUCTION_RETAIN_YEARS="$GOM_PRODUCTION_RETAIN_YEARS"
@@ -200,6 +211,7 @@ gom_production_write_metadata() {
         "well_volume_fraction=1e-3" \
         "production_output_mode=true" \
         "production_qoi_mode=$PRODUCTION_QOI_MODE" \
+        "production_qoi_schema_version=$GOM_PRODUCTION_QOI_SCHEMA_VERSION" \
         "production_qoi_schema4_mode=$PRODUCTION_QOI_SCHEMA4_MODE" \
         "production_retain_years=$PRODUCTION_RETAIN_YEARS" \
         "production_rolling_checkpoints=$PRODUCTION_ROLLING_CHECKPOINTS" \

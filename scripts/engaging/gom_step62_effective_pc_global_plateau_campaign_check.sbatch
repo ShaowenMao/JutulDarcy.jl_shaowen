@@ -55,16 +55,30 @@ while IFS= read -r task; do
         test "$GOM_PRODUCTION_CASE_COUNT" -eq 7
         expected_case_key="${legacy_expected_case_keys[$task]}"
     else
-        # Schema-2 acceptance tasks are positions in the canonical complete
-        # 6 x 27 x 10 ensemble, not positions in the legacy seven-case pilot.
-        test "$GOM_PRODUCTION_SCHEMA_VERSION" -eq 2
-        test "$GOM_PRODUCTION_ENSEMBLE_KIND" = full_1620
-        test "$GOM_PRODUCTION_CASE_COUNT" -eq 1620
+        # Production acceptance tasks are canonical manifest positions, not
+        # positions in the legacy seven-case pilot.
         zero_based_task=$((task - 1))
-        scenario=$((zero_based_task / 270 + 1))
-        within_scenario=$((zero_based_task % 270))
-        geology=$((within_scenario / 10 + 1))
-        realization=$((within_scenario % 10 + 1))
+        campaign_identity="$GOM_PRODUCTION_SCHEMA_VERSION:$GOM_PRODUCTION_ENSEMBLE_KIND:$GOM_PRODUCTION_CASE_COUNT"
+        case "$campaign_identity" in
+            2:full_1620:1620)
+                scenario=$((zero_based_task / 270 + 1))
+                within_scenario=$((zero_based_task % 270))
+                geology=$((within_scenario / 10 + 1))
+                realization=$((within_scenario % 10 + 1))
+                ;;
+            3:phase1_2430:2430)
+                phase1_case_ids=(1 2 3 4 5 6 7 8 9 10 11 12 101 102 103)
+                scenario=$((zero_based_task / 405 + 1))
+                within_scenario=$((zero_based_task % 405))
+                geology=$((within_scenario / 15 + 1))
+                realization="${phase1_case_ids[$((within_scenario % 15))]}"
+                test "$GOM_PRODUCTION_QOI_SCHEMA_VERSION" -eq 4
+                ;;
+            *)
+                echo "Unsupported production campaign identity." >&2
+                exit 1
+                ;;
+        esac
         printf -v expected_case_key 's%02d_c%03d_case%02d' \
             "$scenario" "$geology" "$realization"
     fi

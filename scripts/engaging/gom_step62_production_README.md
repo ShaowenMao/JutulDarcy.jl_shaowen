@@ -307,6 +307,10 @@ mixed schemas.
 
 ### Production QoI schema-4 extension
 
+The revised 2,430-case phase-1 campaign contract and its fail-closed launch
+gates are documented in
+`docs/gom_step62_phase1_2430_production.md`.
+
 When `PRODUCTION_QOI_MODE=required`, the production launcher also sets
 `PRODUCTION_QOI_SCHEMA4_MODE=required`. The extension writes to the separate
 `production_output/qoi_schema4/` directory and does not change any schema-3

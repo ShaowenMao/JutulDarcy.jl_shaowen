@@ -74,10 +74,10 @@ gom_effective_pc_task_is_selected() {
 }
 
 gom_effective_pc_validate_campaign() {
-    if test "${GOM_PRODUCTION_SCHEMA_VERSION:-1}" -eq 2; then
+    if test "${GOM_PRODUCTION_SCHEMA_VERSION:-1}" -ge 2; then
         test "$GOM_PRODUCTION_PHYSICS_PROFILE" = \
             "$GOM_EFFECTIVE_PC_PHYSICS_PROFILE" || {
-            echo "Schema-2 campaign selected the wrong physics profile:" \
+            echo "Production campaign selected the wrong physics profile:" \
                 "$GOM_PRODUCTION_PHYSICS_PROFILE" >&2
             return 1
         }
@@ -97,7 +97,7 @@ gom_effective_pc_validate_campaign() {
 gom_effective_pc_resolve_task() {
     gom_production_resolve_task
     gom_effective_pc_validate_campaign
-    if test "$GOM_PRODUCTION_SCHEMA_VERSION" -eq 2; then
+    if test "$GOM_PRODUCTION_SCHEMA_VERSION" -ge 2; then
         return 0
     fi
     case "$GOM_PRODUCTION_TASK" in
@@ -114,7 +114,7 @@ gom_effective_pc_resolve_task() {
 gom_effective_pc_export_locked_physics() {
     # Legacy schema-1 effective-Pc campaigns predate a manifest-level profile
     # field. Promote the specialized workflow identity before importing the
-    # shared settings; schema-2 manifests already resolve to this same value.
+    # shared settings; schema-2/3 manifests already resolve to this same value.
     export GOM_PRODUCTION_PHYSICS_PROFILE="$GOM_EFFECTIVE_PC_PHYSICS_PROFILE"
     gom_production_export_locked_physics
     # Override the accepted PREDICT-only treatment after importing the
