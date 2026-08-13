@@ -46,6 +46,7 @@ job_id=$job_id
 run_id=$GOM_EQUILIBRIUM_RUN_ID
 array_spec=$GOM_EQUILIBRIUM_ARRAY_SPEC
 report_years=${GOM_EQUILIBRIUM_REPORT_YEARS:-default}
+initial_pressure_mode=${GOM_EQUILIBRIUM_PRESSURE_MODE:-imported}
 campaign_manifest=$GOM_PRODUCTION_MANIFEST
 campaign_manifest_sha256=$(sha256sum "$GOM_PRODUCTION_MANIFEST" | awk '{print $1}')
 production_repo=$JUTULDARCY_COMBINED_REPO

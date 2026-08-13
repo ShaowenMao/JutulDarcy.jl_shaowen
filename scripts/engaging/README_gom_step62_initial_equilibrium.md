@@ -4,6 +4,15 @@ This isolated workflow tests whether the imported all-brine initial state is a
 discrete equilibrium for the exact JutulDarcy production model. It does not
 modify production inputs, active jobs, restart files, or archived results.
 
+The control has two explicit pressure modes:
+
+- `imported` tests the state produced by the current MRST importer;
+- `raw_liquid_reference` restores the untouched common-MAT pressure as the
+  liquid reference-phase pressure and constructs a fresh simulator so all
+  dependent state variables are recomputed consistently.
+
+Set the mode with `GOM_EQUILIBRIUM_PRESSURE_MODE`. The default is `imported`.
+
 ## Scientific test
 
 For each selected case, the workflow reconstructs the checksum-pinned split MAT
@@ -35,8 +44,10 @@ construction and simulation through Slurm.
    `gom_step62_initial_equilibrium_selection.sbatch`.
 2. Submit one short smoke control, for example with report years
    `1/365.25,30/365.25,1`.
-3. Inspect the imported-pressure, face-potential, and state-evolution tables.
-4. Submit full logarithmic controls for a low-permeability case, a
+3. Run the same task and report times with `raw_liquid_reference` and a new run
+   ID for an apple-to-apple comparison.
+4. Inspect the imported-pressure, face-potential, and state-evolution tables.
+5. Submit full logarithmic controls for a low-permeability case, a
    high-permeability case, and a case with heterogeneous entry pressure.
 
 The default full report times are 1 day, 30 days, 1 year, 10 years, 100 years,

@@ -6,6 +6,10 @@ include(joinpath(@__DIR__, "gom_step62_initial_equilibrium_common.jl"))
     @test gom_equilibrium_parse_report_years("0.1,1,10") == [0.1, 1.0, 10.0]
     @test_throws ErrorException gom_equilibrium_parse_report_years("1,1")
     @test_throws ErrorException gom_equilibrium_parse_report_years("1,0")
+    @test gom_equilibrium_parse_pressure_mode(" imported ") == "imported"
+    @test gom_equilibrium_parse_pressure_mode("RAW_LIQUID_REFERENCE") ==
+        "raw_liquid_reference"
+    @test_throws ErrorException gom_equilibrium_parse_pressure_mode("corrected")
     @test gom_equilibrium_parse_task_spec("all", [3, 1, 2]) == [1, 2, 3]
     @test gom_equilibrium_parse_task_spec("1,3-4", 1:5) == [1, 3, 4]
     @test_throws ErrorException gom_equilibrium_parse_task_spec("1,6", 1:5)
@@ -31,6 +35,31 @@ include(joinpath(@__DIR__, "gom_step62_initial_equilibrium_common.jl"))
     @test regions.fault_cells == collect(2:7)
     @test count(regions.fault_mask) == 6
     @test regions.regions[3] == ("W1" => [2])
+
+    imported_state0 = Dict(
+        :Reservoir => Dict(:Pressure => [11.0, 12.0], :Other => [3.0, 4.0]),
+        :Facility => Dict(:Control => [1])
+    )
+    imported_copy = gom_equilibrium_primary_state(
+        imported_state0,
+        [9.0, 10.0],
+        "imported"
+    )
+    raw_copy = gom_equilibrium_primary_state(
+        imported_state0,
+        [9.0, 10.0],
+        "raw_liquid_reference"
+    )
+    @test imported_copy !== imported_state0
+    @test imported_copy[:Reservoir][:Pressure] == [11.0, 12.0]
+    @test raw_copy[:Reservoir][:Pressure] == [9.0, 10.0]
+    @test raw_copy[:Reservoir][:Other] == [3.0, 4.0]
+    @test imported_state0[:Reservoir][:Pressure] == [11.0, 12.0]
+    @test_throws ErrorException gom_equilibrium_primary_state(
+        imported_state0,
+        [9.0],
+        "raw_liquid_reference"
+    )
 
     mktempdir() do directory
         source = joinpath(directory, "source.txt")

@@ -29,6 +29,36 @@ function gom_equilibrium_parse_report_years(text::AbstractString)
     return values
 end
 
+"""Parse the initial reference-pressure mode used by an equilibrium control."""
+function gom_equilibrium_parse_pressure_mode(text::AbstractString)
+    mode = lowercase(strip(text))
+    mode in ("imported", "raw_liquid_reference") || error(
+        "Unsupported equilibrium pressure mode '$text'. Use imported or " *
+        "raw_liquid_reference."
+    )
+    return mode
+end
+
+"""Copy primary state and optionally restore the untouched liquid pressure."""
+function gom_equilibrium_primary_state(
+        imported_state0,
+        raw_liquid_pressure::AbstractVector,
+        pressure_mode::AbstractString
+    )
+    mode = gom_equilibrium_parse_pressure_mode(pressure_mode)
+    state0 = deepcopy(imported_state0)
+    mode == "imported" && return state0
+
+    reservoir = haskey(state0, :Reservoir) ? state0[:Reservoir] : state0
+    haskey(reservoir, :Pressure) ||
+        error("Initial reservoir state has no Pressure primary variable.")
+    length(reservoir[:Pressure]) == length(raw_liquid_pressure) || error(
+        "Raw liquid pressure and initial Pressure have different lengths."
+    )
+    reservoir[:Pressure] = Float64.(copy(raw_liquid_pressure))
+    return state0
+end
+
 """Parse `all`, a comma list, or inclusive ranges such as `1,4-6`."""
 function gom_equilibrium_parse_task_spec(
         text::AbstractString,

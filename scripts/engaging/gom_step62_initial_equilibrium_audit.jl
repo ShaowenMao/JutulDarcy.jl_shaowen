@@ -33,6 +33,11 @@ report_years_text = get(
 report_years = gom_equilibrium_parse_report_years(report_years_text)
 report_seconds = report_years .* GOM_EQUILIBRIUM_SECONDS_PER_YEAR
 report_steps = diff(vcat(0.0, report_seconds))
+pressure_mode = gom_equilibrium_parse_pressure_mode(get(
+    ENV,
+    "GOM_EQUILIBRIUM_PRESSURE_MODE",
+    "imported"
+))
 
 mkpath(result_dir)
 isfile(joinpath(result_dir, "COMPLETE")) && error(
@@ -137,7 +142,7 @@ setup = simulate_mrst_case(
 )
 
 case = setup.case
-simulator = setup.sim
+imported_simulator = setup.sim
 config = setup.config
 mrst = setup.mrst
 model = case.model
@@ -153,6 +158,39 @@ phase_indices = JutulDarcy.phase_indices(reservoir_model.system)
 liquid_phase = phase_indices.l
 vapor_phase = phase_indices.v
 reference_phase = JutulDarcy.get_reference_phase_index(reservoir_model.system)
+pressure_mode == "raw_liquid_reference" && reference_phase != liquid_phase &&
+    error("Raw-liquid pressure mode requires liquid to be the reference phase.")
+
+imported_storage = Jutul.get_simulator_storage(imported_simulator)
+imported_full_state = imported_storage[:Reservoir].state0
+imported_pressure = Float64.(vec(imported_full_state[:Pressure]))
+length(raw_common_pressure) == cell_count ||
+    error("Raw common-MAT initial pressure has the wrong cell count.")
+assembled_state0_pressure = Float64.(vec(mrst["state0"]["pressure"]))
+length(assembled_state0_pressure) == cell_count ||
+    error("Assembled MRST initial pressure has the wrong cell count.")
+imported_pc = gom_equilibrium_capillary_pressure(imported_full_state, cell_count)
+import_offset = imported_pressure .- raw_common_pressure
+assembled_offset = assembled_state0_pressure .- raw_common_pressure
+imported_minus_assembled = imported_pressure .- assembled_state0_pressure
+offset_minus_pc = import_offset .- imported_pc
+
+if pressure_mode == "imported"
+    simulation_state0 = case.state0
+    simulator = imported_simulator
+else
+    simulation_state0 = gom_equilibrium_primary_state(
+        case.state0,
+        raw_common_pressure,
+        pressure_mode
+    )
+    simulator = Jutul.Simulator(
+        model;
+        state0 = deepcopy(simulation_state0),
+        parameters = deepcopy(case.parameters),
+        executor = Jutul.simulator_executor(imported_simulator)
+    )
+end
 
 storage = Jutul.get_simulator_storage(simulator)
 initial_full_state = storage[:Reservoir].state0
@@ -160,16 +198,9 @@ initial_pressure = Float64.(vec(initial_full_state[:Pressure]))
 initial_saturation = Float64.(initial_full_state[:Saturations])
 initial_rs = Float64.(vec(initial_full_state[:Rs]))
 initial_total_masses = Float64.(initial_full_state[:TotalMasses])
-length(raw_common_pressure) == cell_count ||
-    error("Raw common-MAT initial pressure has the wrong cell count.")
-assembled_state0_pressure = Float64.(vec(mrst["state0"]["pressure"]))
-length(assembled_state0_pressure) == cell_count ||
-    error("Assembled MRST initial pressure has the wrong cell count.")
 initial_pc = gom_equilibrium_capillary_pressure(initial_full_state, cell_count)
-import_offset = initial_pressure .- raw_common_pressure
-assembled_offset = assembled_state0_pressure .- raw_common_pressure
-imported_minus_assembled = initial_pressure .- assembled_state0_pressure
-offset_minus_pc = import_offset .- initial_pc
+tested_minus_raw = initial_pressure .- raw_common_pressure
+tested_minus_imported = initial_pressure .- imported_pressure
 
 initial_mass_by_region = Dict{String, Any}(
     label => region_masses(initial_total_masses, selection)
@@ -185,6 +216,9 @@ for (label, selection) in regions.regions
         gom_equilibrium_region_view(assembled_state0_pressure, selection)
     )
     imported_stats = gom_equilibrium_moments(
+        gom_equilibrium_region_view(imported_pressure, selection)
+    )
+    tested_stats = gom_equilibrium_moments(
         gom_equilibrium_region_view(initial_pressure, selection)
     )
     offset_stats = gom_equilibrium_moments(
@@ -197,10 +231,16 @@ for (label, selection) in regions.regions
         gom_equilibrium_region_view(imported_minus_assembled, selection)
     )
     pc_stats = gom_equilibrium_moments(
-        gom_equilibrium_region_view(initial_pc, selection)
+        gom_equilibrium_region_view(imported_pc, selection)
     )
     mismatch_stats = gom_equilibrium_moments(
         gom_equilibrium_region_view(offset_minus_pc, selection)
+    )
+    tested_raw_stats = gom_equilibrium_moments(
+        gom_equilibrium_region_view(tested_minus_raw, selection)
+    )
+    tested_imported_stats = gom_equilibrium_moments(
+        gom_equilibrium_region_view(tested_minus_imported, selection)
     )
     push!(import_rows, Dict{Symbol, Any}(
         :region => label,
@@ -211,6 +251,8 @@ for (label, selection) in regions.regions
         :assembled_pressure_max_pa => assembled_stats.maximum,
         :imported_pressure_min_pa => imported_stats.minimum,
         :imported_pressure_max_pa => imported_stats.maximum,
+        :tested_pressure_min_pa => tested_stats.minimum,
+        :tested_pressure_max_pa => tested_stats.maximum,
         :assembled_offset_max_abs_pa => assembled_offset_stats.max_abs,
         :import_offset_mean_pa => offset_stats.mean,
         :import_offset_rms_pa => offset_stats.rms,
@@ -220,7 +262,9 @@ for (label, selection) in regions.regions
         :capillary_pressure_mean_pa => pc_stats.mean,
         :capillary_pressure_rms_pa => pc_stats.rms,
         :capillary_pressure_max_abs_pa => pc_stats.max_abs,
-        :offset_minus_pc_max_abs_pa => mismatch_stats.max_abs
+        :offset_minus_pc_max_abs_pa => mismatch_stats.max_abs,
+        :tested_minus_raw_max_abs_pa => tested_raw_stats.max_abs,
+        :tested_minus_imported_max_abs_pa => tested_imported_stats.max_abs
     ))
 end
 
@@ -233,6 +277,8 @@ import_columns = [
     :assembled_pressure_max_pa,
     :imported_pressure_min_pa,
     :imported_pressure_max_pa,
+    :tested_pressure_min_pa,
+    :tested_pressure_max_pa,
     :assembled_offset_max_abs_pa,
     :import_offset_mean_pa,
     :import_offset_rms_pa,
@@ -241,7 +287,9 @@ import_columns = [
     :capillary_pressure_mean_pa,
     :capillary_pressure_rms_pa,
     :capillary_pressure_max_abs_pa,
-    :offset_minus_pc_max_abs_pa
+    :offset_minus_pc_max_abs_pa,
+    :tested_minus_raw_max_abs_pa,
+    :tested_minus_imported_max_abs_pa
 ]
 gom_equilibrium_write_table(
     joinpath(result_dir, "initial_import_pressure_audit.tsv"),
@@ -343,11 +391,12 @@ config[:report_level] = 1
 config[:output_substates] = false
 
 println(
-    "Starting zero-injection control for $expected_case_key at report years ",
+    "Starting $pressure_mode zero-injection control for $expected_case_key " *
+    "at report years ",
     join(report_years, ", ")
 )
 elapsed_seconds = @elapsed simulation_result = Jutul.simulate(
-    case.state0,
+    simulation_state0,
     simulator,
     report_steps;
     parameters = case.parameters,
@@ -465,6 +514,7 @@ summary_pairs = [
     "geology_hash" => lowercase(expected_geology_hash),
     "realization_id" => expected_realization_id,
     "level3_case_name" => expected_level3_case_name,
+    "initial_pressure_mode" => pressure_mode,
     "campaign_manifest_sha256" => lowercase(expected_manifest_sha256),
     "common_mat_sha256" => lowercase(expected_common_sha256),
     "specific_mat_sha256" => lowercase(expected_specific_sha256),
@@ -499,6 +549,11 @@ summary_pairs = [
         fault_import[:import_offset_max_abs_pa],
     "fault_import_offset_minus_pc_max_abs_pa" =>
         fault_import[:offset_minus_pc_max_abs_pa],
+    "tested_initial_pressure_minus_raw_max_abs_pa" =>
+        maximum(abs, tested_minus_raw),
+    "tested_initial_pressure_minus_imported_max_abs_pa" =>
+        maximum(abs, tested_minus_imported),
+    "tested_initial_capillary_pressure_max_abs_pa" => maximum(abs, initial_pc),
     "initial_head_residual_max_abs_pa" =>
         global_initial_face[:head_abs_max_pa],
     "final_head_residual_max_abs_pa" =>

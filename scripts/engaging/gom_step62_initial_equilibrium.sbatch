@@ -110,6 +110,7 @@ level3_case_name=$GOM_PRODUCTION_LEVEL3_CASE_NAME
 common_mat_sha256=$GOM_PRODUCTION_COMMON_SHA256
 specific_mat_sha256=$GOM_PRODUCTION_SPECIFIC_SHA256
 report_years=${GOM_EQUILIBRIUM_REPORT_YEARS:-default}
+initial_pressure_mode=${GOM_EQUILIBRIUM_PRESSURE_MODE:-imported}
 cpus=${SLURM_CPUS_PER_TASK:-unknown}
 memory=${SLURM_MEM_PER_NODE:-unknown}
 EOF
