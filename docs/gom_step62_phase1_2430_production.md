@@ -49,8 +49,14 @@ contract-test outputs, and writes `PASS` only after every test succeeds.
    SHA-256.
 5. Pass local tests, Engaging script compatibility, campaign validation,
    preflight, and restart smoke tests.
-6. Run a bounded official canary and validate its durable shard.
-7. Only then authorize the full campaign with
+6. Select and run the 24-case, full-schedule acceptance cohort. The cohort
+   contains four input-driven cases from each thickness scenario: a central
+   medoid, a barrier-state benchmark, a conduit-state benchmark, and the most
+   heterogeneous independent realization. These noncontiguous diagnostic
+   runs do not count as production shards.
+7. Run the official contiguous 50-case canary and validate its durable shard.
+   A passing canary is the first reusable production shard.
+8. Only then authorize the full campaign with
    `GOM_PRODUCTION_CONFIRM_PHASE1_2430=YES`.
 
 The shard-level sliding controller supports restartable production with at
