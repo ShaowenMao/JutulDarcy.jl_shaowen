@@ -13,16 +13,30 @@
 set -euo pipefail
 
 : "${JUTULDARCY_COMBINED_REPO:?Set JUTULDARCY_COMBINED_REPO.}"
+simulation_repo="${GOM_PREFLIGHT_SIMULATION_REPO:-$JUTULDARCY_COMBINED_REPO}"
+test -f "$simulation_repo/Project.toml"
+test -f "$simulation_repo/Manifest.toml"
+simulation_commit="$(git -C "$simulation_repo" rev-parse HEAD)"
+test -z "$(git -C "$simulation_repo" status --porcelain --untracked-files=no)" || {
+    echo "Preflight simulation repository tracked files must be clean." >&2
+    exit 1
+}
 source \
     "$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_effective_pc_global_plateau_common.sh"
 gom_effective_pc_resolve_task
 gom_effective_pc_export_locked_physics
 export PRODUCTION_QOI_MODE=required
 
+simulation_manifest_sha256="$(sha256sum "$simulation_repo/Manifest.toml" | awk '{print $1}')"
+test "$simulation_manifest_sha256" = "$GOM_PRODUCTION_JUTUL_MANIFEST_SHA256" || {
+    echo "Preflight simulation Manifest.toml differs from production." >&2
+    exit 1
+}
+
 gom_root="${GOM_GRID_ROOT:-$HOME/orcd/scratch/gom_grid}"
 result_root="$gom_root/results/gom_step62_effective_pc_global_plateau_preflight_job${SLURM_ARRAY_JOB_ID}"
 result_dir="$result_root/$GOM_PRODUCTION_CASE_KEY"
-script="$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_effective_pc_global_plateau_preflight.jl"
+script="$simulation_repo/scripts/engaging/gom_step62_effective_pc_global_plateau_preflight.jl"
 test ! -e "$result_dir" || {
     echo "Refusing to reuse existing preflight directory: $result_dir" >&2
     exit 1
@@ -46,11 +60,16 @@ export CASE_JULIA_THREADS="$SLURM_CPUS_PER_TASK"
 export HYPRE_THREADS="$SLURM_CPUS_PER_TASK"
 
 gom_effective_pc_write_metadata "$result_dir/RUN_METADATA.txt" preflight
+printf '%s\n' \
+    "preflight_simulation_repo=$simulation_repo" \
+    "preflight_simulation_commit=$simulation_commit" \
+    "preflight_simulation_manifest_sha256=$simulation_manifest_sha256" \
+    >> "$result_dir/RUN_METADATA.txt"
 cp -- "$GOM_PRODUCTION_MANIFEST_PATH" "$result_dir/campaign.toml"
 cp -- "$GOM_PRODUCTION_MANIFEST_COMPANION_PATH" \
     "$result_dir/campaign.toml.sha256.original"
 
-cd "$JUTULDARCY_COMBINED_REPO"
+cd "$simulation_repo"
 julia --startup-file=no --project=. "$script" \
     "$GOM_PRODUCTION_COMMON_MAT" "$GOM_PRODUCTION_SPECIFIC_MAT" \
     "$result_dir" "$GOM_PRODUCTION_CASE_KEY" "$GOM_PRODUCTION_GEOLOGY_ID" \
@@ -69,6 +88,9 @@ grep -Fxq 'explicit_predict_regions=522' "$summary"
 grep -Fxq 'drainage_saturation_regions=530' "$summary"
 grep -Fxq 'total_sgof_tables=1060' "$summary"
 grep -Fxq 'hysteresis_active=true' "$summary"
+grep -Fxq 'initial_pressure_convention=liquid_reference' "$summary"
+grep -Fxq 'initial_pressure_reference_phase=1' "$summary"
+grep -Fxq 'initial_pressure_max_abs_difference_from_common_pa=0.0' "$summary"
 grep -Fxq 'pc_mapping_schema=gom_effective_saturation_pc_v1' "$summary"
 grep -Fxq \
     'pc_mapping_method=entry_renormalized_analytic_brooks_corey' "$summary"
