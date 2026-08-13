@@ -80,7 +80,10 @@ columns = [
 if isempty(output_path)
     println(join(string.(columns), '\t'))
     for row in rows
-        println(join(gom_equilibrium_table_value(row[column]) for column in columns, '\t'))
+        println(join(
+            (gom_equilibrium_table_value(row[column]) for column in columns),
+            '\t'
+        ))
     end
 else
     gom_equilibrium_write_table(output_path, columns, rows)
