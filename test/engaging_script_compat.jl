@@ -174,6 +174,30 @@ using Test
     @test occursin("SHARD_CONTROL_VALIDATION.tsv", production_finalize)
     @test occursin("sha256sums_sha256=", shard_archive)
 
+    # The phase-1 scientific acceptance cohort is deliberately noncontiguous
+    # and diagnostic. It must be chosen without reservoir outcomes, run
+    # through the pinned production scripts, and remain separate from the
+    # reusable contiguous-shard canary.
+    acceptance_selector = read(
+        joinpath(scripts_dir, "gom_step62_phase1_2430_select_acceptance.jl"),
+        String
+    )
+    acceptance_submit = read(
+        joinpath(scripts_dir, "gom_step62_phase1_2430_acceptance_submit.sh"),
+        String
+    )
+    acceptance_finalize = read(
+        joinpath(scripts_dir, "gom_step62_phase1_2430_acceptance_finalize.sbatch"),
+        String
+    )
+    @test occursin("selection_uses_reservoir_outcomes=false", acceptance_selector)
+    @test occursin("length(selected) == 24", acceptance_selector)
+    @test occursin("--array=\"\$array_spec%24\"", acceptance_submit)
+    @test occursin("aftercorr:\$preflight_job", acceptance_submit)
+    @test occursin("aftercorr:\$full_job", acceptance_submit)
+    @test occursin("acceptance_results_count_as_production=false", acceptance_finalize)
+    @test !occursin("gom_step62_production_shard_archive.sbatch", acceptance_submit)
+
     # Engaging counts pending array elements against a per-user QOS ceiling.
     # The rolling control plane must keep the scientific checkout pinned,
     # bound each wave to two shards, and finish with the normal full-selection
