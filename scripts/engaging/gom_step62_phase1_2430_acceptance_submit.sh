@@ -22,7 +22,6 @@ test -n "$array_spec"
     sha256sum --check SHA256SUMS.txt
 )
 
-"$production_python" "$resolver" --manifest "$GOM_PRODUCTION_MANIFEST" validate
 summary="$($production_python "$resolver" --manifest "$GOM_PRODUCTION_MANIFEST" summary --format shell)"
 eval "$summary"
 test "$GOM_PRODUCTION_SCHEMA_VERSION" -eq 3
@@ -31,6 +30,22 @@ test "$GOM_PRODUCTION_CASE_COUNT" -eq 2430
 test "$GOM_PRODUCTION_PHYSICS_PROFILE" = sandpc_effective_globalplateau_v1
 grep -Fxq "campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256" \
     "$GOM_ACCEPTANCE_SELECTION_DIR/SELECTION_METADATA.txt"
+
+acceptance_id="${GOM_ACCEPTANCE_ID:-${GOM_PRODUCTION_CAMPAIGN_ID}_acceptance24_v1}"
+[[ "$acceptance_id" =~ ^[a-z0-9][a-z0-9_.-]*$ ]]
+mkdir -p "$gom_root/logs" "$gom_root/submissions" \
+    "$GOM_PRODUCTION_ARCHIVE_ROOT/acceptance_submissions"
+receipt="$GOM_PRODUCTION_ARCHIVE_ROOT/acceptance_submissions/${acceptance_id}.txt"
+test ! -e "$receipt" || {
+    echo "Acceptance submission receipt already exists: $receipt" >&2
+    exit 1
+}
+lock_file="$GOM_PRODUCTION_ARCHIVE_ROOT/acceptance_submissions/.${acceptance_id}.submit.lock"
+exec 9>"$lock_file"
+flock -n 9 || {
+    echo "Another acceptance submission is active for $acceptance_id." >&2
+    exit 1
+}
 
 observed_commit="$(git -C "$JUTULDARCY_COMBINED_REPO" rev-parse HEAD)"
 test "$observed_commit" = "$GOM_PRODUCTION_JUTULDARCY_COMMIT" || {
@@ -47,25 +62,50 @@ test -z "$(git -C "$GOM_ACCEPTANCE_WORKFLOW_REPO" status --porcelain)" || {
     exit 1
 }
 
-selected_count=0
-while IFS=$'\t' read -r task case_key _; do
-    test "$task" != task || continue
-    resolved="$($production_python "$resolver" --manifest "$GOM_PRODUCTION_MANIFEST" resolve --task "$task" --format shell)"
-    eval "$resolved"
-    test "$GOM_PRODUCTION_CASE_KEY" = "$case_key"
-    selected_count=$((selected_count + 1))
-done < "$selection"
-test "$selected_count" -eq 24
+# `summary` above performs the complete checksum audit once. Re-resolving each
+# selected task through the resolver would repeat the 2,430-file hash scan 24
+# times, so identity checks below deliberately parse the already-audited TOML.
+"$production_python" - "$GOM_PRODUCTION_MANIFEST" "$selection" "$array_spec" <<'PY'
+import csv
+import sys
+import tomllib
 
-acceptance_id="${GOM_ACCEPTANCE_ID:-${GOM_PRODUCTION_CAMPAIGN_ID}_acceptance24_v1}"
-[[ "$acceptance_id" =~ ^[a-z0-9][a-z0-9_.-]*$ ]]
-mkdir -p "$gom_root/logs" "$gom_root/submissions" \
-    "$GOM_PRODUCTION_ARCHIVE_ROOT/acceptance_submissions"
-receipt="$GOM_PRODUCTION_ARCHIVE_ROOT/acceptance_submissions/${acceptance_id}.txt"
-test ! -e "$receipt" || {
-    echo "Acceptance submission receipt already exists: $receipt" >&2
-    exit 1
-}
+manifest_path, selection_path, array_spec = sys.argv[1:]
+with open(manifest_path, "rb") as handle:
+    campaign = tomllib.load(handle)
+with open(selection_path, newline="", encoding="utf-8") as handle:
+    selected = list(csv.DictReader(handle, delimiter="\t"))
+
+if len(selected) != 24:
+    raise SystemExit(f"acceptance selection has {len(selected)} rows, expected 24")
+cases = campaign.get("cases", [])
+selected_tasks = []
+for row in selected:
+    task = int(row["task"])
+    if not 1 <= task <= len(cases):
+        raise SystemExit(f"selected task {task} is outside the campaign")
+    case = cases[task - 1]
+    expected = {
+        "case_key": str(case["case_key"]),
+        "geology_id": str(case["geology_id"]),
+        "realization_id": str(case["realization_id"]),
+        "case_name": str(case["level3_case_name"]),
+    }
+    for field, value in expected.items():
+        if row[field] != value:
+            raise SystemExit(
+                f"selected task {task} {field} mismatch: "
+                f"selection={row[field]!r}, campaign={value!r}"
+            )
+    selected_tasks.append(task)
+
+if len(set(selected_tasks)) != 24:
+    raise SystemExit("acceptance selection contains duplicate tasks")
+array_tasks = [int(value) for value in array_spec.split(",") if value]
+if array_tasks != sorted(selected_tasks):
+    raise SystemExit("acceptance array specification does not match selected tasks")
+print("Acceptance identities validated against the checksum-audited campaign.")
+PY
 
 submitted_jobs=()
 submission_complete=false
