@@ -5,7 +5,7 @@
 #SBATCH --qos=mit_amf_advanced_cpu
 #SBATCH --time=06:00:00
 #SBATCH --cpus-per-task=1
-#SBATCH --mem=8G
+#SBATCH --mem=12G
 #SBATCH --output=/home/%u/orcd/scratch/gom_grid/logs/%x-%j.out
 #SBATCH --error=/home/%u/orcd/scratch/gom_grid/logs/%x-%j.err
 
