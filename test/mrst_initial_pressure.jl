@@ -1,3 +1,5 @@
+using JutulDarcy, Test
+
 @testset "MRST liquid-vapor initial pressure reference" begin
     raw_pressure = [10.0, 20.0, 30.0]
     capillary_pressure = [1.0, 2.0, 3.0]

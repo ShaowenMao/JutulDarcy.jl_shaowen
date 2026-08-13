@@ -72,6 +72,8 @@ julia --startup-file=no --project=. test/engaging_script_compat.jl \
     > "$result_dir/engaging_script_compat.txt" 2>&1
 julia --startup-file=no --project=. test/mrst_input_contract.jl \
     > "$result_dir/mrst_input_contract.txt" 2>&1
+julia --startup-file=no --project=. test/mrst_initial_pressure.jl \
+    > "$result_dir/mrst_initial_pressure.txt" 2>&1
 
 printf '%s\n' \
     "schema=gom_phase1_2430_contract_test_v1" \
@@ -89,6 +91,7 @@ printf '%s\n' \
     cd "$result_dir"
     sha256sum production_manifest.txt production_sliding_launcher.txt \
         engaging_script_compat.txt mrst_input_contract.txt \
+        mrst_initial_pressure.txt \
         TEST_METADATA.txt > TEST_SHA256SUMS.txt
     sha256sum --check TEST_SHA256SUMS.txt
 )
