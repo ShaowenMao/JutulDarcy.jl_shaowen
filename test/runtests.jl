@@ -28,6 +28,10 @@ end
     include("mrst_cases.jl")
 end
 
+@testitem "MRST initial pressure reference" begin
+    include("mrst_initial_pressure.jl")
+end
+
 @testitem "MRST split input" begin
     include("mrst_split.jl")
 end

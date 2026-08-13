@@ -43,7 +43,7 @@ construction and simulation through Slurm.
 1. Rank a modest candidate cohort with
    `gom_step62_initial_equilibrium_selection.sbatch`.
 2. Submit one short smoke control, for example with report years
-   `1/365.25,30/365.25,1`.
+   `0.0027378507871321,0.082135523613963,1` (1 day, 30 days, and 1 year).
 3. Run the same task and report times with `raw_liquid_reference` and a new run
    ID for an apple-to-apple comparison.
 4. Inspect the imported-pressure, face-potential, and state-evolution tables.

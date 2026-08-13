@@ -2423,11 +2423,41 @@ function unwrap_reservoir_variable(var::Pair)
     return last(var)
 end
 
+"""
+    convert_mrst_liquid_vapor_pressure_to_reference!(pressure, pc, reference_phase)
+
+Convert MRST liquid-phase pressure to the pressure variable used by a
+two-phase liquid-vapor Jutul model. MRST supplies liquid pressure for this
+case. No shift is needed when liquid is the model reference phase; when vapor
+is the reference phase, the capillary-pressure difference is added.
+
+This helper deliberately operates on a caller-owned copy so importing a case
+does not mutate `mrst_data["state0"]["pressure"]`.
+"""
+function convert_mrst_liquid_vapor_pressure_to_reference!(
+        pressure,
+        pc,
+        reference_phase::Integer
+    )
+    length(pressure) == length(pc) || throw(DimensionMismatch(
+        "Initial pressure has $(length(pressure)) cells, but capillary pressure has $(length(pc))."
+    ))
+    if reference_phase == 1
+        return pressure
+    elseif reference_phase == 2
+        @. pressure += pc
+        return pressure
+    end
+    throw(ArgumentError(
+        "A two-phase liquid-vapor model must use reference phase 1 or 2, got $reference_phase."
+    ))
+end
+
 function init_from_mat(mrst_data, model, param)
     state0 = mrst_data["state0"]
     p0 = state0["pressure"]
     if isa(p0, AbstractArray)
-        p0 = vec(p0)
+        p0 = copy(vec(p0))
     else
         p0 = [p0]
     end
@@ -2440,11 +2470,23 @@ function init_from_mat(mrst_data, model, param)
     if haskey(model.secondary_variables, :CapillaryPressure)
         phases = get_phases(sys)
         if length(phases) == 2 && phases[2] isa VaporPhase && phases[1] isa LiquidPhase
-            pc = zeros(1, length(p0))
-            pc_impl = model[:CapillaryPressure]
-            Jutul.update_secondary_variable!(pc, pc_impl, model, (Saturations = s, ), 1:length(p0))
-            pc = vec(pc)
-            @. p0 += pc
+            reference_phase = get_reference_phase_index(sys)
+            if reference_phase != 1
+                pc = zeros(1, length(p0))
+                pc_impl = model[:CapillaryPressure]
+                Jutul.update_secondary_variable!(
+                    pc,
+                    pc_impl,
+                    model,
+                    (Saturations = s, ),
+                    1:length(p0)
+                )
+                convert_mrst_liquid_vapor_pressure_to_reference!(
+                    p0,
+                    vec(pc),
+                    reference_phase
+                )
+            end
         end
     end
     init = Dict{Symbol, Any}(:Pressure => p0)
