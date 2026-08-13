@@ -195,6 +195,9 @@ using Test
     @test occursin("--array=\"\$array_spec%24\"", acceptance_submit)
     @test occursin("aftercorr:\$preflight_job", acceptance_submit)
     @test occursin("aftercorr:\$full_job", acceptance_submit)
+    @test occursin("checksum-audited campaign", acceptance_submit)
+    @test !occursin("resolve --task", acceptance_submit)
+    @test occursin("flock -n 9", acceptance_submit)
     @test occursin("acceptance_results_count_as_production=false", acceptance_finalize)
     @test !occursin("gom_step62_production_shard_archive.sbatch", acceptance_submit)
 
