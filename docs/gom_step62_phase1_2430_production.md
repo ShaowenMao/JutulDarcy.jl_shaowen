@@ -68,3 +68,10 @@ verified durable shards.
 Legacy schema-1 pilots and schema-2 `full_1620` campaigns retain their
 existing behavior. The schema-2 recovery and older rolling controllers remain
 schema-2-only; the phase-1 campaign uses the sliding controller.
+
+The official canary is released with
+`gom_step62_phase1_2430_canary_release.sh`. The wrapper requires the completed
+24-case acceptance archive, verifies its checksums and all 24 case statuses,
+and requires the explicit `GOM_ACCEPTANCE_MANUAL_REVIEW=YES` approval. It then
+submits exactly tasks `1:50` as one normal durable production shard, so a
+passing canary is reused by the subsequent full campaign.
