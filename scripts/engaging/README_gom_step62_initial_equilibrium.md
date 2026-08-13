@@ -13,6 +13,12 @@ The control has two explicit pressure modes:
 
 Set the mode with `GOM_EQUILIBRIUM_PRESSURE_MODE`. The default is `imported`.
 
+By default, the diagnostic runs with the checksum-pinned production checkout.
+For an immutable A/B test of an importer change, set
+`GOM_EQUILIBRIUM_SIMULATION_REPO` to a clean candidate checkout that uses the
+same checksum-pinned `Manifest.toml`. Task resolution and input validation still
+come from the untouched production checkout and campaign manifest.
+
 ## Scientific test
 
 For each selected case, the workflow reconstructs the checksum-pinned split MAT

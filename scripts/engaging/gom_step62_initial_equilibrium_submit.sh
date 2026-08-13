@@ -13,7 +13,10 @@ umask 027
 
 command -v sbatch >/dev/null
 diagnostic_commit="$(git -C "$GOM_EQUILIBRIUM_DIAGNOSTIC_REPO" rev-parse HEAD)"
+simulation_repo="${GOM_EQUILIBRIUM_SIMULATION_REPO:-$JUTULDARCY_COMBINED_REPO}"
+simulation_commit="$(git -C "$simulation_repo" rev-parse HEAD)"
 test -n "$diagnostic_commit"
+test -n "$simulation_commit"
 test -z "$(git -C "$GOM_EQUILIBRIUM_DIAGNOSTIC_REPO" status --porcelain)" || {
     echo "Diagnostic repository must be clean before submission." >&2
     exit 1
@@ -51,6 +54,8 @@ campaign_manifest=$GOM_PRODUCTION_MANIFEST
 campaign_manifest_sha256=$(sha256sum "$GOM_PRODUCTION_MANIFEST" | awk '{print $1}')
 production_repo=$JUTULDARCY_COMBINED_REPO
 production_commit=$(git -C "$JUTULDARCY_COMBINED_REPO" rev-parse HEAD)
+simulation_repo=$simulation_repo
+simulation_commit=$simulation_commit
 diagnostic_repo=$GOM_EQUILIBRIUM_DIAGNOSTIC_REPO
 diagnostic_commit=$diagnostic_commit
 result_root=$GOM_EQUILIBRIUM_RESULT_ROOT

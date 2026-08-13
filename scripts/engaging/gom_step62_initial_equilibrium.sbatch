@@ -25,8 +25,11 @@ umask 027
 
 production_common="$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_effective_pc_global_plateau_common.sh"
 diagnostic_script="$GOM_EQUILIBRIUM_DIAGNOSTIC_REPO/scripts/engaging/gom_step62_initial_equilibrium_audit.jl"
+simulation_repo="${GOM_EQUILIBRIUM_SIMULATION_REPO:-$JUTULDARCY_COMBINED_REPO}"
 test -f "$production_common"
 test -f "$diagnostic_script"
+test -f "$simulation_repo/Project.toml"
+test -f "$simulation_repo/Manifest.toml"
 
 observed_diagnostic_commit="$(
     git -C "$GOM_EQUILIBRIUM_DIAGNOSTIC_REPO" rev-parse HEAD
@@ -36,9 +39,21 @@ test "$observed_diagnostic_commit" = "$GOM_EQUILIBRIUM_DIAGNOSTIC_COMMIT" || {
     exit 1
 }
 
+simulation_commit="$(git -C "$simulation_repo" rev-parse HEAD)"
+test -z "$(git -C "$simulation_repo" status --porcelain --untracked-files=no)" || {
+    echo "Simulation repository tracked files must be clean." >&2
+    exit 1
+}
+
 source "$production_common"
 gom_effective_pc_resolve_task
 gom_effective_pc_export_locked_physics
+
+simulation_manifest_sha256="$(sha256sum "$simulation_repo/Manifest.toml" | awk '{print $1}')"
+test "$simulation_manifest_sha256" = "$GOM_PRODUCTION_JUTUL_MANIFEST_SHA256" || {
+    echo "Simulation Manifest.toml differs from the checksum-pinned production environment." >&2
+    exit 1
+}
 
 final_dir="$GOM_EQUILIBRIUM_RESULT_ROOT/$GOM_EQUILIBRIUM_RUN_ID/$GOM_PRODUCTION_CASE_KEY"
 test ! -e "$final_dir" || {
@@ -69,7 +84,7 @@ export JULIA_NUM_GC_THREADS=1
 export HYPRE_THREADS="${SLURM_CPUS_PER_TASK:-8}"
 
 started_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-cd "$JUTULDARCY_COMBINED_REPO"
+cd "$simulation_repo"
 julia --startup-file=no --project=. "$diagnostic_script" \
     "$GOM_PRODUCTION_COMMON_MAT" \
     "$GOM_PRODUCTION_SPECIFIC_MAT" \
@@ -101,6 +116,9 @@ campaign_manifest=$GOM_PRODUCTION_MANIFEST_PATH
 campaign_manifest_sha256=$GOM_PRODUCTION_MANIFEST_SHA256
 production_jutuldarcy_commit=$GOM_PRODUCTION_JUTULDARCY_COMMIT
 production_jutul_manifest_sha256=$GOM_PRODUCTION_JUTUL_MANIFEST_SHA256
+simulation_repo=$simulation_repo
+simulation_commit=$simulation_commit
+simulation_manifest_sha256=$simulation_manifest_sha256
 diagnostic_commit=$GOM_EQUILIBRIUM_DIAGNOSTIC_COMMIT
 case_key=$GOM_PRODUCTION_CASE_KEY
 geology_id=$GOM_PRODUCTION_GEOLOGY_ID
