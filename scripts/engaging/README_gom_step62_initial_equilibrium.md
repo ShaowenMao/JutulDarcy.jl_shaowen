@@ -73,3 +73,31 @@ Each durable case directory contains:
 
 Results are first written to node-local storage and are only published to the
 durable result root after checksum verification.
+
+## Validated decision
+
+The Step62 common MAT stores hydrostatic liquid pressure. For the current
+liquid-reference Jutul model, that pressure must be imported without adding
+capillary pressure. The fixed importer passes the production preflight with an
+exact `0.0 Pa` difference from the common MAT and reproduces the manually
+corrected zero-injection controls across low-permeability, high-permeability,
+and heterogeneous-capillary cases.
+
+The controls show that the supplied liquid pressure is already a discrete
+equilibrium: after the import fix, the maximum initial liquid-potential
+residual is about `6.30 Pa`, the maximum initial face flux is about
+`9.22e-6 m3/s`, the one-year pressure adjustment is about `3.4 Pa`, no gas
+appears, and relative total-mass drift remains below `2e-13`. In the full
+1,000-year control, the maximum pressure adjustment remains bounded at
+`3.41 Pa`, gas saturation remains exactly zero, and relative total-mass drift
+is `1.44e-13`. A separate case-by-case equilibration simulation is therefore
+neither required nor recommended.
+
+Keep the initial fluid state common to all production cases: hydrostatic
+liquid pressure, zero gas saturation, and the same initial composition.
+Case-specific permeability affects redistribution rates, while porosity
+changes pore volume and initial brine mass; neither requires a different
+hydrostatic pressure field.
+
+See `GOM_STEP62_INITIAL_EQUILIBRIUM_FINDINGS.md` for the root-cause history,
+cross-case evidence, immutable paths, and production implications.

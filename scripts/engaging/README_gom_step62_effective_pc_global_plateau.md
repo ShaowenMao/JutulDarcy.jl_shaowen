@@ -20,6 +20,8 @@ step62_new3_sandpc_ycap50_effective_globalplateau_v1
 ## Locked physics
 
 - Step62 grid, 87 slices, 2,165,082 cells.
+- The common-MAT pressure is hydrostatic liquid pressure and must be imported
+  unchanged because liquid is the Jutul reference phase.
 - Hysteresis remains enabled with `S_min=0.05`.
 - PREDICT fault imbibition tables remain drainage-equivalent.
 - JutulDarcy computes transmissibility from the grid and rock.
@@ -55,6 +57,13 @@ The 522 explicit PREDICT imbibition tables are mirrored after the plateau so
 they remain exact drainage duplicates. Preflight records deterministic
 SHA-256 contracts for input/output drainage tables, Sg/Kr, the preserved Pc
 tails, and base imbibition.
+
+Preflight also rereads the immutable common-MAT pressure independently and
+fails unless the Jutul reference phase is liquid and the imported pressure
+matches it within `1e-6 Pa`. This prevents capillary pressure from being
+mistakenly added to an already hydrostatic liquid-pressure field. The
+zero-injection evidence and importer history are documented in
+`GOM_STEP62_INITIAL_EQUILIBRIUM_FINDINGS.md`.
 
 ## Input preparation
 
