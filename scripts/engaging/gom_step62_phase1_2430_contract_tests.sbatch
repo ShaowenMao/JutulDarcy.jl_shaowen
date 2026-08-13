@@ -60,11 +60,13 @@ module purge
 module load community-modules
 module load julia/1.10.4
 export JULIA_NUM_THREADS="$SLURM_CPUS_PER_TASK"
+python_exe="${GOM_PRODUCTION_PYTHON:-python3.12}"
+command -v "$python_exe" >/dev/null
 
 cd "$GOM_JUTUL_REPO"
-python3 test/production_manifest.py \
+"$python_exe" test/production_manifest.py \
     > "$result_dir/production_manifest.txt" 2>&1
-python3 test/production_sliding_launcher.py \
+"$python_exe" test/production_sliding_launcher.py \
     > "$result_dir/production_sliding_launcher.txt" 2>&1
 julia --startup-file=no --project=. test/engaging_script_compat.jl \
     > "$result_dir/engaging_script_compat.txt" 2>&1
@@ -81,7 +83,7 @@ printf '%s\n' \
     "jutul_commit=$observed_commit" \
     "julia_manifest_sha256=$observed_manifest_sha256" \
     "julia_version=$(julia --startup-file=no -e 'print(VERSION)')" \
-    "python_version=$(python3 --version 2>&1)" \
+    "python_version=$($python_exe --version 2>&1)" \
     > "$result_dir/TEST_METADATA.txt"
 (
     cd "$result_dir"
