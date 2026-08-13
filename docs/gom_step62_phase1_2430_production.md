@@ -32,6 +32,11 @@ transformation.
 
 Advance the campaign only after each preceding gate passes:
 
+Run `scripts/engaging/gom_step62_phase1_2430_contract_tests.sbatch` from the
+immutable production checkout before accepting campaign inputs. The job pins
+the source commit and `Manifest.toml` SHA-256, records all Python and Julia
+contract-test outputs, and writes `PASS` only after every test succeeds.
+
 1. Verify the 162 stratigraphy companions and all 2,430 fault/stratigraphy
    pairings.
 2. Build and checksum the immutable source manifest.
