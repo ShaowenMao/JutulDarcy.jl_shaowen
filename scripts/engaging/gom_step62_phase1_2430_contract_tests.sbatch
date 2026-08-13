@@ -57,6 +57,7 @@ record_exit_status() {
 trap record_exit_status EXIT
 
 module purge
+module load community-modules
 module load julia/1.10.4
 export JULIA_NUM_THREADS="$SLURM_CPUS_PER_TASK"
 
