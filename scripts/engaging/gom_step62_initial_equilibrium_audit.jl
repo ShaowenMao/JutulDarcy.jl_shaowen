@@ -66,7 +66,7 @@ function validate_input_identity()
     expected_case_key ==
         "$(expected_geology_id)_case$(lpad(expected_realization_id, 2, '0'))" ||
         error("Case key is inconsistent with geology and realization IDs.")
-    return nothing
+    return specific
 end
 
 """Return the reservoir substate from a MultiModel or reservoir-only state."""
@@ -88,7 +88,7 @@ function region_masses(total_masses, selection)
     )
 end
 
-validate_input_identity()
+specific_metadata = validate_input_identity()
 raw_common_pressure = MAT.matopen(common_path) do file
     state0 = read(file, "state0")
     haskey(state0, "pressure") || error("Common MAT state0 has no pressure.")
@@ -144,7 +144,8 @@ model = case.model
 reservoir_model = model.models[:Reservoir]
 cell_count = Jutul.number_of_cells(reservoir_model.domain)
 cell_count == EXPECTED_CELLS || error("Unexpected cell count: $cell_count")
-regions = gom_equilibrium_regions(mrst, cell_count)
+regions = gom_equilibrium_regions(specific_metadata, cell_count)
+empty!(specific_metadata)
 length(regions.fault_cells) == EXPECTED_FAULT_CELLS ||
     error("Unexpected fault-cell count: $(length(regions.fault_cells))")
 

@@ -21,6 +21,17 @@ include(joinpath(@__DIR__, "gom_step62_initial_equilibrium_common.jl"))
     @test distribution.count == 3
     @test distribution.maximum == 2.0
 
+    mock_specific = Dict(
+        "fault" => Dict(
+            "cells" => collect(2:7),
+            "window_index" => collect(1:6)
+        )
+    )
+    regions = gom_equilibrium_regions(mock_specific, 8)
+    @test regions.fault_cells == collect(2:7)
+    @test count(regions.fault_mask) == 6
+    @test regions.regions[3] == ("W1" => [2])
+
     mktempdir() do directory
         source = joinpath(directory, "source.txt")
         write(source, "equilibrium\n")

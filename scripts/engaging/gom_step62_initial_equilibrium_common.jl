@@ -180,10 +180,10 @@ function gom_equilibrium_capillary_pressure(state, cell_count::Integer)
     error("Unsupported CapillaryPressure shape $(size(raw)).")
 end
 
-"""Build domain, complete-fault, and W1-W6 cell selections."""
-function gom_equilibrium_regions(mrst, cell_count::Integer)
-    haskey(mrst, "fault") || error("Assembled input has no fault metadata.")
-    fault = mrst["fault"]
+"""Build domain, complete-fault, and W1-W6 selections from specific metadata."""
+function gom_equilibrium_regions(specific, cell_count::Integer)
+    haskey(specific, "fault") || error("Specific input has no fault metadata.")
+    fault = specific["fault"]
     fault_cells = Int.(round.(vec(fault["cells"])))
     window_index = Int.(round.(vec(fault["window_index"])))
     length(fault_cells) == length(window_index) ||
