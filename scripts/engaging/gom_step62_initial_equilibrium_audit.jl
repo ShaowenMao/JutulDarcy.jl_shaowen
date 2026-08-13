@@ -314,12 +314,12 @@ function append_rows!(state_label, time_years, state, previous_pressure)
     return pressure
 end
 
-previous_pressure = append_rows!(
+previous_pressure = Ref(append_rows!(
     "initial",
     0.0,
     initial_full_state,
     initial_pressure
-)
+))
 
 zero_forces = setup_reservoir_forces(model)
 reservoir_forces = zero_forces[:Reservoir]
@@ -366,11 +366,11 @@ length(reports) == length(report_years) || error(
 
 for (index, raw_state) in enumerate(states)
     state = gom_equilibrium_reservoir_state(raw_state)
-    previous_pressure = append_rows!(
+    previous_pressure[] = append_rows!(
         "report_$index",
         report_years[index],
         state,
-        previous_pressure
+        previous_pressure[]
     )
 end
 
