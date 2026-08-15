@@ -248,6 +248,15 @@ using Test
     @test occursin("length(additional) == 26", canary50_selector)
     @test occursin("selection_uses_reservoir_outcomes=false", canary50_selector)
     @test occursin("campaign_tasks_covered_exactly_once=true", canary50_selector)
+    canary50_selector_batch = read(
+        joinpath(
+            scripts_dir,
+            "gom_step62_phase1_2430_select_canary50.sbatch"
+        ),
+        String
+    )
+    @test occursin("GOM_CANARY_JULIA_PROJECT", canary50_selector_batch)
+    @test occursin("--project=\"\$canary_julia_project\"", canary50_selector_batch)
     @test occursin("afterok:\$audit24_job", canary50_submit)
     @test occursin("afterok:\$audit50_job", canary50_submit)
     @test occursin("roles24=\"central_medoid|", canary50_submit)

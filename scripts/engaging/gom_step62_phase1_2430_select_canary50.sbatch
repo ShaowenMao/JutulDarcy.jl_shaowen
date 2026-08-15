@@ -16,9 +16,12 @@ umask 027
 : "${GOM_CANARY_WORKFLOW_REPO:?Set GOM_CANARY_WORKFLOW_REPO.}"
 : "${GOM_CANARY_SELECTION_DIR:?Set GOM_CANARY_SELECTION_DIR.}"
 
+canary_julia_project="${GOM_CANARY_JULIA_PROJECT:-$GOM_CANARY_WORKFLOW_REPO}"
+
 script="$GOM_CANARY_WORKFLOW_REPO/scripts/engaging/gom_step62_phase1_2430_select_canary50.jl"
 test -f "$script"
 test -f "$GOM_PRODUCTION_MANIFEST"
+test -f "$canary_julia_project/Project.toml"
 workflow_commit="$(git -C "$GOM_CANARY_WORKFLOW_REPO" rev-parse HEAD)"
 test -z "$(git -C "$GOM_CANARY_WORKFLOW_REPO" status --porcelain)" || {
     echo "Canary workflow checkout must be clean." >&2
@@ -42,7 +45,7 @@ module load julia/1.10.4
 export JULIA_NUM_THREADS=1
 export JULIA_NUM_GC_THREADS=1
 
-julia --startup-file=no --project="$GOM_CANARY_WORKFLOW_REPO" \
+julia --startup-file=no --project="$canary_julia_project" \
     "$script" "$GOM_PRODUCTION_MANIFEST" "$incoming"
 
 test "$(($(wc -l < "$incoming/canary50_selection.tsv") - 1))" -eq 50
@@ -58,8 +61,9 @@ grep -Fxq 'selection_uses_reservoir_outcomes=false' \
     "$incoming/SELECTION_METADATA.txt"
 grep -Fxq 'campaign_tasks_covered_exactly_once=true' \
     "$incoming/SELECTION_METADATA.txt"
-printf 'workflow_commit=%s\nselection_job_id=%s\n' \
-    "$workflow_commit" "$SLURM_JOB_ID" >> "$incoming/SELECTION_METADATA.txt"
+printf 'workflow_commit=%s\nselection_job_id=%s\njulia_project=%s\n' \
+    "$workflow_commit" "$SLURM_JOB_ID" "$canary_julia_project" \
+    >> "$incoming/SELECTION_METADATA.txt"
 (
     cd "$incoming"
     find . -type f ! -name SHA256SUMS.txt ! -name PASS -print0 | \
