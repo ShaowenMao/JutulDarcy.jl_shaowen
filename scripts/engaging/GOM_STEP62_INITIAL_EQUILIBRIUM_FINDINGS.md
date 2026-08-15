@@ -84,7 +84,11 @@ hash-contract checks.
   `01e689416715df3d785535692ce03d547707a3e7`
 - Validated candidate commit:
   `96f995a929c907dc36d6d8ff8c6726d852844aae`
-- Production campaign manifest SHA-256:
+- Accepted corrected-canary runtime commit:
+  `ed81af8e88fcd2a7720f26872eef1d16d63469f5`
+- Accepted corrected-canary campaign manifest SHA-256:
+  `adf73c15b1c4edc4b4721c7666a2c2b56aaf800088fff3599a5541dce0ed3dde`
+- Previous production-baseline campaign manifest SHA-256:
   `fbe8cdb7a2f3933dc7a0bfdd69233ab050b96f70846ccdb7a7def6693cc51a77`
 - Candidate Engaging checkout:
   `/home/shaowen/orcd/scratch/gom_grid/code/immutable/JutulDarcy_96f995a9`

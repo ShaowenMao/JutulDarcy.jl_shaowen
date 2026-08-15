@@ -75,3 +75,29 @@ The official canary is released with
 and requires the explicit `GOM_ACCEPTANCE_MANUAL_REVIEW=YES` approval. It then
 submits exactly tasks `1:50` as one normal durable production shard, so a
 passing canary is reused by the subsequent full campaign.
+
+## Corrected-importer qualification record
+
+Before the full 24-case acceptance cohort, three deliberately difficult cases
+qualify the corrected liquid-reference pressure importer over the complete
+1,000-year schedule:
+
+- task `580`, `s02_c012_case10`: heterogeneous independent realization;
+- task `840`, `s03_c002_case103`: high-state conduit stress; and
+- task `1259`, `s04_c003_case102`: low-state barrier stress.
+
+All three cases complete preflight, simulation, QoI schema-4 export, restart
+retention, and VTU export. The immutable audit contains 73 passing checks and
+no failures. Its accepted provenance is:
+
+- campaign ID:
+  `step62_phase1_2430_independent_full_fault_v1_effective_globalplateau_qoi4_coordfix_pressurefix_20260814`;
+- campaign manifest SHA-256:
+  `adf73c15b1c4edc4b4721c7666a2c2b56aaf800088fff3599a5541dce0ed3dde`;
+- simulation commit:
+  `ed81af8e88fcd2a7720f26872eef1d16d63469f5`.
+
+Use `scripts/engaging/gom_step62_canary_acceptance_audit.py` to reproduce the
+read-only audit bundle. These diagnostic outputs do not count as production
+and do not replace the required 24-case acceptance cohort or the reusable
+50-case production canary.
