@@ -41,13 +41,33 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--selection-sha256", required=True)
     parser.add_argument("--submission-receipt", required=True, type=Path)
     parser.add_argument("--code-repo", required=True, type=Path)
-    parser.add_argument("--preflight-root", required=True, type=Path)
-    parser.add_argument("--full-root", required=True, type=Path)
-    parser.add_argument("--vtu-root", required=True, type=Path)
-    parser.add_argument("--preflight-job", required=True)
-    parser.add_argument("--smoke-job", required=True)
-    parser.add_argument("--full-job", required=True)
-    parser.add_argument("--vtu-job", required=True)
+    parser.add_argument("--preflight-root", type=Path)
+    parser.add_argument("--full-root", type=Path)
+    parser.add_argument("--vtu-root", type=Path)
+    parser.add_argument("--preflight-job")
+    parser.add_argument("--smoke-job")
+    parser.add_argument("--full-job")
+    parser.add_argument("--vtu-job")
+    parser.add_argument(
+        "--source-map",
+        type=Path,
+        help=(
+            "Optional task-indexed TSV containing preflight_root, full_root, "
+            "vtu_root, and stage job IDs. This supports a reusable canary "
+            "assembled from more than one dependency stage."
+        ),
+    )
+    parser.add_argument("--expected-count", type=int, default=3)
+    parser.add_argument(
+        "--required-roles",
+        default=",".join(sorted(EXPECTED_ROLES)),
+        help="Comma-separated roles that must occur in the selection.",
+    )
+    parser.add_argument(
+        "--production-reusable",
+        action="store_true",
+        help="Mark a passing audit as eligible for immutable production promotion.",
+    )
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument(
         "--first-hour-predict-pressure-rms-limit-pa",
@@ -91,6 +111,76 @@ def parse_key_values(path: Path) -> dict[str, str]:
 def read_tsv(path: Path) -> list[dict[str, str]]:
     with path.open("r", encoding="utf-8", newline="") as stream:
         return list(csv.DictReader(stream, delimiter="\t"))
+
+
+def load_source_map(
+    args: argparse.Namespace, selection: list[dict[str, str]]
+) -> tuple[dict[int, dict[str, str]], list[str]]:
+    """Resolve one output-root/job mapping for every selected campaign task."""
+
+    if args.source_map is not None:
+        rows = read_tsv(args.source_map)
+        required = {
+            "task",
+            "preflight_root",
+            "full_root",
+            "vtu_root",
+            "preflight_job",
+            "full_job",
+            "vtu_job",
+        }
+        if not rows or not required.issubset(rows[0]):
+            raise RuntimeError("source map has an unexpected schema")
+        mapping: dict[int, dict[str, str]] = {}
+        for row in rows:
+            task = int(row["task"])
+            if task in mapping:
+                raise RuntimeError(f"source map contains duplicate task {task}")
+            for field in ("preflight_job", "full_job", "vtu_job"):
+                if not row[field].isdigit():
+                    raise RuntimeError(f"source map {field} is not numeric for task {task}")
+            mapping[task] = row
+        selected_tasks = {int(row["task"]) for row in selection}
+        if set(mapping) != selected_tasks:
+            raise RuntimeError("source-map tasks do not exactly match the selection")
+        jobs = sorted(
+            {
+                row[field]
+                for row in rows
+                for field in ("preflight_job", "full_job", "vtu_job")
+            },
+            key=int,
+        )
+        return mapping, jobs
+
+    required_values = (
+        args.preflight_root,
+        args.full_root,
+        args.vtu_root,
+        args.preflight_job,
+        args.full_job,
+        args.vtu_job,
+    )
+    if any(value is None for value in required_values):
+        raise RuntimeError(
+            "provide --source-map or all legacy output roots and job IDs"
+        )
+    mapping = {
+        int(row["task"]): {
+            "task": row["task"],
+            "preflight_root": str(args.preflight_root),
+            "full_root": str(args.full_root),
+            "vtu_root": str(args.vtu_root),
+            "preflight_job": str(args.preflight_job),
+            "full_job": str(args.full_job),
+            "vtu_job": str(args.vtu_job),
+        }
+        for row in selection
+    }
+    jobs = [str(args.preflight_job), str(args.full_job), str(args.vtu_job)]
+    if args.smoke_job is not None:
+        jobs.append(str(args.smoke_job))
+    return mapping, sorted(set(jobs), key=int)
 
 
 def as_float(value: str) -> float:
@@ -483,7 +573,29 @@ def main() -> int:
 
     selection = read_tsv(args.selection)
     roles = {row["acceptance_role"] for row in selection}
-    audit.check("campaign", "selection", "three_acceptance_roles", len(selection) == 3 and roles == EXPECTED_ROLES, ",".join(sorted(roles)))
+    # The pipe delimiter is safe inside Slurm's comma-delimited --export list;
+    # retain comma support for direct and historical command-line invocations.
+    required_roles = {
+        role.strip()
+        for group in args.required_roles.split("|")
+        for role in group.split(",")
+        if role.strip()
+    }
+    audit.check(
+        "campaign",
+        "selection",
+        "expected_case_count",
+        len(selection) == args.expected_count,
+        f"observed={len(selection)}; expected={args.expected_count}",
+    )
+    audit.check(
+        "campaign",
+        "selection",
+        "required_acceptance_roles",
+        required_roles.issubset(roles),
+        f"required={','.join(sorted(required_roles))}; observed={','.join(sorted(roles))}",
+    )
+    source_map, source_jobs = load_source_map(args, selection)
     cases_by_task = {int(case["task"]): case for case in campaign["cases"]}
     case_metrics: list[dict[str, object]] = []
     acceptance_rows: list[dict[str, object]] = []
@@ -512,13 +624,19 @@ def main() -> int:
         )
         audit.check(scope, "inputs", "specific_mat_size_and_sha256", specific_ok, str(specific_path))
 
-        preflight_dir = args.preflight_root / case_key
+        source = source_map[task]
+        preflight_dir = Path(source["preflight_root"]) / case_key
         try:
-            full_dir = find_full_case(args.full_root, case_key, args.full_job, task_text)
+            full_dir = find_full_case(
+                Path(source["full_root"]),
+                case_key,
+                source["full_job"],
+                task_text,
+            )
         except RuntimeError as error:
             audit.check(scope, "outputs", "full_run_directory", False, str(error))
             continue
-        vtu_dir = args.vtu_root / case_key
+        vtu_dir = Path(source["vtu_root"]) / case_key
         preflight_summary_path = preflight_dir / "preflight_summary.txt"
         production_summary_path = full_dir / "production_summary.txt"
         final_summary_path = full_dir / "final_state_summary.txt"
@@ -706,10 +824,12 @@ def main() -> int:
     copy_evidence(args.campaign, incoming / "campaign.toml")
     copy_evidence(args.selection, incoming / "canary_selection.tsv")
     copy_evidence(args.submission_receipt, incoming / "submission_receipt.txt")
+    if args.source_map is not None:
+        copy_evidence(args.source_map, incoming / "source_map.tsv")
     copy_evidence(Path(__file__), incoming / "gom_step62_canary_acceptance_audit.py")
     capture_slurm(
         incoming / "slurm_accounting.txt",
-        [args.preflight_job, args.smoke_job, args.full_job, args.vtu_job],
+        source_jobs,
     )
 
     overall = "fail" if audit.failures else "pass"
@@ -729,7 +849,8 @@ def main() -> int:
         "retained_restart_steps=51,78,110,210",
         f"first_hour_predict_pressure_rms_limit_pa={args.first_hour_predict_pressure_rms_limit_pa:.12g}",
         f"final_mass_balance_relative_limit={args.final_mass_balance_relative_limit:.12g}",
-        "acceptance_results_count_as_production=false",
+        "acceptance_results_count_as_production=" +
+        ("true" if args.production_reusable else "false"),
         "simulation_outputs_modified=false",
         "scratch_outputs_preserved=true",
         f"failed_check_count={len(audit.failures)}",

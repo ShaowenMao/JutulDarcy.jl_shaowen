@@ -174,10 +174,9 @@ using Test
     @test occursin("SHARD_CONTROL_VALIDATION.tsv", production_finalize)
     @test occursin("sha256sums_sha256=", shard_archive)
 
-    # The phase-1 scientific acceptance cohort is deliberately noncontiguous
-    # and diagnostic. It must be chosen without reservoir outcomes, run
-    # through the pinned production scripts, and remain separate from the
-    # reusable contiguous-shard canary.
+    # Preserve the original diagnostic acceptance path for provenance. The
+    # newer reusable-canary path below embeds these same 24 cases without
+    # rerunning them.
     acceptance_selector = read(
         joinpath(scripts_dir, "gom_step62_phase1_2430_select_acceptance.jl"),
         String
@@ -209,6 +208,56 @@ using Test
     @test occursin("GOM_PRODUCTION_SELECTION_END=50", canary_release)
     @test occursin("GOM_PRODUCTION_SHARD_WINDOW=1", canary_release)
     @test occursin("gom_step62_production_ensemble_submit.sh", canary_release)
+
+    canary50_selector = read(
+        joinpath(
+            scripts_dir,
+            "gom_step62_phase1_2430_select_canary50.jl"
+        ),
+        String
+    )
+    canary50_submit = read(
+        joinpath(
+            scripts_dir,
+            "gom_step62_phase1_2430_canary50_submit.sh"
+        ),
+        String
+    )
+    taskset_archive = read(
+        joinpath(
+            scripts_dir,
+            "gom_step62_production_taskset_archive.sbatch"
+        ),
+        String
+    )
+    taskset_controller = read(
+        joinpath(
+            scripts_dir,
+            "gom_step62_production_taskset_controller.sbatch"
+        ),
+        String
+    )
+    taskset_finalize = read(
+        joinpath(
+            scripts_dir,
+            "gom_step62_production_taskset_finalize.sbatch"
+        ),
+        String
+    )
+    @test occursin("length(embedded) == 24", canary50_selector)
+    @test occursin("length(additional) == 26", canary50_selector)
+    @test occursin("selection_uses_reservoir_outcomes=false", canary50_selector)
+    @test occursin("campaign_tasks_covered_exactly_once=true", canary50_selector)
+    @test occursin("afterok:\$audit24_job", canary50_submit)
+    @test occursin("afterok:\$audit50_job", canary50_submit)
+    @test occursin("roles24=\"central_medoid|", canary50_submit)
+    @test occursin("canary_results_count_as_production=true", canary50_submit)
+    @test occursin("gom_step62_production_taskset_archive.sbatch", canary50_submit)
+    @test occursin("gom_step62_production_taskset_verify.py", taskset_archive)
+    @test occursin("cmp --silent", taskset_archive)
+    @test occursin("mass_balance_relative_residual", taskset_archive)
+    @test occursin("GOM_PRODUCTION_NEXT_TASKSET_INDEX", taskset_controller)
+    @test occursin("all_campaign_tasks_present_exactly_once=true", taskset_finalize)
 
     # Engaging counts pending array elements against a per-user QOS ceiling.
     # The rolling control plane must keep the scientific checkout pinned,

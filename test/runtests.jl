@@ -56,6 +56,10 @@ end
     include("engaging_script_compat.jl")
 end
 
+@testitem "Phase-1 reusable canary selection" begin
+    include("phase1_canary50.jl")
+end
+
 @testitem "VTU geology indicators" begin
     include("vtu_geology_indicators.jl")
 end
