@@ -278,6 +278,10 @@ function write_taskset_plan(output_dir, selected, cases)
     length(unique(covered)) == length(cases) || error("Task-set plan overlaps")
 end
 
+function sorted_selected_tasks(selected, indices)
+    return sort([selected[index].metric.task for index in indices])
+end
+
 function main_canary50(args)
     length(args) == 2 || error("Usage: select_canary50.jl CAMPAIGN_TOML OUTPUT_DIR")
     campaign_path = abspath(args[1])
@@ -305,8 +309,8 @@ function main_canary50(args)
     write_canary_selection(joinpath(output_dir, "canary50_selection.tsv"), selected)
     write_canary_selection(joinpath(output_dir, "embedded24_selection.tsv"), selected[1:24])
     write_canary_selection(joinpath(output_dir, "additional26_selection.tsv"), selected[25:50])
-    embedded_tasks = sort(item.metric.task for item in selected[1:24])
-    additional_tasks = sort(item.metric.task for item in selected[25:50])
+    embedded_tasks = sorted_selected_tasks(selected, 1:24)
+    additional_tasks = sorted_selected_tasks(selected, 25:50)
     write(joinpath(output_dir, "embedded24_array_spec.txt"), join(embedded_tasks, ',') * "\n")
     write(joinpath(output_dir, "additional26_array_spec.txt"), join(additional_tasks, ',') * "\n")
     write(joinpath(output_dir, "canary50_array_spec.txt"), join(sort(vcat(embedded_tasks, additional_tasks)), ',') * "\n")

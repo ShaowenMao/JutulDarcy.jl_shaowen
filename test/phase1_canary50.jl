@@ -62,6 +62,8 @@ end
     @test count(item -> item.role == "stratified_high_state", selected) == 6
     @test count(item -> item.role == "stratified_independent", selected) == 12
     @test count(item -> item.role == "stratified_independent_extra", selected) == 2
+    @test sorted_selected_tasks(selected, 1:24) == sort(selected_tasks[1:24])
+    @test sorted_selected_tasks(selected, 25:50) == sort(selected_tasks[25:50])
 
     cases = [Dict{String, Any}(
         "task" => metric.task,
