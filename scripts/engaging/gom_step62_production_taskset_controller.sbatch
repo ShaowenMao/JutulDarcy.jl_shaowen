@@ -9,9 +9,10 @@
 #SBATCH --output=/home/%u/orcd/scratch/gom_grid/logs/%x-%j.out
 #SBATCH --error=/home/%u/orcd/scratch/gom_grid/logs/%x-%j.err
 
-# Advance exactly one 50-case task set. The next controller is submitted only
-# after this task set has been durably promoted, keeping the Slurm queue small
-# and making continuation automatic after interruptions.
+# Advance exactly one 50-case task set in one rolling lane. The next controller
+# in this lane is submitted only after the task set has been durably promoted.
+# Multiple lanes therefore overlap slow task sets without growing an unbounded
+# Slurm queue or weakening archive backpressure.
 
 set -euo pipefail
 umask 027
@@ -31,6 +32,21 @@ umask 027
 [[ "$GOM_PRODUCTION_PARENT_SUBMISSION_ID" =~ ^[a-z0-9][a-z0-9_.-]*$ ]]
 test -s "$GOM_PRODUCTION_TASKSET_PLAN"
 test -d "$GOM_PRODUCTION_TASKSET_SELECTION_DIR"
+
+taskset_stride="${GOM_PRODUCTION_TASKSET_STRIDE:-1}"
+lane_count="${GOM_PRODUCTION_LANE_COUNT:-1}"
+lane_index="${GOM_PRODUCTION_LANE_INDEX:-1}"
+lane_start_index="${GOM_PRODUCTION_LANE_START_INDEX:-$GOM_PRODUCTION_NEXT_TASKSET_INDEX}"
+[[ "$taskset_stride" =~ ^[1-9][0-9]*$ ]]
+[[ "$lane_count" =~ ^[1-9][0-9]*$ ]]
+[[ "$lane_index" =~ ^[1-9][0-9]*$ ]]
+[[ "$lane_start_index" =~ ^[1-9][0-9]*$ ]]
+test "$lane_index" -le "$lane_count"
+test "$taskset_stride" -eq "$lane_count"
+test "$GOM_PRODUCTION_NEXT_TASKSET_INDEX" -ge "$lane_start_index"
+test "$((
+    (GOM_PRODUCTION_NEXT_TASKSET_INDEX - lane_start_index) % taskset_stride
+))" -eq 0
 
 gom_root="${GOM_GRID_ROOT:-$HOME/orcd/scratch/gom_grid}"
 production_python="${GOM_PRODUCTION_PYTHON:-python3.12}"
@@ -53,12 +69,12 @@ test "$plan_count" -eq 49
 index="$GOM_PRODUCTION_NEXT_TASKSET_INDEX"
 
 common_export="ALL,GOM_GRID_ROOT=$gom_root,JUTULDARCY_COMBINED_REPO=$JUTULDARCY_COMBINED_REPO,GOM_PRODUCTION_MANIFEST=$GOM_PRODUCTION_MANIFEST"
-controller_common="$common_export,GOM_TASKSET_WORKFLOW_REPO=$GOM_TASKSET_WORKFLOW_REPO,GOM_PRODUCTION_CHECK_JOB_ID=$GOM_PRODUCTION_CHECK_JOB_ID,GOM_PRODUCTION_TASKSET_PLAN=$GOM_PRODUCTION_TASKSET_PLAN,GOM_PRODUCTION_TASKSET_SELECTION_DIR=$GOM_PRODUCTION_TASKSET_SELECTION_DIR,GOM_PRODUCTION_CANARY_TASKSET=$GOM_PRODUCTION_CANARY_TASKSET,GOM_PRODUCTION_PARENT_SUBMISSION_ID=$GOM_PRODUCTION_PARENT_SUBMISSION_ID"
+controller_common="$common_export,GOM_TASKSET_WORKFLOW_REPO=$GOM_TASKSET_WORKFLOW_REPO,GOM_PRODUCTION_CHECK_JOB_ID=$GOM_PRODUCTION_CHECK_JOB_ID,GOM_PRODUCTION_TASKSET_PLAN=$GOM_PRODUCTION_TASKSET_PLAN,GOM_PRODUCTION_TASKSET_SELECTION_DIR=$GOM_PRODUCTION_TASKSET_SELECTION_DIR,GOM_PRODUCTION_CANARY_TASKSET=$GOM_PRODUCTION_CANARY_TASKSET,GOM_PRODUCTION_PARENT_SUBMISSION_ID=$GOM_PRODUCTION_PARENT_SUBMISSION_ID,GOM_PRODUCTION_TASKSET_STRIDE=$taskset_stride,GOM_PRODUCTION_LANE_COUNT=$lane_count,GOM_PRODUCTION_LANE_INDEX=$lane_index,GOM_PRODUCTION_LANE_START_INDEX=$lane_start_index"
 
 if test "$index" -gt "$plan_count"; then
     sbatch --parsable --kill-on-invalid-dep=yes \
         --export="$controller_common" \
-        "$GOM_TASKSET_WORKFLOW_REPO/scripts/engaging/gom_step62_production_taskset_finalize.sbatch"
+        "$GOM_TASKSET_WORKFLOW_REPO/scripts/engaging/gom_step62_production_taskset_lane_complete.sbatch"
     exit 0
 fi
 
@@ -78,7 +94,7 @@ test "$(tr ',' '\n' < "$array_file" | sed '/^$/d' | wc -l)" -eq "$task_count"
 
 campaign_parent="$GOM_PRODUCTION_ARCHIVE_ROOT/campaigns/$GOM_PRODUCTION_CAMPAIGN_ID"
 durable="$campaign_parent/tasksets/$taskset_id"
-next_index=$((index + 1))
+next_index=$((index + taskset_stride))
 if test -e "$durable"; then
     "$production_python" "$verifier" \
         --manifest "$GOM_PRODUCTION_MANIFEST" \
@@ -173,6 +189,10 @@ printf '%s\n' \
     "submitted_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     "parent_submission_id=$GOM_PRODUCTION_PARENT_SUBMISSION_ID" \
     "submission_id=$submission_id" \
+    "lane_index=$lane_index" \
+    "lane_count=$lane_count" \
+    "lane_start_index=$lane_start_index" \
+    "taskset_stride=$taskset_stride" \
     "taskset_index=$index" \
     "taskset_id=$taskset_id" \
     "task_count=$task_count" \

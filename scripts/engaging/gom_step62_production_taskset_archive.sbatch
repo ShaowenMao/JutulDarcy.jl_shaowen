@@ -234,7 +234,7 @@ else
         grep -Fxq "case_key=$case_key" "$full_case/production_summary.txt"
         grep -Fxq 'steps_completed=210' "$full_case/production_summary.txt"
         grep -Fxq 'retained_restart_steps=51,78,110,210' "$full_case/production_summary.txt"
-        grep -Fxq 'production_qoi_schema4_mode=required' "$full_case/production_summary.txt"
+        grep -Fxq 'production_qoi_mode=required' "$full_case/production_summary.txt"
         grep -Fxq 'qoi_schema4_validated=true' "$full_case/final_state_summary.txt"
         grep -Fxq 'status=pass' "$full_case/runtime_diagnostics.txt"
         awk -F '\t' '

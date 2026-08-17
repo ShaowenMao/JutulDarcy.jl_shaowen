@@ -237,6 +237,20 @@ using Test
         ),
         String
     )
+    taskset_lane_complete = read(
+        joinpath(
+            scripts_dir,
+            "gom_step62_production_taskset_lane_complete.sbatch"
+        ),
+        String
+    )
+    canary50_archive_resume = read(
+        joinpath(
+            scripts_dir,
+            "gom_step62_phase1_2430_resume_archive_two_lane.sh"
+        ),
+        String
+    )
     taskset_finalize = read(
         joinpath(
             scripts_dir,
@@ -265,7 +279,34 @@ using Test
     @test occursin("gom_step62_production_taskset_verify.py", taskset_archive)
     @test occursin("cmp --silent", taskset_archive)
     @test occursin("mass_balance_relative_residual", taskset_archive)
+    @test occursin("production_qoi_mode=required", taskset_archive)
+    @test !occursin("production_qoi_schema4_mode=required", taskset_archive)
     @test occursin("GOM_PRODUCTION_NEXT_TASKSET_INDEX", taskset_controller)
+    @test occursin("GOM_PRODUCTION_TASKSET_STRIDE", taskset_controller)
+    @test occursin(
+        "gom_step62_production_taskset_lane_complete.sbatch",
+        taskset_controller
+    )
+    @test occursin("flock -x 9", taskset_lane_complete)
+    @test occursin(
+        "lane_start_index=\$((completed_lane + 1))",
+        taskset_lane_complete
+    )
+    @test occursin(
+        "gom_step62_production_taskset_finalize.sbatch",
+        taskset_lane_complete
+    )
+    @test occursin("GOM_PRODUCTION_LANE_COUNT:-2", canary50_submit)
+    @test occursin(
+        "remaining_production_controller_jobs",
+        canary50_submit
+    )
+    @test occursin("tasksets_covered=2:49", canary50_archive_resume)
+    @test occursin(
+        "tasksets_covered_exactly_once=true",
+        canary50_archive_resume
+    )
+    @test occursin("GOM_PRODUCTION_LANE_COUNT:-2", canary50_archive_resume)
     @test occursin("all_campaign_tasks_present_exactly_once=true", taskset_finalize)
 
     # Engaging counts pending array elements against a per-user QOS ceiling.

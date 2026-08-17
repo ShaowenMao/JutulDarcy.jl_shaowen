@@ -47,6 +47,10 @@ test -z "$(git -C "$GOM_CANARY_WORKFLOW_REPO" status --porcelain)"
 
 canary_id="${GOM_CANARY_ID:-${GOM_PRODUCTION_CAMPAIGN_ID}_reusable_canary50_v1}"
 [[ "$canary_id" =~ ^[a-z0-9][a-z0-9_.-]*$ ]]
+production_lane_count="${GOM_PRODUCTION_LANE_COUNT:-2}"
+[[ "$production_lane_count" =~ ^[0-9]+$ ]]
+test "$production_lane_count" -ge 2
+test "$production_lane_count" -le 48
 submission_parent="$GOM_PRODUCTION_ARCHIVE_ROOT/canary_submissions"
 submission_dir="$submission_parent/$canary_id"
 receipt="$submission_dir/submission_receipt.txt"
@@ -241,13 +245,21 @@ submit_job --kill-on-invalid-dep=yes --dependency="afterok:$audit50_job" \
     "$GOM_CANARY_WORKFLOW_REPO/scripts/engaging/gom_step62_production_taskset_archive.sbatch"
 archive50_job="$submitted_job_id"
 
-controller_job=none
+controller_jobs=()
 if test "${GOM_CANARY_AUTO_CONTINUE_PRODUCTION:-true}" = true; then
-    controller_export="$common_export,GOM_TASKSET_WORKFLOW_REPO=$GOM_CANARY_WORKFLOW_REPO,GOM_PRODUCTION_CHECK_JOB_ID=$check_job,GOM_PRODUCTION_TASKSET_PLAN=$GOM_CANARY_SELECTION_DIR/taskset_plan.tsv,GOM_PRODUCTION_TASKSET_SELECTION_DIR=$GOM_CANARY_SELECTION_DIR/tasksets,GOM_PRODUCTION_CANARY_TASKSET=$GOM_PRODUCTION_ARCHIVE_ROOT/campaigns/$GOM_PRODUCTION_CAMPAIGN_ID/tasksets/taskset_0001,GOM_PRODUCTION_PARENT_SUBMISSION_ID=$canary_id,GOM_PRODUCTION_NEXT_TASKSET_INDEX=2"
-    submit_job --kill-on-invalid-dep=yes --dependency="afterok:$archive50_job" \
-        --export="$controller_export" \
-        "$GOM_CANARY_WORKFLOW_REPO/scripts/engaging/gom_step62_production_taskset_controller.sbatch"
-    controller_job="$submitted_job_id"
+    controller_common="$common_export,GOM_TASKSET_WORKFLOW_REPO=$GOM_CANARY_WORKFLOW_REPO,GOM_PRODUCTION_CHECK_JOB_ID=$check_job,GOM_PRODUCTION_TASKSET_PLAN=$GOM_CANARY_SELECTION_DIR/taskset_plan.tsv,GOM_PRODUCTION_TASKSET_SELECTION_DIR=$GOM_CANARY_SELECTION_DIR/tasksets,GOM_PRODUCTION_CANARY_TASKSET=$GOM_PRODUCTION_ARCHIVE_ROOT/campaigns/$GOM_PRODUCTION_CAMPAIGN_ID/tasksets/taskset_0001,GOM_PRODUCTION_PARENT_SUBMISSION_ID=$canary_id,GOM_PRODUCTION_TASKSET_STRIDE=$production_lane_count,GOM_PRODUCTION_LANE_COUNT=$production_lane_count"
+    for ((lane_index = 1; lane_index <= production_lane_count; lane_index++)); do
+        lane_start_index=$((lane_index + 1))
+        controller_export="$controller_common,GOM_PRODUCTION_LANE_INDEX=$lane_index,GOM_PRODUCTION_LANE_START_INDEX=$lane_start_index,GOM_PRODUCTION_NEXT_TASKSET_INDEX=$lane_start_index"
+        submit_job --kill-on-invalid-dep=yes --dependency="afterok:$archive50_job" \
+            --export="$controller_export" \
+            "$GOM_CANARY_WORKFLOW_REPO/scripts/engaging/gom_step62_production_taskset_controller.sbatch"
+        controller_jobs+=("$submitted_job_id")
+    done
+fi
+controller_jobs_csv=none
+if test "${#controller_jobs[@]}" -gt 0; then
+    controller_jobs_csv="$(IFS=,; echo "${controller_jobs[*]}")"
 fi
 
 printf '%s\n' \
@@ -273,7 +285,8 @@ printf '%s\n' \
     "additional26_vtu_job=$vtu26_job" \
     "full50_audit_job=$audit50_job" \
     "full50_archive_job=$archive50_job" \
-    "remaining_production_controller_job=$controller_job" \
+    "production_lane_count=$production_lane_count" \
+    "remaining_production_controller_jobs=$controller_jobs_csv" \
     "canary_results_count_as_production=true" \
     "remaining_production_starts_only_after_full50_pass=true" \
     > "$receipt"
