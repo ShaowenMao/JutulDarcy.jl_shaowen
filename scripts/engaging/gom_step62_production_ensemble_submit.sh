@@ -206,7 +206,7 @@ while test "$cursor" -le "$selection_end"; do
         preflight_jobs+=("$preflight_job")
 
         submit_job --kill-on-invalid-dep=yes \
-            --dependency="aftercorr:$preflight_job" \
+            --dependency="afterok:$preflight_job" \
             --array="$array_spec" \
             --time=4-00:00:00 \
             --export="$common_export,GOM_PRODUCTION_PREFLIGHT_JOB_ID=$preflight_job" \
@@ -215,7 +215,7 @@ while test "$cursor" -le "$selection_end"; do
         full_jobs+=("$full_job")
 
         submit_job --kill-on-invalid-dep=yes \
-            --dependency="aftercorr:$full_job" \
+            --dependency="afterok:$full_job" \
             --array="$array_spec" \
             --export="$common_export,GOM_PRODUCTION_FULL_JOB_ID=$full_job" \
             "$vtu_script"

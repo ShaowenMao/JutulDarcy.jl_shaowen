@@ -140,13 +140,13 @@ submit_job --kill-on-invalid-dep=yes \
     "$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_effective_pc_global_plateau_preflight.sbatch"
 preflight_job="$submitted_job_id"
 submit_job --kill-on-invalid-dep=yes \
-    --dependency="aftercorr:$preflight_job" --array="$array_spec%24" \
+    --dependency="afterok:$preflight_job" --array="$array_spec%24" \
     --time=4-00:00:00 \
     --export="$common_export,GOM_PRODUCTION_PREFLIGHT_JOB_ID=$preflight_job" \
     "$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_effective_pc_global_plateau_full.sbatch"
 full_job="$submitted_job_id"
 submit_job --kill-on-invalid-dep=yes \
-    --dependency="aftercorr:$full_job" --array="$array_spec%24" \
+    --dependency="afterok:$full_job" --array="$array_spec%24" \
     --export="$common_export,GOM_PRODUCTION_FULL_JOB_ID=$full_job" \
     "$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_effective_pc_global_plateau_vtu.sbatch"
 vtu_job="$submitted_job_id"

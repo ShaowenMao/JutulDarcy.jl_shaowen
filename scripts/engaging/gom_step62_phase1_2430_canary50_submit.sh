@@ -189,12 +189,12 @@ submit_job --kill-on-invalid-dep=yes --dependency="afterok:$check_job" \
     --array="$array24%24" --export="$common_export" \
     "$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_effective_pc_global_plateau_preflight.sbatch"
 preflight24_job="$submitted_job_id"
-submit_job --kill-on-invalid-dep=yes --dependency="aftercorr:$preflight24_job" \
+submit_job --kill-on-invalid-dep=yes --dependency="afterok:$preflight24_job" \
     --array="$array24%24" --time=4-00:00:00 \
     --export="$common_export,GOM_PRODUCTION_PREFLIGHT_JOB_ID=$preflight24_job" \
     "$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_effective_pc_global_plateau_full.sbatch"
 full24_job="$submitted_job_id"
-submit_job --kill-on-invalid-dep=yes --dependency="aftercorr:$full24_job" \
+submit_job --kill-on-invalid-dep=yes --dependency="afterok:$full24_job" \
     --array="$array24%24" \
     --export="$common_export,GOM_PRODUCTION_FULL_JOB_ID=$full24_job" \
     "$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_effective_pc_global_plateau_vtu.sbatch"
@@ -214,12 +214,12 @@ submit_job --kill-on-invalid-dep=yes --dependency="afterok:$audit24_job" \
     --array="$array26%26" --export="$common_export" \
     "$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_effective_pc_global_plateau_preflight.sbatch"
 preflight26_job="$submitted_job_id"
-submit_job --kill-on-invalid-dep=yes --dependency="aftercorr:$preflight26_job" \
+submit_job --kill-on-invalid-dep=yes --dependency="afterok:$preflight26_job" \
     --array="$array26%26" --time=4-00:00:00 \
     --export="$common_export,GOM_PRODUCTION_PREFLIGHT_JOB_ID=$preflight26_job" \
     "$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_effective_pc_global_plateau_full.sbatch"
 full26_job="$submitted_job_id"
-submit_job --kill-on-invalid-dep=yes --dependency="aftercorr:$full26_job" \
+submit_job --kill-on-invalid-dep=yes --dependency="afterok:$full26_job" \
     --array="$array26%26" \
     --export="$common_export,GOM_PRODUCTION_FULL_JOB_ID=$full26_job" \
     "$JUTULDARCY_COMBINED_REPO/scripts/engaging/gom_step62_effective_pc_global_plateau_vtu.sbatch"

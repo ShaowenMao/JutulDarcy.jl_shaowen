@@ -196,8 +196,8 @@ using Test
     @test occursin("selection_uses_reservoir_outcomes=false", acceptance_selector)
     @test occursin("length(selected) == 24", acceptance_selector)
     @test occursin("--array=\"\$array_spec%24\"", acceptance_submit)
-    @test occursin("aftercorr:\$preflight_job", acceptance_submit)
-    @test occursin("aftercorr:\$full_job", acceptance_submit)
+    @test occursin("afterok:\$preflight_job", acceptance_submit)
+    @test occursin("afterok:\$full_job", acceptance_submit)
     @test occursin("checksum-audited campaign", acceptance_submit)
     @test !occursin("resolve --task", acceptance_submit)
     @test occursin("flock -n 9", acceptance_submit)
@@ -308,6 +308,20 @@ using Test
     )
     @test occursin("GOM_PRODUCTION_LANE_COUNT:-2", canary50_archive_resume)
     @test occursin("all_campaign_tasks_present_exactly_once=true", taskset_finalize)
+
+    # Array-to-array aftercorr dependencies expand into one pending scheduler
+    # record per task on Engaging. Batch-level afterok barriers retain compact
+    # arrays and require the complete upstream validation stage to succeed.
+    production_launchers = sort(filter(
+        path -> endswith(path, ".sh") || endswith(path, ".sbatch"),
+        readdir(scripts_dir; join = true)
+    ))
+    for path in production_launchers
+        source = read(path, String)
+        occursin("gom_step62_production", basename(path)) ||
+            occursin("gom_step62_phase1_2430", basename(path)) || continue
+        @test !occursin("aftercorr:", source)
+    end
 
     # Engaging counts pending array elements against a per-user QOS ceiling.
     # The rolling control plane must keep the scientific checkout pinned,
